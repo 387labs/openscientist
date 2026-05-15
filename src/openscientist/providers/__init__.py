@@ -1,5 +1,5 @@
 """
-Provider abstraction for model access (Anthropic, CBORG, Vertex AI, Bedrock, Codex, Azure Foundry).
+Provider abstraction for model access (Anthropic, CBORG, Vertex AI, Bedrock, Azure Foundry).
 
 Providers handle:
 - Environment configuration for Claude CLI
@@ -17,13 +17,13 @@ def get_provider() -> BaseProvider:
 
     Returns:
         Provider instance (AnthropicProvider, CborgProvider, VertexProvider,
-        BedrockProvider, CodexProvider, or FoundryProvider)
+        BedrockProvider, or FoundryProvider)
 
     Raises:
         ValueError: If provider is unknown or misconfigured
 
     Environment:
-        CLAUDE_PROVIDER: Provider name ("anthropic", "cborg", "vertex", "bedrock", "codex", "foundry")
+        CLAUDE_PROVIDER: Provider name ("anthropic", "cborg", "vertex", "bedrock", "foundry")
                         Defaults to "anthropic" if not set
     """
     settings = get_settings()
@@ -45,16 +45,12 @@ def get_provider() -> BaseProvider:
         from openscientist.providers.bedrock import BedrockProvider
 
         return BedrockProvider()
-    if provider_name == "codex":
-        from openscientist.providers.codex import CodexProvider
-
-        return CodexProvider()
     if provider_name == "foundry":
         from openscientist.providers.foundry import FoundryProvider
 
         return FoundryProvider()
     raise ValueError(
-        f"Unknown provider '{provider_name}'. Valid options: anthropic, cborg, vertex, bedrock, codex, foundry"
+        f"Unknown provider '{provider_name}'. Valid options: anthropic, cborg, vertex, bedrock, foundry"
     )
 
 
@@ -86,7 +82,7 @@ def check_provider_config() -> tuple[bool, str, list[str]]:
 
     provider_name = settings.provider.claude_provider.lower()
 
-    valid_providers = ("anthropic", "cborg", "vertex", "bedrock", "codex", "foundry")
+    valid_providers = ("anthropic", "cborg", "vertex", "bedrock", "foundry")
     if provider_name not in valid_providers:
         return (
             False,

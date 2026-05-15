@@ -178,11 +178,6 @@ class TestProviderSettings:
         assert settings.claude_provider == "unknown-provider"
         assert "Unknown provider" in caplog.text
 
-    def test_codex_minimal_config(self):
-        """Codex provider has minimal requirements."""
-        settings = ProviderSettings(CLAUDE_PROVIDER="codex")
-        assert settings.claude_provider == "codex"
-
     def test_foundry_accepted_as_valid_provider(self, caplog):
         """Foundry is a recognized provider with no warnings."""
         with caplog.at_level(logging.WARNING, logger="openscientist.settings"):
