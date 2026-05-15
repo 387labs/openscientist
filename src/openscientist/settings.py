@@ -211,7 +211,6 @@ class ProviderSettings(BaseSettings):
             "cborg": self._cborg_warnings,
             "vertex": self._vertex_warnings,
             "bedrock": self._bedrock_warnings,
-            "codex": lambda: [],
             "foundry": lambda: [],
         }
         warnings = warning_builders.get(
