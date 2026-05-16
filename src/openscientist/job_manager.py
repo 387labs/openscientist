@@ -493,7 +493,7 @@ class JobManager:
         from openscientist.settings import get_settings
 
         settings = get_settings()
-        llm_provider = settings.provider.claude_provider.lower()
+        llm_provider = settings.provider.provider_id.lower()
         model = (
             settings.provider.anthropic_model or settings.provider.anthropic_default_sonnet_model
         )

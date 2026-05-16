@@ -42,10 +42,10 @@ class ProviderSettings(BaseSettings):
     )
 
     # Provider selection
-    claude_provider: str = Field(
+    provider_id: str = Field(
         default="anthropic",
-        alias="CLAUDE_PROVIDER",
-        description="Provider: anthropic, cborg, vertex, bedrock, codex, foundry",
+        alias="OPENSCIENTIST_PROVIDER",
+        description="Provider id (anthropic, cborg, vertex, bedrock, foundry).",
     )
 
     # GitHub token for skill syncing
@@ -119,7 +119,7 @@ class ProviderSettings(BaseSettings):
         if not self.anthropic_api_key and not self.claude_code_oauth_token:
             warnings.append(
                 "ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN is required "
-                "when CLAUDE_PROVIDER=anthropic. "
+                "when OPENSCIENTIST_PROVIDER=anthropic. "
                 "Get your API key from https://console.anthropic.com "
                 "or run 'claude login' for OAuth."
             )
@@ -129,12 +129,12 @@ class ProviderSettings(BaseSettings):
         warnings: list[str] = []
         self._warn_if_missing(
             self.anthropic_auth_token,
-            "ANTHROPIC_AUTH_TOKEN is required when CLAUDE_PROVIDER=cborg",
+            "ANTHROPIC_AUTH_TOKEN is required when OPENSCIENTIST_PROVIDER=cborg",
             warnings,
         )
         self._warn_if_missing(
             self.anthropic_base_url,
-            "ANTHROPIC_BASE_URL is required when CLAUDE_PROVIDER=cborg "
+            "ANTHROPIC_BASE_URL is required when OPENSCIENTIST_PROVIDER=cborg "
             "(should be https://api.cborg.lbl.gov)",
             warnings,
         )
@@ -195,6 +195,22 @@ class ProviderSettings(BaseSettings):
         ]
 
     @model_validator(mode="after")
+    def reject_legacy_env_vars(self) -> "ProviderSettings":
+        """Raise a clear error when a removed env-var name is still set.
+
+        We do not silently accept legacy aliases. Users upgrading must
+        rename their environment variables explicitly so that the
+        running configuration matches what the code reads.
+        """
+        if os.environ.get("CLAUDE_PROVIDER"):
+            raise ValueError(
+                "CLAUDE_PROVIDER has been renamed to OPENSCIENTIST_PROVIDER. "
+                "Rename the variable in your environment (and .env file) and unset "
+                "CLAUDE_PROVIDER. The legacy name is no longer accepted."
+            )
+        return self
+
+    @model_validator(mode="after")
     def validate_provider_requirements(self) -> "ProviderSettings":
         """Warn about missing provider config.
 
@@ -205,7 +221,7 @@ class ProviderSettings(BaseSettings):
         """
         from collections.abc import Callable
 
-        provider = self.claude_provider.lower()
+        provider = self.provider_id.lower()
         warning_builders: dict[str, Callable[[], list[str]]] = {
             "anthropic": self._anthropic_warnings,
             "cborg": self._cborg_warnings,
@@ -252,7 +268,7 @@ class ProviderSettings(BaseSettings):
         env_vars: dict[str, str],
         gcp_credentials_container_path: str | None,
     ) -> None:
-        if self.claude_provider.lower() == "vertex":
+        if self.provider_id.lower() == "vertex":
             env_vars["CLAUDE_CODE_USE_VERTEX"] = "1"
         self._set_env_if_present(
             env_vars, "ANTHROPIC_VERTEX_PROJECT_ID", self.anthropic_vertex_project_id
@@ -271,7 +287,7 @@ class ProviderSettings(BaseSettings):
             )
 
     def _apply_bedrock_env_vars(self, env_vars: dict[str, str]) -> None:
-        if self.claude_provider.lower() == "bedrock":
+        if self.provider_id.lower() == "bedrock":
             env_vars["CLAUDE_CODE_USE_BEDROCK"] = "1"
         self._set_env_if_present(env_vars, "AWS_REGION", self.aws_region)
         self._set_env_if_present(env_vars, "AWS_ACCESS_KEY_ID", self.aws_access_key_id)
@@ -282,7 +298,7 @@ class ProviderSettings(BaseSettings):
         )
 
     def _apply_foundry_env_vars(self, env_vars: dict[str, str]) -> None:
-        if self.claude_provider.lower() == "foundry":
+        if self.provider_id.lower() == "foundry":
             env_vars["CLAUDE_CODE_USE_FOUNDRY"] = "1"
 
         self._set_env_if_present(
@@ -310,7 +326,7 @@ class ProviderSettings(BaseSettings):
         Returns:
             Dict of env var names to values (only includes set values).
         """
-        env_vars: dict[str, str] = {"CLAUDE_PROVIDER": self.claude_provider}
+        env_vars: dict[str, str] = {"OPENSCIENTIST_PROVIDER": self.provider_id}
         self._apply_model_env_vars(env_vars)
         self._apply_auth_env_vars(env_vars)
         self._apply_vertex_env_vars(env_vars, gcp_credentials_container_path)

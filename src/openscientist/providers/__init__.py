@@ -23,11 +23,11 @@ def get_provider() -> BaseProvider:
         ValueError: If provider is unknown or misconfigured
 
     Environment:
-        CLAUDE_PROVIDER: Provider name ("anthropic", "cborg", "vertex", "bedrock", "foundry")
-                        Defaults to "anthropic" if not set
+        OPENSCIENTIST_PROVIDER: Provider name ("anthropic", "cborg", "vertex", "bedrock", "foundry").
+                               Defaults to "anthropic" if not set.
     """
     settings = get_settings()
-    provider_name = settings.provider.claude_provider.lower()
+    provider_name = settings.provider.provider_id.lower()
 
     if provider_name == "anthropic":
         from openscientist.providers.anthropic import AnthropicProvider
@@ -80,7 +80,7 @@ def check_provider_config() -> tuple[bool, str, list[str]]:
             ],
         )
 
-    provider_name = settings.provider.claude_provider.lower()
+    provider_name = settings.provider.provider_id.lower()
 
     valid_providers = ("anthropic", "cborg", "vertex", "bedrock", "foundry")
     if provider_name not in valid_providers:
