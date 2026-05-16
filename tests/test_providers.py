@@ -426,7 +426,7 @@ class TestProviderEnvironmentSwitching:
         settings = MagicMock()
         settings.provider.anthropic_api_key = "sk-ant-test-key"
         settings.provider.claude_code_oauth_token = None
-        settings.provider.anthropic_model = "claude-sonnet-4-6"
+        settings.provider.model = "claude-sonnet-4-6"
         return settings
 
     @staticmethod
@@ -434,7 +434,7 @@ class TestProviderEnvironmentSwitching:
         settings = MagicMock()
         settings.provider.anthropic_auth_token = "cborg-token"
         settings.provider.anthropic_base_url = "https://api.cborg.lbl.gov"
-        settings.provider.anthropic_model = "claude-sonnet-4-6"
+        settings.provider.model = "claude-sonnet-4-6"
         return settings
 
     @staticmethod
@@ -444,7 +444,7 @@ class TestProviderEnvironmentSwitching:
         settings.provider.google_application_credentials = "/tmp/vertex-creds.json"
         settings.provider.gcp_billing_account_id = "012345-ABCDEF"
         settings.provider.cloud_ml_region = "us-east5"
-        settings.provider.anthropic_model = "claude-sonnet-4-5@20250929"
+        settings.provider.model = "claude-sonnet-4-5@20250929"
         settings.provider.vertex_region_claude_4_5_sonnet = None
         settings.provider.vertex_region_claude_4_5_haiku = None
         return settings
@@ -457,7 +457,7 @@ class TestProviderEnvironmentSwitching:
         settings.provider.aws_secret_access_key = "secret"
         settings.provider.aws_profile = None
         settings.provider.aws_bearer_token_bedrock = None
-        settings.provider.anthropic_model = "claude-sonnet-4-5"
+        settings.provider.model = "claude-sonnet-4-5"
         settings.provider.anthropic_small_fast_model = "claude-haiku-4-5"
         return settings
 

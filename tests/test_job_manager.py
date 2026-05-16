@@ -702,7 +702,7 @@ class TestJobManagerCreationSafety:
         settings = SimpleNamespace(
             provider=SimpleNamespace(
                 provider_id="Anthropic",
-                anthropic_model=None,
+                model=None,
                 anthropic_default_sonnet_model="claude-sonnet-4-5",
             )
         )

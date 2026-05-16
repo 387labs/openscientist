@@ -15,7 +15,7 @@ class TestAnthropicProviderValidation:
         mock_settings = MagicMock()
         mock_settings.provider.anthropic_api_key = None
         mock_settings.provider.claude_code_oauth_token = None
-        mock_settings.provider.anthropic_model = "claude-sonnet-4-6"
+        mock_settings.provider.model = "claude-sonnet-4-6"
         with (
             patch("openscientist.providers.anthropic.get_settings", return_value=mock_settings),
             pytest.raises(
@@ -29,7 +29,7 @@ class TestAnthropicProviderValidation:
         mock_settings = MagicMock()
         mock_settings.provider.anthropic_api_key = "sk-ant-test-key"
         mock_settings.provider.claude_code_oauth_token = None
-        mock_settings.provider.anthropic_model = "claude-sonnet-4-6"
+        mock_settings.provider.model = "claude-sonnet-4-6"
         with patch("openscientist.providers.anthropic.get_settings", return_value=mock_settings):
             provider = AnthropicProvider()
             assert provider.name == "Anthropic"
@@ -38,7 +38,7 @@ class TestAnthropicProviderValidation:
         mock_settings = MagicMock()
         mock_settings.provider.anthropic_api_key = None
         mock_settings.provider.claude_code_oauth_token = "oauth-token"
-        mock_settings.provider.anthropic_model = "claude-sonnet-4-6"
+        mock_settings.provider.model = "claude-sonnet-4-6"
         with patch("openscientist.providers.anthropic.get_settings", return_value=mock_settings):
             provider = AnthropicProvider()
             assert provider.name == "Anthropic"
@@ -47,7 +47,7 @@ class TestAnthropicProviderValidation:
         mock_settings = MagicMock()
         mock_settings.provider.anthropic_api_key = "key"
         mock_settings.provider.claude_code_oauth_token = None
-        mock_settings.provider.anthropic_model = None
+        mock_settings.provider.model = None
         with patch("openscientist.providers.anthropic.get_settings", return_value=mock_settings):
             provider = AnthropicProvider()
             # Provider should still initialize (warnings don't prevent init)
@@ -61,7 +61,7 @@ class TestAnthropicSetupEnvironment:
         mock_settings = MagicMock()
         mock_settings.provider.anthropic_api_key = "sk-test"
         mock_settings.provider.claude_code_oauth_token = None
-        mock_settings.provider.anthropic_model = "model"
+        mock_settings.provider.model = "model"
 
         with (
             patch("openscientist.providers.anthropic.get_settings", return_value=mock_settings),
@@ -86,7 +86,7 @@ class TestAnthropicSetupEnvironment:
         mock_settings = MagicMock()
         mock_settings.provider.anthropic_api_key = None
         mock_settings.provider.claude_code_oauth_token = "my-oauth-token"
-        mock_settings.provider.anthropic_model = "model"
+        mock_settings.provider.model = "model"
 
         with (
             patch("openscientist.providers.anthropic.get_settings", return_value=mock_settings),
@@ -105,7 +105,7 @@ class TestAnthropicGetCostInfo:
         mock_settings = MagicMock()
         mock_settings.provider.anthropic_api_key = "key"
         mock_settings.provider.claude_code_oauth_token = None
-        mock_settings.provider.anthropic_model = "model"
+        mock_settings.provider.model = "model"
 
         with patch("openscientist.providers.anthropic.get_settings", return_value=mock_settings):
             provider = AnthropicProvider()
@@ -120,7 +120,7 @@ class TestAnthropicGetCostInfo:
         mock_settings = MagicMock()
         mock_settings.provider.anthropic_api_key = "key"
         mock_settings.provider.claude_code_oauth_token = None
-        mock_settings.provider.anthropic_model = "model"
+        mock_settings.provider.model = "model"
 
         with patch("openscientist.providers.anthropic.get_settings", return_value=mock_settings):
             provider = AnthropicProvider()

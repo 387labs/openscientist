@@ -494,9 +494,7 @@ class JobManager:
 
         settings = get_settings()
         llm_provider = settings.provider.provider_id.lower()
-        model = (
-            settings.provider.anthropic_model or settings.provider.anthropic_default_sonnet_model
-        )
+        model = settings.provider.model or settings.provider.anthropic_default_sonnet_model
         llm_config = {"model": model} if model else None
 
         # Create job in database

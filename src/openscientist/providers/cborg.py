@@ -55,8 +55,8 @@ class CborgProvider(BaseProvider):
         warnings = []
         settings = get_settings()
 
-        if not settings.provider.anthropic_model:
-            warnings.append("ANTHROPIC_MODEL not set (will use Claude CLI default)")
+        if not settings.provider.model:
+            warnings.append("OPENSCIENTIST_MODEL not set (will use Claude CLI default)")
 
         return warnings
 
@@ -171,7 +171,7 @@ class CborgProvider(BaseProvider):
             messages=messages,
             system=system,
             model=model,
-            configured_model=settings.provider.anthropic_model,
+            configured_model=settings.provider.model,
             provider_default_model="claude-sonnet-4-20250514",
             max_tokens=max_tokens,
         )
@@ -203,7 +203,7 @@ class CborgProvider(BaseProvider):
             tools=tools,
             system=system,
             model=model,
-            configured_model=settings.provider.anthropic_model,
+            configured_model=settings.provider.model,
             provider_default_model="claude-sonnet-4-20250514",
             max_tokens=max_tokens,
             tool_use_block_type=ToolUseBlock,

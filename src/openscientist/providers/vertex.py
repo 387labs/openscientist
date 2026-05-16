@@ -59,8 +59,8 @@ class VertexProvider(BaseProvider):
         warnings = []
         settings = get_settings()
 
-        if not settings.provider.anthropic_model:
-            warnings.append("ANTHROPIC_MODEL not set (will use claude-sonnet-4-5@20250929)")
+        if not settings.provider.model:
+            warnings.append("OPENSCIENTIST_MODEL not set (will use claude-sonnet-4-5@20250929)")
 
         if not settings.provider.vertex_region_claude_4_5_sonnet:
             warnings.append("VERTEX_REGION_CLAUDE_4_5_SONNET not set (may cause region issues)")
@@ -210,7 +210,7 @@ class VertexProvider(BaseProvider):
             messages=messages,
             system=system,
             model=model,
-            configured_model=settings.provider.anthropic_model,
+            configured_model=settings.provider.model,
             provider_default_model="claude-sonnet-4-5@20250929",
             max_tokens=max_tokens,
         )
@@ -249,7 +249,7 @@ class VertexProvider(BaseProvider):
             tools=tools,
             system=system,
             model=model,
-            configured_model=settings.provider.anthropic_model,
+            configured_model=settings.provider.model,
             provider_default_model="claude-sonnet-4-5@20250929",
             max_tokens=max_tokens,
             tool_use_block_type=ToolUseBlock,

@@ -186,6 +186,7 @@ uv run python tools/tile_screenshots.py \
 | `DATABASE_URL`         | Yes      | PostgreSQL connection string        |
 | `OPENSCIENTIST_SECRET_KEY`    | Yes      | Master secret (derives all auth keys)|
 | `OPENSCIENTIST_PROVIDER` | No     | Provider name (default: anthropic). The previous name `CLAUDE_PROVIDER` is no longer accepted and raises at startup if set. |
+| `OPENSCIENTIST_MODEL`  | No       | Model id for the selected provider. The previous name `ANTHROPIC_MODEL` is no longer accepted and raises at startup if set. |
 | `ANTHROPIC_API_KEY`    | Depends  | Required if using Anthropic         |
 | `OPENSCIENTIST_MAX_CONCURRENT_JOBS` | No | Max concurrent jobs (default: 1)    |
 | `OPENSCIENTIST_DEV_MODE`      | No       | Enable dev mode (mock OAuth, etc.)  |

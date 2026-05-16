@@ -214,6 +214,109 @@ class TestProviderIdEnvVar:
             ProviderSettings()
 
 
+class TestModelEnvVar:
+    """Tests for OPENSCIENTIST_MODEL and rejection of the removed ANTHROPIC_MODEL."""
+
+    def test_canonical_env_var_resolves(self, monkeypatch, tmp_path):
+        """OPENSCIENTIST_MODEL is the canonical env-var name."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("ANTHROPIC_MODEL", raising=False)
+        monkeypatch.setenv("OPENSCIENTIST_MODEL", "claude-sonnet-4-6")
+        settings = ProviderSettings()
+        assert settings.model == "claude-sonnet-4-6"
+
+    def test_legacy_env_var_raises_clear_error(self, monkeypatch, tmp_path):
+        """Setting the removed ANTHROPIC_MODEL raises with a rename hint."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("OPENSCIENTIST_MODEL", raising=False)
+        monkeypatch.setenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+        with pytest.raises(ValueError, match="ANTHROPIC_MODEL has been renamed"):
+            ProviderSettings()
+
+    def test_legacy_env_var_rejected_even_when_canonical_also_set(self, monkeypatch, tmp_path):
+        """Both env vars set together still raises so users notice the leftover."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("OPENSCIENTIST_MODEL", "claude-sonnet-4-6")
+        monkeypatch.setenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+        with pytest.raises(ValueError, match="ANTHROPIC_MODEL has been renamed"):
+            ProviderSettings()
+
+
+class TestModelFormatValidation:
+    """Tests that ProviderSettings rejects model ids that do not match the
+    selected provider's naming convention."""
+
+    def test_anthropic_accepts_claude_prefix(self):
+        settings = ProviderSettings(
+            OPENSCIENTIST_PROVIDER="anthropic",
+            OPENSCIENTIST_MODEL="claude-sonnet-4-6",
+        )
+        assert settings.model == "claude-sonnet-4-6"
+
+    def test_anthropic_rejects_non_claude_model(self):
+        with pytest.raises(ValueError, match="does not look like an Anthropic model"):
+            ProviderSettings(
+                OPENSCIENTIST_PROVIDER="anthropic",
+                OPENSCIENTIST_MODEL="gpt-5.2",
+            )
+
+    def test_cborg_rejects_non_claude_model(self):
+        with pytest.raises(ValueError, match="claude-"):
+            ProviderSettings(
+                OPENSCIENTIST_PROVIDER="cborg",
+                OPENSCIENTIST_MODEL="gpt-5.2",
+            )
+
+    def test_vertex_accepts_dated_claude_model(self):
+        settings = ProviderSettings(
+            OPENSCIENTIST_PROVIDER="vertex",
+            OPENSCIENTIST_MODEL="claude-sonnet-4-5@20250929",
+        )
+        assert settings.model == "claude-sonnet-4-5@20250929"
+
+    def test_vertex_rejects_undated_claude_model(self):
+        with pytest.raises(ValueError, match="Vertex"):
+            ProviderSettings(
+                OPENSCIENTIST_PROVIDER="vertex",
+                OPENSCIENTIST_MODEL="claude-sonnet-4-6",
+            )
+
+    def test_bedrock_accepts_region_prefixed_model(self):
+        settings = ProviderSettings(
+            OPENSCIENTIST_PROVIDER="bedrock",
+            OPENSCIENTIST_MODEL="us.anthropic.claude-sonnet-4-5-20250929-v1:0",
+        )
+        assert settings.model == "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+
+    def test_bedrock_accepts_inference_profile_arn(self):
+        arn = "arn:aws:bedrock:us-east-1:123456789012:inference-profile/abcd"
+        settings = ProviderSettings(
+            OPENSCIENTIST_PROVIDER="bedrock",
+            OPENSCIENTIST_MODEL=arn,
+        )
+        assert settings.model == arn
+
+    def test_bedrock_rejects_bare_claude_model(self):
+        with pytest.raises(ValueError, match="Bedrock"):
+            ProviderSettings(
+                OPENSCIENTIST_PROVIDER="bedrock",
+                OPENSCIENTIST_MODEL="claude-sonnet-4-6",
+            )
+
+    def test_foundry_does_not_enforce_a_pattern(self):
+        """Foundry deployment names are user-defined, so we do not validate."""
+        settings = ProviderSettings(
+            OPENSCIENTIST_PROVIDER="foundry",
+            OPENSCIENTIST_MODEL="any-deployment-name",
+        )
+        assert settings.model == "any-deployment-name"
+
+    def test_unset_model_skips_validation(self):
+        """An unset model is always valid (the provider falls back to defaults)."""
+        settings = ProviderSettings(OPENSCIENTIST_PROVIDER="vertex")
+        assert settings.model is None
+
+
 class TestProviderContainerEnvVars:
     """Tests for ProviderSettings.get_container_env_vars()."""
 
@@ -257,7 +360,7 @@ class TestProviderContainerEnvVars:
             CLAUDE_CODE_OAUTH_TOKEN="oauth-token",
             ANTHROPIC_AUTH_TOKEN="auth-token",
             ANTHROPIC_BASE_URL="https://api.example.com",
-            ANTHROPIC_MODEL="model-a",
+            OPENSCIENTIST_MODEL="claude-sonnet-test",
             ANTHROPIC_SMALL_FAST_MODEL="model-b",
             GITHUB_TOKEN="ghp_example",
         )
@@ -269,7 +372,7 @@ class TestProviderContainerEnvVars:
         assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "oauth-token"
         assert env["ANTHROPIC_AUTH_TOKEN"] == "auth-token"
         assert env["ANTHROPIC_BASE_URL"] == "https://api.example.com"
-        assert env["ANTHROPIC_MODEL"] == "model-a"
+        assert env["OPENSCIENTIST_MODEL"] == "claude-sonnet-test"
         assert env["ANTHROPIC_SMALL_FAST_MODEL"] == "model-b"
         assert env["GITHUB_TOKEN"] == "ghp_example"
 

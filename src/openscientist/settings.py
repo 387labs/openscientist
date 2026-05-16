@@ -60,15 +60,15 @@ class ProviderSettings(BaseSettings):
     anthropic_base_url: str | None = Field(default=None, alias="ANTHROPIC_BASE_URL")
 
     # Model settings
-    anthropic_model: str | None = Field(default=None, alias="ANTHROPIC_MODEL")
+    model: str | None = Field(default=None, alias="OPENSCIENTIST_MODEL")
     anthropic_chat_model: str | None = Field(
         default=None,
         alias="ANTHROPIC_CHAT_MODEL",
         description=(
-            "Model used for in-page chat. Falls back to ANTHROPIC_MODEL if unset. "
+            "Model used for in-page chat. Falls back to OPENSCIENTIST_MODEL if unset. "
             "Useful when the discovery model rejects chat-style prompts under its "
-            "Usage Policy enforcement (e.g. Claude Opus 4.6 on Foundry); operators "
-            "can set this to a smaller / less-restrictive deployment such as Haiku."
+            "Usage Policy enforcement (e.g. Claude Opus 4.6 on Foundry). Operators "
+            "can set this to a smaller, less-restrictive deployment such as Haiku."
         ),
     )
     anthropic_small_fast_model: str | None = Field(default=None, alias="ANTHROPIC_SMALL_FAST_MODEL")
@@ -204,6 +204,11 @@ class ProviderSettings(BaseSettings):
             "Valid options: anthropic, cborg, vertex, bedrock, codex, foundry"
         ]
 
+    _LEGACY_ENV_VAR_RENAMES = (
+        ("CLAUDE_PROVIDER", "OPENSCIENTIST_PROVIDER"),
+        ("ANTHROPIC_MODEL", "OPENSCIENTIST_MODEL"),
+    )
+
     @model_validator(mode="after")
     def reject_legacy_env_vars(self) -> "ProviderSettings":
         """Raise a clear error when a removed env-var name is still set.
@@ -212,22 +217,65 @@ class ProviderSettings(BaseSettings):
         rename their environment variables explicitly so that the
         running configuration matches what the code reads.
         """
-        if os.environ.get("CLAUDE_PROVIDER"):
-            raise ValueError(
-                "CLAUDE_PROVIDER has been renamed to OPENSCIENTIST_PROVIDER. "
-                "Rename the variable in your environment (and .env file) and unset "
-                "CLAUDE_PROVIDER. The legacy name is no longer accepted."
-            )
+        for legacy, canonical in self._LEGACY_ENV_VAR_RENAMES:
+            if os.environ.get(legacy):
+                raise ValueError(
+                    f"{legacy} has been renamed to {canonical}. "
+                    f"Rename the variable in your environment (and .env file) and unset "
+                    f"{legacy}. The legacy name is no longer accepted."
+                )
         return self
+
+    # Per-provider model-name format. Mismatches raise at settings load so
+    # users cannot pair a model with a provider that would reject it at runtime.
+    _MODEL_FORMAT_BY_PROVIDER: dict[str, tuple[re.Pattern[str], str]] = {
+        "anthropic": (
+            re.compile(r"^claude-"),
+            "an Anthropic model name (expected to start with 'claude-')",
+        ),
+        "cborg": (
+            re.compile(r"^claude-"),
+            "an Anthropic model name on CBORG (expected to start with 'claude-')",
+        ),
+        "vertex": (
+            re.compile(r"^claude-.+@\d{8}$"),
+            "a Vertex Anthropic model id ('claude-<name>@<YYYYMMDD>')",
+        ),
+        "bedrock": (
+            re.compile(r"^([a-z]+\.anthropic\.claude-.+-v\d+:\d+|arn:aws:bedrock:)"),
+            "a Bedrock model id ('<region>.anthropic.claude-<name>-v<n>:<n>' or an inference-profile ARN)",
+        ),
+    }
+
+    def _validate_model_format(self) -> str | None:
+        """Return an error message when the configured model does not match
+        the provider's expected naming convention. Returns None when no
+        model is set or when the provider has no enforced pattern.
+        """
+        if not self.model:
+            return None
+        spec = self._MODEL_FORMAT_BY_PROVIDER.get(self.provider_id.lower())
+        if spec is None:
+            return None
+        pattern, description = spec
+        if pattern.match(self.model):
+            return None
+        return (
+            f"OPENSCIENTIST_MODEL={self.model!r} does not look like {description}. "
+            f"Either change the model id or change OPENSCIENTIST_PROVIDER."
+        )
 
     @model_validator(mode="after")
     def validate_provider_requirements(self) -> "ProviderSettings":
-        """Warn about missing provider config.
+        """Validate provider config: warn on missing credentials, raise on
+        model-name mismatches.
 
-        This is intentionally warn-only so that settings can always be
+        Credential checks remain warn-only so that settings can always be
         constructed (e.g. during testing or when only a subset of env vars
-        is available).  The authoritative validation lives in each
-        provider's ``_validate_required_config``.
+        is available); the authoritative credential validation lives in each
+        provider's ``_validate_required_config``. Model-name mismatches do
+        raise here because a wrong-family model id is a hard incompatibility
+        the user must fix before any agent call can succeed.
         """
         from collections.abc import Callable
 
@@ -245,6 +293,10 @@ class ProviderSettings(BaseSettings):
         for warning in warnings:
             logger.warning("Provider config: %s", warning)
 
+        model_error = self._validate_model_format()
+        if model_error:
+            raise ValueError(model_error)
+
         return self
 
     @staticmethod
@@ -253,7 +305,7 @@ class ProviderSettings(BaseSettings):
             env_vars[key] = value
 
     def _apply_model_env_vars(self, env_vars: dict[str, str]) -> None:
-        self._set_env_if_present(env_vars, "ANTHROPIC_MODEL", self.anthropic_model)
+        self._set_env_if_present(env_vars, "OPENSCIENTIST_MODEL", self.model)
         self._set_env_if_present(
             env_vars, "ANTHROPIC_SMALL_FAST_MODEL", self.anthropic_small_fast_model
         )
