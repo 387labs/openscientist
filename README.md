@@ -128,7 +128,7 @@ OpenScientist supports multiple model providers. Choose one and configure it in 
 
 ```bash
 # Provider selection
-CLAUDE_PROVIDER=cborg
+OPENSCIENTIST_PROVIDER=cborg
 
 # CBORG credentials
 ANTHROPIC_AUTH_TOKEN=your-cborg-token
@@ -141,7 +141,7 @@ ANTHROPIC_BASE_URL=https://api.cborg.lbl.gov
 
 ```bash
 # Provider selection
-CLAUDE_PROVIDER=vertex
+OPENSCIENTIST_PROVIDER=vertex
 
 # Vertex AI configuration
 ANTHROPIC_VERTEX_PROJECT_ID=your-gcp-project
@@ -161,7 +161,7 @@ GCP_BILLING_ACCOUNT_ID=XXXXXX-YYYYYY-ZZZZZZ
 
 ```bash
 # Provider selection
-CLAUDE_PROVIDER=bedrock
+OPENSCIENTIST_PROVIDER=bedrock
 
 # AWS configuration
 AWS_REGION=us-east-1
@@ -185,7 +185,7 @@ AWS_SECRET_ACCESS_KEY=your-secret-access-key
 
 ```bash
 # Provider selection
-CLAUDE_PROVIDER=foundry
+OPENSCIENTIST_PROVIDER=foundry
 
 # Azure resource configuration
 ANTHROPIC_FOUNDRY_RESOURCE=your-resource-name

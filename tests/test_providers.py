@@ -90,7 +90,7 @@ class TestGetProvider:
     @patch.dict(
         os.environ,
         {
-            "CLAUDE_PROVIDER": "cborg",
+            "OPENSCIENTIST_PROVIDER": "cborg",
             "ANTHROPIC_AUTH_TOKEN": "tok",
             "ANTHROPIC_BASE_URL": "https://api.cborg.lbl.gov",
         },
@@ -105,7 +105,7 @@ class TestGetProvider:
         with patch.dict(
             os.environ,
             {
-                "CLAUDE_PROVIDER": "vertex",
+                "OPENSCIENTIST_PROVIDER": "vertex",
                 "ANTHROPIC_VERTEX_PROJECT_ID": "proj",
                 "GOOGLE_APPLICATION_CREDENTIALS": str(creds_file),
                 "GCP_BILLING_ACCOUNT_ID": "012345-ABCDEF",
@@ -118,7 +118,7 @@ class TestGetProvider:
     @patch.dict(
         os.environ,
         {
-            "CLAUDE_PROVIDER": "bedrock",
+            "OPENSCIENTIST_PROVIDER": "bedrock",
             "AWS_REGION": "us-east-1",
             "AWS_ACCESS_KEY_ID": "test-key",
             "AWS_SECRET_ACCESS_KEY": "test-secret",
@@ -129,13 +129,13 @@ class TestGetProvider:
         provider = get_provider()
         assert "bedrock" in provider.name.lower()
 
-    @patch.dict(os.environ, {"CLAUDE_PROVIDER": "unknown_provider"})
+    @patch.dict(os.environ, {"OPENSCIENTIST_PROVIDER": "unknown_provider"})
     def test_unknown_provider_raises(self):
         with pytest.raises(ValueError, match="Unknown provider"):
             get_provider()
 
     def test_defaults_to_anthropic(self, monkeypatch, tmp_path):
-        """Without CLAUDE_PROVIDER, defaults to anthropic (which may fail validation)."""
+        """Without OPENSCIENTIST_PROVIDER, defaults to anthropic (which may fail validation)."""
         # Change to temp dir to avoid .env file
         monkeypatch.chdir(tmp_path)
 
@@ -302,7 +302,7 @@ class TestCheckProviderConfig:
         assert len(errors) == 2
         assert any("ANTHROPIC_API_KEY" in e for e in errors)
 
-    @patch.dict(os.environ, {"CLAUDE_PROVIDER": "totally_bogus"})
+    @patch.dict(os.environ, {"OPENSCIENTIST_PROVIDER": "totally_bogus"})
     def test_unknown_provider(self):
         from openscientist.providers import check_provider_config
 
@@ -314,7 +314,7 @@ class TestCheckProviderConfig:
     @patch.dict(
         os.environ,
         {
-            "CLAUDE_PROVIDER": "anthropic",
+            "OPENSCIENTIST_PROVIDER": "anthropic",
             "ANTHROPIC_API_KEY": "sk-test-valid",
         },
     )
@@ -329,7 +329,7 @@ class TestCheckProviderConfig:
     @patch.dict(
         os.environ,
         {
-            "CLAUDE_PROVIDER": "cborg",
+            "OPENSCIENTIST_PROVIDER": "cborg",
             "ANTHROPIC_AUTH_TOKEN": "tok",
             "ANTHROPIC_BASE_URL": "https://api.cborg.lbl.gov",
         },
@@ -354,7 +354,7 @@ class TestGetProviderAllNames:
 
     @patch.dict(
         os.environ,
-        {"CLAUDE_PROVIDER": "anthropic", "ANTHROPIC_API_KEY": "sk-test"},
+        {"OPENSCIENTIST_PROVIDER": "anthropic", "ANTHROPIC_API_KEY": "sk-test"},
     )
     def test_anthropic(self):
         provider = get_provider()
@@ -363,7 +363,7 @@ class TestGetProviderAllNames:
     @patch.dict(
         os.environ,
         {
-            "CLAUDE_PROVIDER": "cborg",
+            "OPENSCIENTIST_PROVIDER": "cborg",
             "ANTHROPIC_AUTH_TOKEN": "tok",
             "ANTHROPIC_BASE_URL": "https://api.cborg.lbl.gov",
         },
@@ -375,7 +375,7 @@ class TestGetProviderAllNames:
     @patch.dict(
         os.environ,
         {
-            "CLAUDE_PROVIDER": "bedrock",
+            "OPENSCIENTIST_PROVIDER": "bedrock",
             "AWS_REGION": "us-east-1",
             "AWS_ACCESS_KEY_ID": "test",
             "AWS_SECRET_ACCESS_KEY": "secret",
@@ -391,7 +391,7 @@ class TestGetProviderAllNames:
         with patch.dict(
             os.environ,
             {
-                "CLAUDE_PROVIDER": "vertex",
+                "OPENSCIENTIST_PROVIDER": "vertex",
                 "ANTHROPIC_VERTEX_PROJECT_ID": "proj",
                 "GOOGLE_APPLICATION_CREDENTIALS": str(creds),
                 "GCP_BILLING_ACCOUNT_ID": "012345-ABCDEF",
@@ -401,7 +401,7 @@ class TestGetProviderAllNames:
             provider = get_provider()
             assert provider.name == "Vertex AI"
 
-    @patch.dict(os.environ, {"CLAUDE_PROVIDER": "unknown_xyz"})
+    @patch.dict(os.environ, {"OPENSCIENTIST_PROVIDER": "unknown_xyz"})
     def test_unknown_raises_with_valid_options(self):
         with pytest.raises(ValueError, match="Valid options"):
             get_provider()

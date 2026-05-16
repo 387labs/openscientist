@@ -31,62 +31,62 @@ class TestProviderSettings:
         """Anthropic provider warns when no credentials are set."""
         with caplog.at_level(logging.WARNING, logger="openscientist.settings"):
             settings = ProviderSettings(
-                CLAUDE_PROVIDER="anthropic",
+                OPENSCIENTIST_PROVIDER="anthropic",
                 ANTHROPIC_API_KEY=None,
                 CLAUDE_CODE_OAUTH_TOKEN=None,
             )
-        assert settings.claude_provider == "anthropic"
+        assert settings.provider_id == "anthropic"
         assert "ANTHROPIC_API_KEY" in caplog.text
 
     def test_anthropic_valid_config(self):
         """Valid Anthropic configuration passes validation."""
         settings = ProviderSettings(
-            CLAUDE_PROVIDER="anthropic",
+            OPENSCIENTIST_PROVIDER="anthropic",
             ANTHROPIC_API_KEY="sk-ant-test-key",
         )
-        assert settings.claude_provider == "anthropic"
+        assert settings.provider_id == "anthropic"
         assert settings.anthropic_api_key == "sk-ant-test-key"
 
     def test_anthropic_valid_with_oauth_token(self, caplog):
         """Anthropic provider accepts CLAUDE_CODE_OAUTH_TOKEN as alternative."""
         with caplog.at_level(logging.WARNING, logger="openscientist.settings"):
             settings = ProviderSettings(
-                CLAUDE_PROVIDER="anthropic",
+                OPENSCIENTIST_PROVIDER="anthropic",
                 ANTHROPIC_API_KEY=None,
                 CLAUDE_CODE_OAUTH_TOKEN="oauth-token-value",
             )
-        assert settings.claude_provider == "anthropic"
+        assert settings.provider_id == "anthropic"
         assert "ANTHROPIC_API_KEY" not in caplog.text
 
     def test_cborg_missing_auth_token_warns(self, caplog):
         """CBORG provider warns when ANTHROPIC_AUTH_TOKEN is missing."""
         with caplog.at_level(logging.WARNING, logger="openscientist.settings"):
             settings = ProviderSettings(
-                CLAUDE_PROVIDER="cborg",
+                OPENSCIENTIST_PROVIDER="cborg",
                 ANTHROPIC_AUTH_TOKEN=None,
             )
-        assert settings.claude_provider == "cborg"
+        assert settings.provider_id == "cborg"
         assert "ANTHROPIC_AUTH_TOKEN" in caplog.text
 
     def test_cborg_missing_base_url_warns(self, caplog):
         """CBORG provider warns when ANTHROPIC_BASE_URL is missing."""
         with caplog.at_level(logging.WARNING, logger="openscientist.settings"):
             settings = ProviderSettings(
-                CLAUDE_PROVIDER="cborg",
+                OPENSCIENTIST_PROVIDER="cborg",
                 ANTHROPIC_AUTH_TOKEN="test-token",
                 ANTHROPIC_BASE_URL=None,
             )
-        assert settings.claude_provider == "cborg"
+        assert settings.provider_id == "cborg"
         assert "ANTHROPIC_BASE_URL" in caplog.text
 
     def test_cborg_valid_config(self):
         """Valid CBORG configuration passes validation."""
         settings = ProviderSettings(
-            CLAUDE_PROVIDER="cborg",
+            OPENSCIENTIST_PROVIDER="cborg",
             ANTHROPIC_AUTH_TOKEN="test-token",
             ANTHROPIC_BASE_URL="https://api.cborg.lbl.gov",
         )
-        assert settings.claude_provider == "cborg"
+        assert settings.provider_id == "cborg"
 
     def test_vertex_missing_project_id_warns(self, caplog):
         """Vertex AI provider warns when project ID is missing."""
@@ -98,13 +98,13 @@ class TestProviderSettings:
             ),
         ):
             settings = ProviderSettings(
-                CLAUDE_PROVIDER="vertex",
+                OPENSCIENTIST_PROVIDER="vertex",
                 ANTHROPIC_VERTEX_PROJECT_ID=None,
                 GOOGLE_APPLICATION_CREDENTIALS="/path/to/creds.json",
                 GCP_BILLING_ACCOUNT_ID="123-456-789",
                 CLOUD_ML_REGION="us-east5",
             )
-        assert settings.claude_provider == "vertex"
+        assert settings.provider_id == "vertex"
         assert "ANTHROPIC_VERTEX_PROJECT_ID" in caplog.text
 
     def test_vertex_missing_credentials_file_warns(self, caplog):
@@ -117,73 +117,101 @@ class TestProviderSettings:
             ),
         ):
             settings = ProviderSettings(
-                CLAUDE_PROVIDER="vertex",
+                OPENSCIENTIST_PROVIDER="vertex",
                 ANTHROPIC_VERTEX_PROJECT_ID="my-project",
                 GOOGLE_APPLICATION_CREDENTIALS="/nonexistent/creds.json",
                 GCP_BILLING_ACCOUNT_ID="123-456-789",
                 CLOUD_ML_REGION="us-east5",
             )
-        assert settings.claude_provider == "vertex"
+        assert settings.provider_id == "vertex"
         assert "not found" in caplog.text
 
     def test_bedrock_missing_region_warns(self, caplog):
         """Bedrock provider warns when AWS_REGION is missing."""
         with caplog.at_level(logging.WARNING, logger="openscientist.settings"):
             settings = ProviderSettings(
-                CLAUDE_PROVIDER="bedrock",
+                OPENSCIENTIST_PROVIDER="bedrock",
                 AWS_REGION=None,
                 AWS_ACCESS_KEY_ID="AKIAIOSFODNN7EXAMPLE",
                 AWS_SECRET_ACCESS_KEY="secret",
             )
-        assert settings.claude_provider == "bedrock"
+        assert settings.provider_id == "bedrock"
         assert "AWS_REGION" in caplog.text
 
     def test_bedrock_missing_credentials_warns(self, caplog):
         """Bedrock provider warns when no credential method is set."""
         with caplog.at_level(logging.WARNING, logger="openscientist.settings"):
             settings = ProviderSettings(
-                CLAUDE_PROVIDER="bedrock",
+                OPENSCIENTIST_PROVIDER="bedrock",
                 AWS_REGION="us-east-1",
                 AWS_ACCESS_KEY_ID=None,
                 AWS_SECRET_ACCESS_KEY=None,
                 AWS_PROFILE=None,
                 AWS_BEARER_TOKEN_BEDROCK=None,
             )
-        assert settings.claude_provider == "bedrock"
+        assert settings.provider_id == "bedrock"
         assert "credentials" in caplog.text.lower()
 
     def test_bedrock_valid_with_access_key(self):
         """Bedrock with access key/secret is valid."""
         settings = ProviderSettings(
-            CLAUDE_PROVIDER="bedrock",
+            OPENSCIENTIST_PROVIDER="bedrock",
             AWS_REGION="us-east-1",
             AWS_ACCESS_KEY_ID="AKIAIOSFODNN7EXAMPLE",
             AWS_SECRET_ACCESS_KEY="secret",
         )
-        assert settings.claude_provider == "bedrock"
+        assert settings.provider_id == "bedrock"
 
     def test_bedrock_valid_with_profile(self):
         """Bedrock with profile is valid."""
         settings = ProviderSettings(
-            CLAUDE_PROVIDER="bedrock",
+            OPENSCIENTIST_PROVIDER="bedrock",
             AWS_REGION="us-east-1",
             AWS_PROFILE="default",
         )
-        assert settings.claude_provider == "bedrock"
+        assert settings.provider_id == "bedrock"
 
     def test_unknown_provider_warns(self, caplog):
         """Unknown provider logs a warning (does not raise)."""
         with caplog.at_level(logging.WARNING, logger="openscientist.settings"):
-            settings = ProviderSettings(CLAUDE_PROVIDER="unknown-provider")
-        assert settings.claude_provider == "unknown-provider"
+            settings = ProviderSettings(OPENSCIENTIST_PROVIDER="unknown-provider")
+        assert settings.provider_id == "unknown-provider"
         assert "Unknown provider" in caplog.text
 
     def test_foundry_accepted_as_valid_provider(self, caplog):
         """Foundry is a recognized provider with no warnings."""
         with caplog.at_level(logging.WARNING, logger="openscientist.settings"):
-            settings = ProviderSettings(CLAUDE_PROVIDER="foundry")
-        assert settings.claude_provider == "foundry"
+            settings = ProviderSettings(OPENSCIENTIST_PROVIDER="foundry")
+        assert settings.provider_id == "foundry"
         assert caplog.text == ""
+
+
+class TestProviderIdEnvVar:
+    """Tests for OPENSCIENTIST_PROVIDER and rejection of the removed CLAUDE_PROVIDER."""
+
+    def test_canonical_env_var_resolves(self, monkeypatch, tmp_path):
+        """OPENSCIENTIST_PROVIDER is the canonical env-var name."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("CLAUDE_PROVIDER", raising=False)
+        monkeypatch.setenv("OPENSCIENTIST_PROVIDER", "anthropic")
+        settings = ProviderSettings()
+        assert settings.provider_id == "anthropic"
+
+    def test_legacy_env_var_raises_clear_error(self, monkeypatch, tmp_path):
+        """Setting the removed CLAUDE_PROVIDER raises with a rename hint."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("OPENSCIENTIST_PROVIDER", raising=False)
+        monkeypatch.setenv("CLAUDE_PROVIDER", "anthropic")
+        with pytest.raises(ValueError, match="CLAUDE_PROVIDER has been renamed"):
+            ProviderSettings()
+
+    def test_legacy_env_var_rejected_even_when_canonical_also_set(self, monkeypatch, tmp_path):
+        """Both env vars set together still raises so users notice the leftover."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("OPENSCIENTIST_PROVIDER", "anthropic")
+        monkeypatch.setenv("CLAUDE_PROVIDER", "anthropic")
+        with pytest.raises(ValueError, match="CLAUDE_PROVIDER has been renamed"):
+            ProviderSettings()
 
 
 class TestProviderContainerEnvVars:
@@ -191,7 +219,7 @@ class TestProviderContainerEnvVars:
 
     def test_vertex_env_vars_use_container_credentials_path_override(self):
         settings = ProviderSettings(
-            CLAUDE_PROVIDER="vertex",
+            OPENSCIENTIST_PROVIDER="vertex",
             ANTHROPIC_VERTEX_PROJECT_ID="vertex-proj",
             GOOGLE_APPLICATION_CREDENTIALS="/host/creds.json",
             GCP_BILLING_ACCOUNT_ID="123-456-789",
@@ -200,14 +228,14 @@ class TestProviderContainerEnvVars:
 
         env = settings.get_container_env_vars(gcp_credentials_container_path="/agent/gcp.json")
 
-        assert env["CLAUDE_PROVIDER"] == "vertex"
+        assert env["OPENSCIENTIST_PROVIDER"] == "vertex"
         assert env["CLAUDE_CODE_USE_VERTEX"] == "1"
         assert env["GOOGLE_APPLICATION_CREDENTIALS"] == "/agent/gcp.json"
         assert "CLAUDE_CODE_USE_BEDROCK" not in env
 
     def test_bedrock_env_vars_include_flag_and_credentials(self):
         settings = ProviderSettings(
-            CLAUDE_PROVIDER="bedrock",
+            OPENSCIENTIST_PROVIDER="bedrock",
             AWS_REGION="us-east-1",
             AWS_ACCESS_KEY_ID="AKIAIOSFODNN7EXAMPLE",
             AWS_SECRET_ACCESS_KEY="secret",
@@ -215,7 +243,7 @@ class TestProviderContainerEnvVars:
 
         env = settings.get_container_env_vars()
 
-        assert env["CLAUDE_PROVIDER"] == "bedrock"
+        assert env["OPENSCIENTIST_PROVIDER"] == "bedrock"
         assert env["CLAUDE_CODE_USE_BEDROCK"] == "1"
         assert env["AWS_REGION"] == "us-east-1"
         assert env["AWS_ACCESS_KEY_ID"] == "AKIAIOSFODNN7EXAMPLE"
@@ -224,7 +252,7 @@ class TestProviderContainerEnvVars:
 
     def test_optional_model_and_token_env_vars_are_included(self):
         settings = ProviderSettings(
-            CLAUDE_PROVIDER="anthropic",
+            OPENSCIENTIST_PROVIDER="anthropic",
             ANTHROPIC_API_KEY="sk-ant-test-key",
             CLAUDE_CODE_OAUTH_TOKEN="oauth-token",
             ANTHROPIC_AUTH_TOKEN="auth-token",
@@ -236,7 +264,7 @@ class TestProviderContainerEnvVars:
 
         env = settings.get_container_env_vars()
 
-        assert env["CLAUDE_PROVIDER"] == "anthropic"
+        assert env["OPENSCIENTIST_PROVIDER"] == "anthropic"
         assert env["ANTHROPIC_API_KEY"] == "sk-ant-test-key"
         assert env["CLAUDE_CODE_OAUTH_TOKEN"] == "oauth-token"
         assert env["ANTHROPIC_AUTH_TOKEN"] == "auth-token"
@@ -247,14 +275,14 @@ class TestProviderContainerEnvVars:
 
     def test_foundry_resource_still_exports_api_key(self):
         settings = ProviderSettings(
-            CLAUDE_PROVIDER="foundry",
+            OPENSCIENTIST_PROVIDER="foundry",
             ANTHROPIC_FOUNDRY_RESOURCE="lab-foundry",
             ANTHROPIC_FOUNDRY_API_KEY="foundry-key",
         )
 
         env = settings.get_container_env_vars()
 
-        assert env["CLAUDE_PROVIDER"] == "foundry"
+        assert env["OPENSCIENTIST_PROVIDER"] == "foundry"
         assert env["CLAUDE_CODE_USE_FOUNDRY"] == "1"
         assert env["ANTHROPIC_FOUNDRY_RESOURCE"] == "lab-foundry"
         assert env["ANTHROPIC_FOUNDRY_API_KEY"] == "foundry-key"

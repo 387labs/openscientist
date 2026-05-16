@@ -17,7 +17,7 @@ class TestCborgProviderValidation:
         with patch.dict(
             os.environ,
             {
-                "CLAUDE_PROVIDER": "cborg",
+                "OPENSCIENTIST_PROVIDER": "cborg",
                 "ANTHROPIC_AUTH_TOKEN": "test-token",
                 "ANTHROPIC_BASE_URL": "https://api.cborg.lbl.gov",
             },
@@ -64,7 +64,7 @@ class TestCborgSetupEnvironment:
         with patch.dict(
             os.environ,
             {
-                "CLAUDE_PROVIDER": "cborg",
+                "OPENSCIENTIST_PROVIDER": "cborg",
                 "ANTHROPIC_AUTH_TOKEN": "tok",
                 "ANTHROPIC_BASE_URL": "https://api.cborg.lbl.gov",
             },
@@ -82,7 +82,7 @@ class TestCborgGetCostInfo:
         with patch.dict(
             os.environ,
             {
-                "CLAUDE_PROVIDER": "cborg",
+                "OPENSCIENTIST_PROVIDER": "cborg",
                 "ANTHROPIC_AUTH_TOKEN": "tok",
                 "ANTHROPIC_BASE_URL": "https://api.cborg.lbl.gov",
             },
@@ -117,7 +117,7 @@ class TestCborgGetCostInfo:
         with patch.dict(
             os.environ,
             {
-                "CLAUDE_PROVIDER": "cborg",
+                "OPENSCIENTIST_PROVIDER": "cborg",
                 "ANTHROPIC_AUTH_TOKEN": "tok",
                 "ANTHROPIC_BASE_URL": "https://api.cborg.lbl.gov",
             },
@@ -148,7 +148,7 @@ class TestCborgGetCostInfo:
         with patch.dict(
             os.environ,
             {
-                "CLAUDE_PROVIDER": "cborg",
+                "OPENSCIENTIST_PROVIDER": "cborg",
                 "ANTHROPIC_AUTH_TOKEN": "tok",
                 "ANTHROPIC_BASE_URL": "https://api.cborg.lbl.gov",
             },

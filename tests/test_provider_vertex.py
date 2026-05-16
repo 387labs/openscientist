@@ -18,7 +18,7 @@ class TestVertexProviderValidation:
         with patch.dict(
             os.environ,
             {
-                "CLAUDE_PROVIDER": "vertex",
+                "OPENSCIENTIST_PROVIDER": "vertex",
                 "ANTHROPIC_VERTEX_PROJECT_ID": "my-project",
                 "GOOGLE_APPLICATION_CREDENTIALS": str(creds),
                 "GCP_BILLING_ACCOUNT_ID": "012345-ABCDEF",
@@ -33,7 +33,7 @@ class TestVertexProviderValidation:
         with patch.dict(
             os.environ,
             {
-                "CLAUDE_PROVIDER": "vertex",
+                "OPENSCIENTIST_PROVIDER": "vertex",
                 "ANTHROPIC_VERTEX_PROJECT_ID": "proj",
                 "GOOGLE_APPLICATION_CREDENTIALS": "/nonexistent/creds.json",
                 "GCP_BILLING_ACCOUNT_ID": "id",
@@ -88,7 +88,7 @@ class TestVertexProviderValidation:
         with patch.dict(
             os.environ,
             {
-                "CLAUDE_PROVIDER": "vertex",
+                "OPENSCIENTIST_PROVIDER": "vertex",
                 "ANTHROPIC_VERTEX_PROJECT_ID": "proj",
                 "GOOGLE_APPLICATION_CREDENTIALS": "/does/not/exist/creds.json",
                 "GCP_BILLING_ACCOUNT_ID": "id",
@@ -129,7 +129,7 @@ class TestVertexSetupEnvironment:
         with patch.dict(
             os.environ,
             {
-                "CLAUDE_PROVIDER": "vertex",
+                "OPENSCIENTIST_PROVIDER": "vertex",
                 "ANTHROPIC_VERTEX_PROJECT_ID": "my-project",
                 "GOOGLE_APPLICATION_CREDENTIALS": str(creds),
                 "GCP_BILLING_ACCOUNT_ID": "id",
@@ -146,7 +146,7 @@ class TestVertexSetupEnvironment:
         with patch.dict(
             os.environ,
             {
-                "CLAUDE_PROVIDER": "vertex",
+                "OPENSCIENTIST_PROVIDER": "vertex",
                 "ANTHROPIC_VERTEX_PROJECT_ID": "my-project",
                 "GOOGLE_APPLICATION_CREDENTIALS": str(creds),
                 "GCP_BILLING_ACCOUNT_ID": "id",
