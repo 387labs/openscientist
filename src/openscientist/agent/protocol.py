@@ -14,26 +14,49 @@ from typing import Any, Protocol, runtime_checkable
 
 @dataclass
 class TokenUsage:
-    """Token usage accounting across all iterations."""
+    """Normalized token usage across all iterations.
+
+    Each token is counted in exactly one category; the categories are
+    additive and non-overlapping. Total token count equals the sum of
+    all five fields. This invariant lets cost functions multiply each
+    field by its per-category rate and sum, without double-counting.
+
+    Backend SDKs that report hierarchical counts (e.g., OpenAI's
+    ``input_tokens`` includes ``cached_input_tokens``) must subtract
+    sub-categories from totals at the agent boundary before populating
+    this dataclass.
+    """
 
     input_tokens: int = 0
+    """Fresh, uncached input tokens."""
+
     output_tokens: int = 0
-    cache_creation_tokens: int = 0
+    """Visible (non-reasoning) output tokens."""
+
+    cache_write_tokens: int = 0
+    """Tokens written to a provider-side prompt cache. Anthropic only."""
+
     cache_read_tokens: int = 0
+    """Tokens served from a provider-side prompt cache."""
+
+    reasoning_tokens: int = 0
+    """Internal reasoning tokens (o-series; Anthropic extended thinking)."""
 
     def __add__(self, other: TokenUsage) -> TokenUsage:
         return TokenUsage(
             input_tokens=self.input_tokens + other.input_tokens,
             output_tokens=self.output_tokens + other.output_tokens,
-            cache_creation_tokens=self.cache_creation_tokens + other.cache_creation_tokens,
+            cache_write_tokens=self.cache_write_tokens + other.cache_write_tokens,
             cache_read_tokens=self.cache_read_tokens + other.cache_read_tokens,
+            reasoning_tokens=self.reasoning_tokens + other.reasoning_tokens,
         )
 
     def __iadd__(self, other: TokenUsage) -> TokenUsage:
         self.input_tokens += other.input_tokens
         self.output_tokens += other.output_tokens
-        self.cache_creation_tokens += other.cache_creation_tokens
+        self.cache_write_tokens += other.cache_write_tokens
         self.cache_read_tokens += other.cache_read_tokens
+        self.reasoning_tokens += other.reasoning_tokens
         return self
 
 

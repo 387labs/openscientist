@@ -184,18 +184,34 @@ class SDKAgentExecutor:
 
     @staticmethod
     def _usage_from_payload(usage: object) -> TokenUsage:
-        """Normalize SDK usage payloads (object or dict) to TokenUsage."""
+        """Normalize Anthropic SDK usage payloads (object or dict) to TokenUsage.
+
+        Anthropic's shape is already additive: ``input_tokens`` excludes
+        cached input, and ``cache_creation_input_tokens`` /
+        ``cache_read_input_tokens`` are independent buckets. We pass the
+        values through with only the field renames required by the
+        normalized schema.
+
+        ``reasoning_tokens`` is always 0 on this path because the
+        Anthropic API does not expose a separate count for extended-
+        thinking tokens; they are billed inside ``output_tokens``.
+
+        The Codex backend (Phase 5) will have its own
+        ``_usage_from_payload`` that subtracts ``cached_input_tokens``
+        and ``reasoning_output_tokens`` from their parent totals to
+        produce the same additive form.
+        """
         if isinstance(usage, dict):
             return TokenUsage(
                 input_tokens=int(usage.get("input_tokens", 0) or 0),
                 output_tokens=int(usage.get("output_tokens", 0) or 0),
-                cache_creation_tokens=int(usage.get("cache_creation_input_tokens", 0) or 0),
+                cache_write_tokens=int(usage.get("cache_creation_input_tokens", 0) or 0),
                 cache_read_tokens=int(usage.get("cache_read_input_tokens", 0) or 0),
             )
         return TokenUsage(
             input_tokens=int(getattr(usage, "input_tokens", 0) or 0),
             output_tokens=int(getattr(usage, "output_tokens", 0) or 0),
-            cache_creation_tokens=int(getattr(usage, "cache_creation_input_tokens", 0) or 0),
+            cache_write_tokens=int(getattr(usage, "cache_creation_input_tokens", 0) or 0),
             cache_read_tokens=int(getattr(usage, "cache_read_input_tokens", 0) or 0),
         )
 
