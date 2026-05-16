@@ -18,7 +18,7 @@ class TestBedrockProviderValidation:
         mock_settings.provider.aws_secret_access_key = "secret"
         mock_settings.provider.aws_profile = None
         mock_settings.provider.aws_bearer_token_bedrock = None
-        mock_settings.provider.anthropic_model = "model"
+        mock_settings.provider.model = "model"
         mock_settings.provider.anthropic_small_fast_model = "haiku"
 
         with (
@@ -37,7 +37,7 @@ class TestBedrockProviderValidation:
         mock_settings.provider.aws_secret_access_key = None
         mock_settings.provider.aws_profile = None
         mock_settings.provider.aws_bearer_token_bedrock = None
-        mock_settings.provider.anthropic_model = "model"
+        mock_settings.provider.model = "model"
         mock_settings.provider.anthropic_small_fast_model = "haiku"
 
         with (
@@ -56,7 +56,7 @@ class TestBedrockProviderValidation:
         mock_settings.provider.aws_secret_access_key = "secret"
         mock_settings.provider.aws_profile = None
         mock_settings.provider.aws_bearer_token_bedrock = None
-        mock_settings.provider.anthropic_model = "model"
+        mock_settings.provider.model = "model"
         mock_settings.provider.anthropic_small_fast_model = "haiku"
 
         with patch("openscientist.providers.bedrock.get_settings", return_value=mock_settings):
@@ -70,7 +70,7 @@ class TestBedrockProviderValidation:
         mock_settings.provider.aws_secret_access_key = None
         mock_settings.provider.aws_profile = "my-profile"
         mock_settings.provider.aws_bearer_token_bedrock = None
-        mock_settings.provider.anthropic_model = "model"
+        mock_settings.provider.model = "model"
         mock_settings.provider.anthropic_small_fast_model = "haiku"
 
         with patch("openscientist.providers.bedrock.get_settings", return_value=mock_settings):
@@ -84,7 +84,7 @@ class TestBedrockProviderValidation:
         mock_settings.provider.aws_secret_access_key = None
         mock_settings.provider.aws_profile = None
         mock_settings.provider.aws_bearer_token_bedrock = "bearer-tok"
-        mock_settings.provider.anthropic_model = "model"
+        mock_settings.provider.model = "model"
         mock_settings.provider.anthropic_small_fast_model = "haiku"
 
         with patch("openscientist.providers.bedrock.get_settings", return_value=mock_settings):
@@ -102,7 +102,7 @@ class TestBedrockSetupEnvironment:
         mock_settings.provider.aws_secret_access_key = "secret"
         mock_settings.provider.aws_profile = None
         mock_settings.provider.aws_bearer_token_bedrock = None
-        mock_settings.provider.anthropic_model = "model"
+        mock_settings.provider.model = "model"
         mock_settings.provider.anthropic_small_fast_model = "haiku"
         return mock_settings
 

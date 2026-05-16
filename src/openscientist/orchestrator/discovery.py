@@ -640,7 +640,7 @@ async def run_discovery_async(job_dir: Path) -> dict[str, Any]:
         try:
             settings = get_settings()
             model_name = (
-                settings.provider.anthropic_model
+                settings.provider.model
                 or settings.provider.anthropic_default_sonnet_model
                 or _PROVIDER_DEFAULT_MODELS.get(provider.name, "unknown")
             )

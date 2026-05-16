@@ -31,7 +31,7 @@ class TestCborgProviderValidation:
         mock_settings = MagicMock()
         mock_settings.provider.anthropic_auth_token = None
         mock_settings.provider.anthropic_base_url = "https://api.cborg.lbl.gov"
-        mock_settings.provider.anthropic_model = "claude-sonnet-4-6"
+        mock_settings.provider.model = "claude-sonnet-4-6"
         with (
             patch("openscientist.providers.cborg.get_settings", return_value=mock_settings),
             pytest.raises(
@@ -46,7 +46,7 @@ class TestCborgProviderValidation:
         mock_settings = MagicMock()
         mock_settings.provider.anthropic_auth_token = "tok"
         mock_settings.provider.anthropic_base_url = None
-        mock_settings.provider.anthropic_model = "claude-sonnet-4-6"
+        mock_settings.provider.model = "claude-sonnet-4-6"
         with (
             patch("openscientist.providers.cborg.get_settings", return_value=mock_settings),
             pytest.raises(

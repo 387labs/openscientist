@@ -161,7 +161,7 @@ class SDKAgentExecutor:
         return ClaudeAgentOptions(
             system_prompt=self._system_prompt,
             mcp_servers={"openscientist-tools": server},
-            model=self._model_override or settings.provider.anthropic_model,
+            model=self._model_override or settings.provider.model,
             can_use_tool=self._allow_all_tools,
             cwd=str(self._job_dir),
             stderr=self._stderr_callback,

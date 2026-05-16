@@ -61,9 +61,9 @@ class BedrockProvider(BaseProvider):
         warnings = []
         settings = get_settings()
 
-        if not settings.provider.anthropic_model:
+        if not settings.provider.model:
             warnings.append(
-                "ANTHROPIC_MODEL not set (will use global.anthropic.claude-sonnet-4-5-20250929-v1:0)"
+                "OPENSCIENTIST_MODEL not set (will use global.anthropic.claude-sonnet-4-5-20250929-v1:0)"
             )
 
         if not settings.provider.anthropic_small_fast_model:
@@ -200,7 +200,7 @@ class BedrockProvider(BaseProvider):
             messages=messages,
             system=system,
             model=model,
-            configured_model=settings.provider.anthropic_model,
+            configured_model=settings.provider.model,
             provider_default_model="us.anthropic.claude-sonnet-4-5-20250929-v1:0",
             max_tokens=max_tokens,
         )
@@ -231,7 +231,7 @@ class BedrockProvider(BaseProvider):
             tools=tools,
             system=system,
             model=model,
-            configured_model=settings.provider.anthropic_model,
+            configured_model=settings.provider.model,
             provider_default_model="us.anthropic.claude-sonnet-4-5-20250929-v1:0",
             max_tokens=max_tokens,
             tool_use_block_type=ToolUseBlock,

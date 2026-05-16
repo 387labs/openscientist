@@ -316,7 +316,7 @@ Be concise, accurate, and cite specific papers or findings when relevant. Focus 
     from openscientist.settings import get_settings
 
     provider_settings = get_settings().provider
-    chat_model = provider_settings.anthropic_chat_model or provider_settings.anthropic_model
+    chat_model = provider_settings.anthropic_chat_model or provider_settings.model
 
     executor = SDKAgentExecutor(
         job_dir=job_dir,

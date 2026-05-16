@@ -52,7 +52,7 @@ class TestVertexProviderValidation:
         mock_settings.provider.google_application_credentials = "/some/creds.json"
         mock_settings.provider.gcp_billing_account_id = "id"
         mock_settings.provider.cloud_ml_region = "us-east5"
-        mock_settings.provider.anthropic_model = "model"
+        mock_settings.provider.model = "model"
         mock_settings.provider.vertex_region_claude_4_5_sonnet = None
         mock_settings.provider.vertex_region_claude_4_5_haiku = None
 
@@ -71,7 +71,7 @@ class TestVertexProviderValidation:
         mock_settings.provider.google_application_credentials = None
         mock_settings.provider.gcp_billing_account_id = "id"
         mock_settings.provider.cloud_ml_region = "us-east5"
-        mock_settings.provider.anthropic_model = "model"
+        mock_settings.provider.model = "model"
         mock_settings.provider.vertex_region_claude_4_5_sonnet = None
         mock_settings.provider.vertex_region_claude_4_5_haiku = None
 
@@ -107,7 +107,7 @@ class TestVertexProviderValidation:
         mock_settings.provider.google_application_credentials = "/some/creds.json"
         mock_settings.provider.gcp_billing_account_id = "id"
         mock_settings.provider.cloud_ml_region = "us-east5"
-        mock_settings.provider.anthropic_model = None
+        mock_settings.provider.model = None
         mock_settings.provider.vertex_region_claude_4_5_sonnet = None
         mock_settings.provider.vertex_region_claude_4_5_haiku = None
 
