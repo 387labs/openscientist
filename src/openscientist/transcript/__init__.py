@@ -6,7 +6,8 @@ backend's transcript in one shape. Per-backend
 shapes into it without dropping any source field. Unrecognised
 shapes become :class:`UnknownEntry`.
 
-See :data:`CLAUDE` for the canonical Claude deserializer.
+See :data:`CLAUDE` and :data:`CODEX` for the canonical
+deserializers.
 """
 
 from openscientist.transcript.agents import (
@@ -15,7 +16,12 @@ from openscientist.transcript.agents import (
     CodexAgent,
     TranscriptDeserializer,
 )
-from openscientist.transcript.translators import CLAUDE, ClaudeDeserializer
+from openscientist.transcript.translators import (
+    CLAUDE,
+    CODEX,
+    ClaudeDeserializer,
+    CodexDeserializer,
+)
 from openscientist.transcript.union import TranscriptAdapter, TranscriptEntry
 from openscientist.transcript.variants import (
     AssistantText,
@@ -42,11 +48,13 @@ from openscientist.transcript.variants import (
 
 __all__ = [
     "CLAUDE",
+    "CODEX",
     "AgentMarker",
     "AssistantText",
     "ClaudeAgent",
     "ClaudeDeserializer",
     "CodexAgent",
+    "CodexDeserializer",
     "CollabAgentToolCall",
     "FileChange",
     "HookPrompt",
