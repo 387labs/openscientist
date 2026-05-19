@@ -1,10 +1,12 @@
 """Normalized transcript schema for agent iteration outputs.
 
 The :data:`TranscriptEntry` discriminated union represents every
-backend's transcript in one shape. Backends will ship
-:class:`TranscriptDeserializer` implementations that map their
-native message shape into it without dropping any source field;
-unrecognised shapes become :class:`UnknownEntry`.
+backend's transcript in one shape. Per-backend
+:class:`TranscriptDeserializer` implementations map native message
+shapes into it without dropping any source field. Unrecognised
+shapes become :class:`UnknownEntry`.
+
+See :data:`CLAUDE` for the canonical Claude deserializer.
 """
 
 from openscientist.transcript.agents import (
@@ -13,6 +15,7 @@ from openscientist.transcript.agents import (
     CodexAgent,
     TranscriptDeserializer,
 )
+from openscientist.transcript.translators import CLAUDE, ClaudeDeserializer
 from openscientist.transcript.union import TranscriptAdapter, TranscriptEntry
 from openscientist.transcript.variants import (
     AssistantText,
@@ -38,9 +41,11 @@ from openscientist.transcript.variants import (
 )
 
 __all__ = [
+    "CLAUDE",
     "AgentMarker",
     "AssistantText",
     "ClaudeAgent",
+    "ClaudeDeserializer",
     "CodexAgent",
     "CollabAgentToolCall",
     "FileChange",
