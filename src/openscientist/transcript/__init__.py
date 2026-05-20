@@ -16,6 +16,7 @@ from openscientist.transcript.agents import (
     CodexAgent,
     TranscriptDeserializer,
 )
+from openscientist.transcript.io import load_transcript, save_transcript
 from openscientist.transcript.translators import (
     CLAUDE,
     CODEX,
@@ -77,4 +78,6 @@ __all__ = [
     "UnknownEntry",
     "UserPrompt",
     "WebSearch",
+    "load_transcript",
+    "save_transcript",
 ]
