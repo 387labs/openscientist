@@ -7,13 +7,27 @@ from pydantic import ValidationError
 
 from openscientist.transcript import (
     AssistantText,
+    CollabAgentToolCall,
     FileChange,
+    HookPrompt,
+    ImageGeneration,
+    ImageView,
+    Plan,
     Reasoning,
+    ReviewModeEntered,
+    ReviewModeExited,
+    SessionInit,
     ShellExecution,
+    TaskNotification,
+    TaskProgress,
+    TaskStarted,
     ToolCall,
     ToolResult,
     TranscriptAdapter,
     TranscriptEntry,
+    UnknownEntry,
+    UserPrompt,
+    WebSearch,
 )
 
 # ---- Per-variant round-trip tests ---------------------------------------------------------------
@@ -22,32 +36,30 @@ from openscientist.transcript import (
 def test_assistant_text_roundtrip() -> None:
     entry = AssistantText(text="hello world")
     raw = entry.model_dump(mode="json")
-    assert raw == {"type": "assistant_text", "text": "hello world"}
+    # Type discriminator survives serialisation. Typed text round-trips.
+    assert raw["type"] == "assistant_text"
+    assert raw["text"] == "hello world"
     assert AssistantText.model_validate(raw) == entry
 
 
 def test_tool_call_roundtrip() -> None:
     entry = ToolCall(id="call_1", tool="execute_code", arguments={"code": "print(1)"})
     raw = entry.model_dump(mode="json")
-    assert raw == {
-        "type": "tool_call",
-        "id": "call_1",
-        "tool": "execute_code",
-        "arguments": {"code": "print(1)"},
-    }
+    assert raw["type"] == "tool_call"
+    assert raw["id"] == "call_1"
+    assert raw["tool"] == "execute_code"
+    assert raw["arguments"] == {"code": "print(1)"}
     assert ToolCall.model_validate(raw) == entry
 
 
 def test_tool_result_roundtrip() -> None:
     entry = ToolResult(call_id="call_1", output="1\n", success=True, duration_ms=42)
     raw = entry.model_dump(mode="json")
-    assert raw == {
-        "type": "tool_result",
-        "call_id": "call_1",
-        "output": "1\n",
-        "success": True,
-        "duration_ms": 42,
-    }
+    assert raw["type"] == "tool_result"
+    assert raw["call_id"] == "call_1"
+    assert raw["output"] == "1\n"
+    assert raw["success"] is True
+    assert raw["duration_ms"] == 42
     assert ToolResult.model_validate(raw) == entry
 
 
@@ -59,13 +71,11 @@ def test_tool_result_duration_optional() -> None:
 def test_shell_execution_roundtrip() -> None:
     entry = ShellExecution(id="sh_1", command="ls", output="a\nb\n", exit_code=0)
     raw = entry.model_dump(mode="json")
-    assert raw == {
-        "type": "shell_execution",
-        "id": "sh_1",
-        "command": "ls",
-        "output": "a\nb\n",
-        "exit_code": 0,
-    }
+    assert raw["type"] == "shell_execution"
+    assert raw["id"] == "sh_1"
+    assert raw["command"] == "ls"
+    assert raw["output"] == "a\nb\n"
+    assert raw["exit_code"] == 0
     assert ShellExecution.model_validate(raw) == entry
 
 
@@ -78,27 +88,67 @@ def test_file_change_roundtrip() -> None:
         success=True,
     )
     raw = entry.model_dump(mode="json")
-    assert raw == {
-        "type": "file_change",
-        "id": "fc_1",
-        "path": "src/foo.py",
-        "kind": "edit",
-        "diff": "@@ -1 +1 @@\n-old\n+new\n",
-        "success": True,
-    }
+    assert raw["type"] == "file_change"
+    assert raw["id"] == "fc_1"
+    assert raw["path"] == "src/foo.py"
+    assert raw["kind"] == "edit"
+    assert raw["diff"] == "@@ -1 +1 @@\n-old\n+new\n"
+    assert raw["success"] is True
     assert FileChange.model_validate(raw) == entry
+
+
+def test_file_change_accepts_extended_kinds() -> None:
+    """The kind union grew to support Codex's PatchChangeKind values."""
+    for kind in ("write", "edit", "create", "delete", "rename"):
+        entry = FileChange(id="fc", path="x", kind=kind, success=True)
+        assert entry.kind == kind
 
 
 def test_file_change_rejects_unknown_kind() -> None:
     with pytest.raises(ValidationError):
-        FileChange(id="fc_2", path="x", kind="delete", success=True)  # type: ignore[arg-type]
+        FileChange(id="fc_2", path="x", kind="scramble", success=True)  # type: ignore[arg-type]
 
 
 def test_reasoning_roundtrip() -> None:
     entry = Reasoning(text="thinking", summary="step 1")
     raw = entry.model_dump(mode="json")
-    assert raw == {"type": "reasoning", "text": "thinking", "summary": "step 1"}
+    assert raw["type"] == "reasoning"
+    assert raw["text"] == "thinking"
+    assert raw["summary"] == "step 1"
     assert Reasoning.model_validate(raw) == entry
+
+
+def test_reasoning_accepts_signature() -> None:
+    entry = Reasoning(text="t", signature="EhcK")
+    assert entry.signature == "EhcK"
+    assert Reasoning.model_validate(entry.model_dump(mode="json")) == entry
+
+
+def test_session_init_roundtrip() -> None:
+    entry = SessionInit(
+        session_id="s1",
+        uuid="u1",
+        cwd="/work",
+        model="claude-opus",
+        permission_mode="bypassPermissions",
+        api_key_source="oauth",
+        tools=["Bash", "Read"],
+        slash_commands=["help", "compact"],
+        agents=["general-purpose"],
+        mcp_servers=[],
+    )
+    raw = entry.model_dump(mode="json")
+    assert raw["type"] == "session_init"
+    assert raw["cwd"] == "/work"
+    assert raw["tools"] == ["Bash", "Read"]
+    assert SessionInit.model_validate(raw) == entry
+
+
+def test_session_init_minimal_defaults_to_none() -> None:
+    entry = SessionInit()
+    assert entry.model is None
+    assert entry.tools is None
+    assert entry.raw == {}
 
 
 # ---- Discriminated-union dispatch tests ---------------------------------------------------------
@@ -147,8 +197,12 @@ def _describe(entry: TranscriptEntry) -> str:
     compile-time exhaustiveness check whenever the suite type-checks.
     """
     match entry:
+        case UserPrompt():
+            return "user_prompt"
         case AssistantText():
             return "assistant_text"
+        case Reasoning():
+            return "reasoning"
         case ToolCall():
             return "tool_call"
         case ToolResult():
@@ -157,8 +211,32 @@ def _describe(entry: TranscriptEntry) -> str:
             return "shell_execution"
         case FileChange():
             return "file_change"
-        case Reasoning():
-            return "reasoning"
+        case WebSearch():
+            return "web_search"
+        case CollabAgentToolCall():
+            return "collab_agent_tool_call"
+        case ImageView():
+            return "image_view"
+        case ImageGeneration():
+            return "image_generation"
+        case Plan():
+            return "plan"
+        case HookPrompt():
+            return "hook_prompt"
+        case SessionInit():
+            return "session_init"
+        case TaskStarted():
+            return "task_started"
+        case TaskProgress():
+            return "task_progress"
+        case TaskNotification():
+            return "task_notification"
+        case ReviewModeEntered():
+            return "review_mode_entered"
+        case ReviewModeExited():
+            return "review_mode_exited"
+        case UnknownEntry():
+            return "unknown_entry"
         case _:
             assert_never(entry)
 
