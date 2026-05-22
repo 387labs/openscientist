@@ -1,13 +1,13 @@
 """Transcript parsing utilities for the web application."""
 
-import json
-from contextlib import suppress
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import Any
 
+from openscientist.transcript import ToolCall, ToolResult, TranscriptEntry
+
 # Known OpenScientist tool names (bare names, without MCP server prefix).
-# Used to identify openscientist tools in SDK transcripts where names are not
-# prefixed with "openscientist-tools__".
 _OPENSCIENTIST_TOOL_NAMES = frozenset(
     {
         "execute_code",
@@ -54,141 +54,76 @@ def _is_openscientist_tool(tool_name: str, short_name: str) -> bool:
     return "openscientist" in tool_name.lower() or short_name in _OPENSCIENTIST_TOOL_NAMES
 
 
-def _extract_tool_result_text(result: Any) -> str:
-    """Normalize tool_result payload into text for timeline display."""
-    if isinstance(result, dict):
-        return str(result.get("result", str(result)))
-    if isinstance(result, str):
-        return result
-    if isinstance(result, list):
-        return str(result)
-    return ""
+def _collect_tool_results_by_call_id(
+    transcript: list[TranscriptEntry],
+) -> dict[str, ToolResult]:
+    """Index ``ToolResult`` entries by their ``call_id``."""
+    return {entry.call_id: entry for entry in transcript if isinstance(entry, ToolResult)}
 
 
-def _is_success_from_result_text(result_text: str) -> bool:
-    """Infer success from free-form tool result text."""
-    lowered = result_text.lower()
-    return "failed" not in lowered and "error" not in lowered
+def _iter_tool_calls(transcript: list[TranscriptEntry]) -> list[ToolCall]:
+    """Return every ``ToolCall`` in the transcript, in source order."""
+    return [entry for entry in transcript if isinstance(entry, ToolCall)]
 
 
-def _collect_tool_results_by_id(transcript: list[dict[str, Any]]) -> dict[str, Any]:
-    """Collect user tool_result entries indexed by tool_use_id."""
-    tool_results: dict[str, Any] = {}
-    for entry in transcript:
-        if entry.get("type") != "user":
-            continue
-        content = entry.get("message", {}).get("content", [])
-        for item in content:
-            if item.get("type") != "tool_result":
-                continue
-            tool_use_id = item.get("tool_use_id")
-            if not isinstance(tool_use_id, str) or not tool_use_id:
-                continue
-            result_content = item.get("content", "")
-            if isinstance(result_content, str) and result_content.startswith("{"):
-                with suppress(json.JSONDecodeError):
-                    result_content = json.loads(result_content)
-            tool_results[tool_use_id] = result_content
-    return tool_results
+def get_action_description(tool_call: ToolCall) -> str:
+    """Return a human-readable description for a ``ToolCall``."""
+    inp = tool_call.arguments
 
-
-def _iter_assistant_tool_uses(transcript: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Yield all assistant tool_use content items from transcript."""
-    tool_uses: list[dict[str, Any]] = []
-    for entry in transcript:
-        if entry.get("type") != "assistant":
-            continue
-        content = entry.get("message", {}).get("content", [])
-        tool_uses.extend(item for item in content if item.get("type") == "tool_use")
-    return tool_uses
-
-
-def get_action_description(tool_use: dict[str, Any]) -> str:
-    """
-    Get description for a tool use action with fallback logic.
-
-    Args:
-        tool_use: Tool use object from transcript
-
-    Returns:
-        Description string
-    """
-    inp = tool_use.get("input", {})
-
-    # 1. Explicit description
     if inp.get("description"):
         return str(inp["description"])
 
-    # 2. Tool-specific fallback from key inputs
-    name = tool_use.get("name", "")
+    name = tool_call.tool
     if "search_pubmed" in name:
         return f"Search: {inp.get('query', '')}"
     if "update_knowledge_state" in name:
         return f"Finding: {inp.get('title', '')}"
     if "save_iteration_summary" in name:
-        return f"Summary: {inp.get('summary', '')[:50]}..."
+        return f"Summary: {str(inp.get('summary', ''))[:50]}..."
     if "execute_code" in name:
         return "Code execution"
     if name == "Skill":
-        skill_name = inp.get("skill", "unknown")
-        return f"Skill: {skill_name}"
+        return f"Skill: {inp.get('skill', 'unknown')}"
 
-    # 3. Just the tool name
-    return str(name.split("__")[-1] if "__" in name else name)
+    return _short_tool_name(name)
 
 
-def parse_transcript_actions(transcript: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """
-    Parse a transcript to extract actions with their reasoning and results.
+def parse_transcript_actions(transcript: list[TranscriptEntry]) -> list[dict[str, Any]]:
+    """Extract OpenScientist tool actions paired with their results.
 
-    Args:
-        transcript: List of transcript entries from iterN_transcript.json
-
-    Returns:
-        List of action dicts with: tool_name, description, input, result, success
+    Returns one dict per ``ToolCall`` whose tool belongs to the
+    OpenScientist toolset, with the matched ``ToolResult`` (if any)
+    folded in. The shape is stable for UI consumers.
     """
     actions: list[dict[str, Any]] = []
-    tool_results = _collect_tool_results_by_id(transcript)
+    results = _collect_tool_results_by_call_id(transcript)
 
-    for item in _iter_assistant_tool_uses(transcript):
-        tool_name = item.get("name", "")
-        short_name = _short_tool_name(tool_name)
-        if not _is_openscientist_tool(tool_name, short_name):
+    for call in _iter_tool_calls(transcript):
+        short_name = _short_tool_name(call.tool)
+        if not _is_openscientist_tool(call.tool, short_name):
             continue
 
-        tool_use_id = item.get("id")
-        if not isinstance(tool_use_id, str):
-            continue
-        result = tool_results.get(tool_use_id, {})
-        result_text = _extract_tool_result_text(result)
+        result = results.get(call.id)
         actions.append(
             {
-                "tool_name": tool_name,
+                "tool_name": call.tool,
                 "short_name": short_name,
-                "description": get_action_description(item),
-                "input": item.get("input", {}),
-                "result": result_text,
-                "success": _is_success_from_result_text(result_text),
+                "description": get_action_description(call),
+                "input": call.arguments,
+                "result": result.output if result is not None else "",
+                "success": result.success if result is not None else True,
             }
         )
 
     return actions
 
 
-def extract_usage_summary(transcript: list[dict[str, Any]]) -> UsageSummary:
-    """
-    Extract a summary of tool and skill usage from a transcript.
-
-    Args:
-        transcript: List of transcript entries
-
-    Returns:
-        UsageSummary with counts and skill names
-    """
+def extract_usage_summary(transcript: list[TranscriptEntry]) -> UsageSummary:
+    """Tally tool / skill usage across the transcript."""
     summary = UsageSummary()
 
-    for item in _iter_assistant_tool_uses(transcript):
-        tool_name = item.get("name", "")
+    for call in _iter_tool_calls(transcript):
+        tool_name = call.tool
         short_name = _short_tool_name(tool_name)
         summary.tool_counts[short_name] = summary.tool_counts.get(short_name, 0) + 1
 
@@ -205,7 +140,7 @@ def extract_usage_summary(transcript: list[dict[str, Any]]) -> UsageSummary:
             summary.mcp_tool_calls += 1
 
         if tool_name == "Skill":
-            skill_name = item.get("input", {}).get("skill", "")
+            skill_name = call.arguments.get("skill", "")
             if skill_name:
                 summary.skill_invocations.append(skill_name)
 

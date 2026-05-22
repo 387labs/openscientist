@@ -5,7 +5,6 @@ the full agent loop. The run_discovery integration is too heavyweight for
 unit testing.
 """
 
-import json
 import os
 from pathlib import Path
 from typing import Any
@@ -829,16 +828,14 @@ class TestSaveTranscript:
 
     def test_writes_json_list(self, tmp_path):
         from openscientist.orchestrator.discovery import _save_transcript
+        from openscientist.transcript import AssistantText, UserPrompt, load_transcript
 
         path = tmp_path / "transcript.json"
-        transcript = [{"role": "user", "content": "hello"}, {"role": "assistant", "content": "hi"}]
+        transcript = [UserPrompt(text="hello"), AssistantText(text="hi")]
         _save_transcript(path, transcript)
 
-        with open(path, encoding="utf-8") as f:
-            data = json.load(f)
-        assert isinstance(data, list)
-        assert len(data) == 2
-        assert data[0]["role"] == "user"
+        loaded = load_transcript(path)
+        assert loaded == transcript
 
 
 # ─── _append_log ──────────────────────────────────────────────────────

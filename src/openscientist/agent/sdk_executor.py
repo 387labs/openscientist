@@ -30,6 +30,7 @@ from claude_agent_sdk.types import (
 )
 
 from openscientist.agent.protocol import IterationResult, TokenUsage
+from openscientist.transcript import CLAUDE
 
 logger = logging.getLogger(__name__)
 
@@ -298,7 +299,7 @@ class SDKAgentExecutor:
             success=False,
             output="",
             tool_calls=state.tool_call_count,
-            transcript=state.transcript,
+            transcript=CLAUDE.deserialize(state.transcript),
             error=message,
         )
 
@@ -313,7 +314,7 @@ class SDKAgentExecutor:
             success=False,
             output=state.final_output,
             tool_calls=0,
-            transcript=state.transcript,
+            transcript=CLAUDE.deserialize(state.transcript),
             error=state.final_output,
         )
 
@@ -373,7 +374,7 @@ class SDKAgentExecutor:
             success=True,
             output=state.final_output,
             tool_calls=state.tool_call_count,
-            transcript=state.transcript,
+            transcript=CLAUDE.deserialize(state.transcript),
             error="",
         )
 
