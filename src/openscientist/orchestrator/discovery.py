@@ -40,6 +40,7 @@ from openscientist.prompts import (
 )
 from openscientist.providers import get_provider
 from openscientist.settings import get_settings
+from openscientist.transcript import TranscriptEntry, save_transcript
 from openscientist.version import get_version_string
 
 logger = logging.getLogger(__name__)
@@ -253,7 +254,7 @@ async def _run_primary_discovery_loop(
     logger.info("Discovery loop completed")
 
 
-def _save_report_transcript(job_dir: Path, transcript: list[dict[str, Any]]) -> None:
+def _save_report_transcript(job_dir: Path, transcript: list[TranscriptEntry]) -> None:
     """Persist report-generation transcript artifact."""
     provenance_dir = job_dir / "provenance"
     provenance_dir.mkdir(parents=True, exist_ok=True)
@@ -650,12 +651,9 @@ async def run_discovery_async(job_dir: Path) -> dict[str, Any]:
         await executor.shutdown()
 
 
-def _save_transcript(path: Path, transcript: list[dict[str, Any]]) -> None:
+def _save_transcript(path: Path, transcript: list[TranscriptEntry]) -> None:
     """Save iteration transcript to JSON file."""
-    import json as _json
-
-    with open(path, "w", encoding="utf-8") as f:
-        _json.dump(transcript, f, indent=2)
+    save_transcript(path, transcript)
     logger.info("Saved transcript to %s", path)
 
 

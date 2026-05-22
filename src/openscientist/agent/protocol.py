@@ -9,7 +9,9 @@ or execution strategy.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
+
+from openscientist.transcript import TranscriptEntry
 
 
 @dataclass
@@ -67,7 +69,7 @@ class IterationResult:
     success: bool
     output: str
     tool_calls: int
-    transcript: list[dict[str, Any]]
+    transcript: list[TranscriptEntry]
     error: str = ""
 
 
