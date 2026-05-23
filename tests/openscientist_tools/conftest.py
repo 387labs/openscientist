@@ -17,6 +17,8 @@ from pathlib import Path  # noqa: E402
 import pytest  # noqa: E402
 from mcp.client.stdio import StdioServerParameters  # noqa: E402
 
+from openscientist.knowledge_state import KnowledgeState  # noqa: E402
+
 
 @pytest.fixture
 def server_env() -> Callable[..., dict[str, str]]:
@@ -52,3 +54,26 @@ def server_params() -> Callable[[dict[str, str]], StdioServerParameters]:
         )
 
     return _build
+
+
+@pytest.fixture
+def patched_ks_persistence(monkeypatch: pytest.MonkeyPatch) -> KnowledgeState:
+    """Replace `KnowledgeState.{load,save}_from_database_sync` with
+    in-memory no-ops and return a real `KnowledgeState` instance that
+    the tool body mutates."""
+    real_ks = KnowledgeState(
+        job_id="test-job-uuid",
+        research_question="placeholder question",
+        max_iterations=1,
+    )
+    monkeypatch.setattr(
+        KnowledgeState,
+        "load_from_database_sync",
+        classmethod(lambda cls, job_id, user_id=None: real_ks),
+    )
+    monkeypatch.setattr(
+        KnowledgeState,
+        "save_to_database_sync",
+        lambda self, job_id, user_id=None: None,
+    )
+    return real_ks
