@@ -186,6 +186,12 @@ async def test_subprocess_smoke_real_ncbi(
                 (block,) = result.content
                 assert isinstance(block, TextContent)
                 assert block.text.startswith("Found ") and "PMID:" in block.text
+
+        reloaded = KnowledgeState.load_from_database_sync(str(job_id))
+        assert len(reloaded.data["literature"]) >= 1
+        last_log = reloaded.data["analysis_log"][-1]
+        assert last_log["action"] == "search_pubmed"
+        assert last_log["query"] == "CRISPR Cas9"
     finally:
         async with AsyncSessionLocal(thread_safe=True) as session:
             await session.execute(delete(Job).where(Job.id == job_id))

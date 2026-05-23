@@ -15,4 +15,4 @@ def ping(message: str = "hello") -> str:
     return f"pong: {message} from job {STATE.job_id}"
 
 
-from openscientist_tools import document, pubmed  # noqa: F401, E402
+from openscientist_tools import document, job_meta, pubmed  # noqa: F401, E402
