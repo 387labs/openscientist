@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 import os
-import sys
-from collections.abc import Callable
-from pathlib import Path
 
-import pytest
-from mcp.client.stdio import StdioServerParameters
+# Required env vars for `openscientist_tools.state.STATE` to instantiate at
+# import time. Tests that need a specific job_id mutate `state.STATE.job_id`
+# at runtime; this just gives state.py something to bind to.
+os.environ.setdefault("OPENSCIENTIST_JOB_ID", "test-placeholder")
+os.environ.setdefault("OPENSCIENTIST_JOB_DIR", "/tmp")
+
+import sys  # noqa: E402
+from collections.abc import Callable  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+import pytest  # noqa: E402
+from mcp.client.stdio import StdioServerParameters  # noqa: E402
 
 
 @pytest.fixture
