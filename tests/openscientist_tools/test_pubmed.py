@@ -67,27 +67,6 @@ def _fake_requests_get(
     return _get
 
 
-@pytest.fixture
-def patched_ks_persistence(monkeypatch: pytest.MonkeyPatch) -> KnowledgeState:
-    """Replace KS load/save with in-memory no-ops and return the shared KS."""
-    real_ks = KnowledgeState(
-        job_id="test-job-uuid",
-        research_question="placeholder question",
-        max_iterations=1,
-    )
-    monkeypatch.setattr(
-        KnowledgeState,
-        "load_from_database_sync",
-        classmethod(lambda cls, job_id, user_id=None: real_ks),
-    )
-    monkeypatch.setattr(
-        KnowledgeState,
-        "save_to_database_sync",
-        lambda self, job_id, user_id=None: None,
-    )
-    return real_ks
-
-
 @pytest.fixture(autouse=True)
 def _state_job_id(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(STATE, "job_id", "test-job-uuid")
