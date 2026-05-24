@@ -6,6 +6,18 @@ Provides the AgentExecutor protocol and the SDKAgentExecutor implementation
 to get the executor.
 """
 
+from openscientist.agent.mcp_specs import (
+    HttpMcpServerSpec,
+    McpServerSpec,
+    StdioMcpServerSpec,
+)
 from openscientist.agent.protocol import AgentExecutor, IterationResult, TokenUsage
 
-__all__ = ["AgentExecutor", "IterationResult", "TokenUsage"]
+__all__ = [
+    "AgentExecutor",
+    "HttpMcpServerSpec",
+    "IterationResult",
+    "McpServerSpec",
+    "StdioMcpServerSpec",
+    "TokenUsage",
+]
