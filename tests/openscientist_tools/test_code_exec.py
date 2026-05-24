@@ -313,7 +313,11 @@ async def test_execute_python_via_subprocess(
     ) as mcp:
         response = await mcp.call_tool(
             "execute_code",
-            {"code": "print('hello world')", "language": "python"},
+            {
+                "code": "print('hello world')",
+                "language": "python",
+                "description": "smoke test description",
+            },
         )
         text = _text(response)
         assert "hello world" in text
@@ -322,6 +326,7 @@ async def test_execute_python_via_subprocess(
         last_log = reloaded.data["analysis_log"][-1]
         assert last_log["action"] == "execute_code"
         assert last_log["success"] is True
+        assert last_log["description"] == "smoke test description"
 
 
 @DOCKER_REQUIRED
