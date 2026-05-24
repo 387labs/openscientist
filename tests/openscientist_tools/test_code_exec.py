@@ -49,6 +49,8 @@ async def _spawned_for_job(
     tmp_path: Path,
     test_database_url: str,
     job_id: UUID,
+    *,
+    env_overrides: dict[str, str] | None = None,
 ) -> AsyncGenerator[ClientSession, None]:
     async with AsyncSessionLocal(thread_safe=True) as setup:
         setup.add(
@@ -65,6 +67,8 @@ async def _spawned_for_job(
         env = server_env(tmp_path, OPENSCIENTIST_JOB_ID=str(job_id))
         env["DATABASE_URL"] = test_database_url
         env["OPENSCIENTIST_SECRET_KEY"] = os.environ["OPENSCIENTIST_SECRET_KEY"]
+        if env_overrides:
+            env.update(env_overrides)
         params = server_params(env)
         params.cwd = str(tmp_path)
         async with stdio_client(params) as (read, write):
@@ -385,6 +389,49 @@ async def test_execute_python_with_plot_via_subprocess(
         last_log = reloaded.data["analysis_log"][-1]
         assert last_log["success"] is True
         assert len(last_log["plots"]) >= 1
+
+
+@DOCKER_REQUIRED
+async def test_execute_python_with_data_file_via_subprocess(
+    tmp_path: Path,
+    server_env: Callable[..., dict[str, str]],
+    server_params: Callable[[dict[str, str]], StdioServerParameters],
+    test_database_url: str,
+    _apply_migrations_once: None,
+) -> None:
+    """Mount a CSV into the executor and read it from Python end-to-end."""
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    csv_path = data_dir / "sample.csv"
+    csv_path.write_text("value\nsentinel-42\nother\n")
+
+    job_id = uuid4()
+    code = (
+        "import pandas as pd\n"
+        "df = pd.read_csv(data_files[0]['path'])\n"
+        "print('rows:', len(df))\n"
+        "print('first:', df.iloc[0]['value'])\n"
+    )
+
+    async with _spawned_for_job(
+        server_env,
+        server_params,
+        tmp_path,
+        test_database_url,
+        job_id,
+        env_overrides={"OPENSCIENTIST_DATA_FILES": str(csv_path)},
+    ) as mcp:
+        response = await mcp.call_tool(
+            "execute_code",
+            {"code": code, "language": "python"},
+        )
+        text = _text(response)
+        assert "rows: 2" in text
+        assert "first: sentinel-42" in text
+
+        reloaded = KnowledgeState.load_from_database_sync(str(job_id))
+        last_log = reloaded.data["analysis_log"][-1]
+        assert last_log["success"] is True
 
 
 @DOCKER_REQUIRED
