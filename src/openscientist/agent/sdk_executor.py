@@ -12,23 +12,26 @@ Bedrock, Foundry).
 from __future__ import annotations
 
 import logging
+import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from claude_agent_sdk import (
     ClaudeAgentOptions,
     ClaudeSDKClient,
     ResultMessage,
-    create_sdk_mcp_server,
 )
 from claude_agent_sdk.types import (
+    McpStdioServerConfig,
     PermissionResultAllow,
     TextBlock,
     ToolPermissionContext,
     ToolUseBlock,
 )
 
+from openscientist.agent.mcp_specs import StdioMcpServerSpec
 from openscientist.agent.protocol import IterationResult, TokenUsage
 from openscientist.transcript import CLAUDE
 
@@ -120,15 +123,12 @@ class SDKAgentExecutor:
         data_files: list[Path] | None = None,
         model_override: str | None = None,
     ) -> None:
-        from openscientist.tools.registry import build_tool_list
-
         self._job_dir = job_dir
         self._data_file = data_file
+        self._data_files: tuple[Path, ...] = tuple(data_files or ())
+        self._use_hypotheses = use_hypotheses
         self._system_prompt = system_prompt
         self._model_override = model_override
-        self._tools = build_tool_list(
-            job_dir.name, job_dir, data_file, use_hypotheses=use_hypotheses, data_files=data_files
-        )
         self._token_usage = TokenUsage()
         self._client: ClaudeSDKClient | None = None
         self._stderr_lines: list[str] = []
@@ -149,24 +149,52 @@ class SDKAgentExecutor:
             self._stderr_lines.append(line)
             logger.debug("claude-cli stderr: %s", line)
 
+    def _build_subprocess_env(self) -> dict[str, str]:
+        """Merge `os.environ` with per-job overlays for the standalone MCP.
+
+        `subprocess.Popen` replaces env entirely when given a dict, so the
+        spec must carry the full map (PATH, DATABASE_URL, etc. inherited
+        from the agent container plus the per-job overlays).
+        """
+        env = dict(os.environ)
+        env["OPENSCIENTIST_JOB_ID"] = self._job_dir.name
+        env["OPENSCIENTIST_JOB_DIR"] = str(self._job_dir)
+        env["OPENSCIENTIST_USE_HYPOTHESES"] = "1" if self._use_hypotheses else "0"
+        if self._data_file is not None:
+            env["OPENSCIENTIST_DATA_FILE"] = str(self._data_file)
+        else:
+            env.pop("OPENSCIENTIST_DATA_FILE", None)
+        if self._data_files:
+            env["OPENSCIENTIST_DATA_FILES"] = os.pathsep.join(str(p) for p in self._data_files)
+        else:
+            env.pop("OPENSCIENTIST_DATA_FILES", None)
+        return env
+
     def _build_options(self) -> ClaudeAgentOptions:
-        """Build ClaudeAgentOptions with tools exposed via an in-process MCP server."""
+        """Build ClaudeAgentOptions with tools exposed via the standalone
+        `openscientist_tools` subprocess MCP server."""
         from openscientist.settings import get_settings
 
         settings = get_settings()
-        server = create_sdk_mcp_server("openscientist-tools", tools=self._tools)
 
-        # Pass OAuth beta header to the CLI when using OAuth token
-        extra_args: dict[str, str | None] = {}
+        spec = StdioMcpServerSpec(
+            name="openscientist-tools",
+            command=sys.executable,
+            args=("-m", "openscientist_tools"),
+            env=self._build_subprocess_env(),
+            cwd=str(self._job_dir),
+        )
 
         return ClaudeAgentOptions(
             system_prompt=self._system_prompt,
-            mcp_servers={"openscientist-tools": server},
+            mcp_servers={
+                "openscientist-tools": cast(McpStdioServerConfig, spec.to_sdk_config()),
+            },
             model=self._model_override or settings.provider.model,
             can_use_tool=self._allow_all_tools,
             cwd=str(self._job_dir),
             stderr=self._stderr_callback,
-            extra_args=extra_args,
+            extra_args={},
         )
 
     async def _ensure_client(self) -> ClaudeSDKClient:

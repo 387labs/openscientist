@@ -295,9 +295,9 @@ class TestBuildToolListHypotheses:
 
 
 class TestSDKAgentExecutorHypotheses:
-    """SDKAgentExecutor must build tool list with correct use_hypotheses."""
+    """SDKAgentExecutor must propagate use_hypotheses to the subprocess env."""
 
-    def test_use_hypotheses_false_tools_lack_hypothesis_tools(self, tmp_path: Path) -> None:
+    def test_use_hypotheses_false_env_is_zero(self, tmp_path: Path) -> None:
         from openscientist.agent.sdk_executor import SDKAgentExecutor
 
         exe = SDKAgentExecutor(
@@ -306,11 +306,9 @@ class TestSDKAgentExecutorHypotheses:
             system_prompt=None,
             use_hypotheses=False,
         )
-        names = {t.name for t in exe._tools}
-        assert "add_hypothesis" not in names
-        assert "update_hypothesis" not in names
+        assert exe._build_subprocess_env()["OPENSCIENTIST_USE_HYPOTHESES"] == "0"
 
-    def test_use_hypotheses_true_tools_include_hypothesis_tools(self, tmp_path: Path) -> None:
+    def test_use_hypotheses_true_env_is_one(self, tmp_path: Path) -> None:
         from openscientist.agent.sdk_executor import SDKAgentExecutor
 
         exe = SDKAgentExecutor(
@@ -319,12 +317,10 @@ class TestSDKAgentExecutorHypotheses:
             system_prompt=None,
             use_hypotheses=True,
         )
-        names = {t.name for t in exe._tools}
-        assert "add_hypothesis" in names
-        assert "update_hypothesis" in names
+        assert exe._build_subprocess_env()["OPENSCIENTIST_USE_HYPOTHESES"] == "1"
 
-    def test_default_use_hypotheses_is_false(self, tmp_path: Path) -> None:
-        """SDKAgentExecutor default should not expose hypothesis tools."""
+    def test_default_use_hypotheses_env_is_zero(self, tmp_path: Path) -> None:
+        """SDKAgentExecutor default should disable hypothesis tools."""
         from openscientist.agent.sdk_executor import SDKAgentExecutor
 
         exe = SDKAgentExecutor(
@@ -332,8 +328,7 @@ class TestSDKAgentExecutorHypotheses:
             data_file=None,
             system_prompt=None,
         )
-        names = {t.name for t in exe._tools}
-        assert "add_hypothesis" not in names
+        assert exe._build_subprocess_env()["OPENSCIENTIST_USE_HYPOTHESES"] == "0"
 
 
 # ---------------------------------------------------------------------------
@@ -353,8 +348,8 @@ class TestGetAgentExecutorHypotheses:
             system_prompt=None,
             use_hypotheses=False,
         )
-        names = {t.name for t in executor.__dict__["_tools"]}
-        assert "add_hypothesis" not in names
+        env = executor._build_subprocess_env()  # type: ignore[attr-defined]
+        assert env["OPENSCIENTIST_USE_HYPOTHESES"] == "0"
 
     def test_use_hypotheses_true_propagates(self, tmp_path: Path) -> None:
         from openscientist.agent.factory import get_agent_executor
@@ -365,9 +360,8 @@ class TestGetAgentExecutorHypotheses:
             system_prompt=None,
             use_hypotheses=True,
         )
-        names = {t.name for t in executor.__dict__["_tools"]}
-        assert "add_hypothesis" in names
-        assert "update_hypothesis" in names
+        env = executor._build_subprocess_env()  # type: ignore[attr-defined]
+        assert env["OPENSCIENTIST_USE_HYPOTHESES"] == "1"
 
     def test_default_does_not_include_hypothesis_tools(self, tmp_path: Path) -> None:
         from openscientist.agent.factory import get_agent_executor
@@ -377,8 +371,8 @@ class TestGetAgentExecutorHypotheses:
             data_file=None,
             system_prompt=None,
         )
-        names = {t.name for t in executor.__dict__["_tools"]}
-        assert "add_hypothesis" not in names
+        env = executor._build_subprocess_env()  # type: ignore[attr-defined]
+        assert env["OPENSCIENTIST_USE_HYPOTHESES"] == "0"
 
 
 # ---------------------------------------------------------------------------

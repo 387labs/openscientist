@@ -38,15 +38,16 @@ The migrator only knows the Claude raw shape. If a future deployment ran a non-C
 
 ## Process model
 
-### `[ ]` Phase 3 (PR 9 to PR 14) — MCP tools become a subprocess
+### `[x]` Phase 3 (PR 9 to PR 14) — MCP tools become a subprocess
 
-After this phase, the agent talks to a standalone MCP server over stdio instead of the in-process `@tool`-decorated callables. Deployment impact is not finalised but is expected to include:
+The agent's tools now run in a standalone MCP server spawned as a child of the agent process. Concrete behaviour:
 
-- An extra long-running process per agent container, or a sibling subprocess managed by the agent process.
-- Logs from the MCP server need to be captured and surfaced alongside the agent logs.
-- Health check or readiness probe additions if the MCP server starts late.
-
-Fill in the concrete deploy steps when PR 9 lands and the process model is decided.
+- The agent process invokes `python -m openscientist_tools` via `claude-agent-sdk`'s stdio client. There is no long-running sidecar and no compose service to add.
+- Subprocess env is built inside `SDKAgentExecutor._build_subprocess_env()`. It inherits the agent container env (`PATH`, `DATABASE_URL`, `OPENSCIENTIST_SECRET_KEY`, `PHENIX_PATH`, `OPENSCIENTIST_EXECUTOR_*`) and adds per-job overlays (`OPENSCIENTIST_JOB_ID`, `OPENSCIENTIST_JOB_DIR`, `OPENSCIENTIST_USE_HYPOTHESES`, optionally `OPENSCIENTIST_DATA_FILE` and `OPENSCIENTIST_DATA_FILES`).
+- No new operator-set env vars or compose changes. The agent image already ships `openscientist_tools` because it is part of the same Python package distribution.
+- Logs from the MCP subprocess surface through the SDK's `stderr` callback into `SDKAgentExecutor._stderr_lines` and are returned in `IterationResult.error` on iteration failure.
+- The MCP subprocess inherits the agent container's docker socket access (the `group_add=[docker_gid]` set by `JobContainerRunner`), so its `execute_code` tool can spawn `openscientist-executor` containers exactly as the in-process path did.
+- Rollback path is `git revert` of the cutover PR. The standalone server and the in-process tool modules coexist in the codebase through the cleanup PR that follows, so reverts do not require restoring deleted code.
 
 ## Backend selection
 
