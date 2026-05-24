@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import Annotated
 
 from pydantic import field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class ToolServerState(BaseSettings):
@@ -26,7 +27,10 @@ class ToolServerState(BaseSettings):
     job_id: str
     job_dir: Path
     data_file: Path | None = None
-    data_files: tuple[Path, ...] = ()
+    # NoDecode suppresses pydantic-settings' default JSON-decode for complex
+    # types so the env value reaches `_split_pathsep` as a raw string and gets
+    # split on `os.pathsep`.
+    data_files: Annotated[tuple[Path, ...], NoDecode] = ()
     use_hypotheses: bool = False
 
     @field_validator("data_files", mode="before")
