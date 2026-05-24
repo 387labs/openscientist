@@ -435,6 +435,48 @@ async def test_execute_python_with_data_file_via_subprocess(
 
 
 @DOCKER_REQUIRED
+async def test_execute_python_with_multiple_data_files_via_subprocess(
+    tmp_path: Path,
+    server_env: Callable[..., dict[str, str]],
+    server_params: Callable[[dict[str, str]], StdioServerParameters],
+    test_database_url: str,
+    _apply_migrations_once: None,
+) -> None:
+    """Mount two CSVs via os.pathsep-joined env and read both inside the container."""
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "a.csv").write_text("value\nalpha\n")
+    (data_dir / "b.csv").write_text("value\nbravo\n")
+
+    job_id = uuid4()
+    joined = os.pathsep.join([str(data_dir / "a.csv"), str(data_dir / "b.csv")])
+    code = (
+        "import pandas as pd\n"
+        "print('count:', len(data_files))\n"
+        "for entry in data_files:\n"
+        "    df = pd.read_csv(entry['path'])\n"
+        "    print('cell:', df.iloc[0]['value'])\n"
+    )
+
+    async with _spawned_for_job(
+        server_env,
+        server_params,
+        tmp_path,
+        test_database_url,
+        job_id,
+        env_overrides={"OPENSCIENTIST_DATA_FILES": joined},
+    ) as mcp:
+        response = await mcp.call_tool(
+            "execute_code",
+            {"code": code, "language": "python"},
+        )
+        text = _text(response)
+        assert "count: 2" in text
+        assert "cell: alpha" in text
+        assert "cell: bravo" in text
+
+
+@DOCKER_REQUIRED
 async def test_execute_python_failure_via_subprocess(
     tmp_path: Path,
     server_env: Callable[..., dict[str, str]],
