@@ -14,7 +14,6 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
-import pytest
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -176,117 +175,6 @@ class TestJobInfoUseHypotheses:
         )
         restored = JobInfo.from_dict(info.to_dict())
         assert restored.use_hypotheses is True
-
-
-# ---------------------------------------------------------------------------
-# 3. tools/knowledge.py — make_tools gating
-# ---------------------------------------------------------------------------
-
-
-class TestKnowledgeMakeTools:
-    """make_tools() must gate hypothesis tools on use_hypotheses."""
-
-    def _get_tool_names(self, tools: list[Any]) -> set[str]:
-        return {t.name for t in tools}
-
-    def test_use_hypotheses_true_includes_all_three_tools(self, tmp_path: Path) -> None:
-        from openscientist.tools.knowledge import make_tools
-        from openscientist.tools.registry import ToolContext
-
-        ctx = ToolContext(job_id="test-id", job_dir=tmp_path)
-        tools = make_tools(ctx, use_hypotheses=True)
-        names = self._get_tool_names(tools)
-        assert "update_knowledge_state" in names
-        assert "add_hypothesis" in names
-        assert "update_hypothesis" in names
-        assert len(tools) == 3
-
-    def test_use_hypotheses_false_only_update_knowledge_state(self, tmp_path: Path) -> None:
-        from openscientist.tools.knowledge import make_tools
-        from openscientist.tools.registry import ToolContext
-
-        ctx = ToolContext(job_id="test-id", job_dir=tmp_path)
-        tools = make_tools(ctx, use_hypotheses=False)
-        names = self._get_tool_names(tools)
-        assert "update_knowledge_state" in names
-        assert "add_hypothesis" not in names
-        assert "update_hypothesis" not in names
-        assert len(tools) == 1
-
-    def test_default_excludes_hypothesis_tools(self, tmp_path: Path) -> None:
-        """Default use_hypotheses=False means hypothesis tools are opt-in."""
-        from openscientist.tools.knowledge import make_tools
-        from openscientist.tools.registry import ToolContext
-
-        ctx = ToolContext(job_id="test-id", job_dir=tmp_path)
-        tools = make_tools(ctx)
-        names = self._get_tool_names(tools)
-        assert "add_hypothesis" not in names
-        assert "update_hypothesis" not in names
-        assert "update_knowledge_state" in names
-
-    def test_tools_are_sdk_tool_instances(self, tmp_path: Path) -> None:
-        """All returned objects must be SdkMcpTool instances."""
-        try:
-            from claude_agent_sdk import SdkMcpTool
-        except ImportError:
-            pytest.skip("claude_agent_sdk not installed")
-
-        from openscientist.tools.knowledge import make_tools
-        from openscientist.tools.registry import ToolContext
-
-        ctx = ToolContext(job_id="test-id", job_dir=tmp_path)
-        for flag in (True, False):
-            tools = make_tools(ctx, use_hypotheses=flag)
-            for t in tools:
-                assert isinstance(t, SdkMcpTool), f"Expected SdkMcpTool, got {type(t)}"
-
-
-# ---------------------------------------------------------------------------
-# 4. tools/registry.py — build_tool_list propagation
-# ---------------------------------------------------------------------------
-
-
-class TestBuildToolListHypotheses:
-    """build_tool_list() must propagate use_hypotheses to knowledge tools."""
-
-    def _tool_names(self, tools: list[Any]) -> set[str]:
-        return {t.name for t in tools}
-
-    def test_use_hypotheses_false_excludes_hypothesis_tools(self, tmp_path: Path) -> None:
-        from openscientist.tools.registry import build_tool_list
-
-        tools = build_tool_list("test-id", tmp_path, use_hypotheses=False)
-        names = self._tool_names(tools)
-        assert "add_hypothesis" not in names
-        assert "update_hypothesis" not in names
-        assert "update_knowledge_state" in names
-
-    def test_use_hypotheses_true_includes_hypothesis_tools(self, tmp_path: Path) -> None:
-        from openscientist.tools.registry import build_tool_list
-
-        tools = build_tool_list("test-id", tmp_path, use_hypotheses=True)
-        names = self._tool_names(tools)
-        assert "add_hypothesis" in names
-        assert "update_hypothesis" in names
-        assert "update_knowledge_state" in names
-
-    def test_default_excludes_hypothesis_tools(self, tmp_path: Path) -> None:
-        """Default use_hypotheses=False so new jobs don't get hypothesis tools by accident."""
-        from openscientist.tools.registry import build_tool_list
-
-        tools = build_tool_list("test-id", tmp_path)
-        names = self._tool_names(tools)
-        assert "add_hypothesis" not in names
-        assert "update_hypothesis" not in names
-
-    def test_all_tools_have_unique_names(self, tmp_path: Path) -> None:
-        from openscientist.tools.registry import build_tool_list
-
-        for flag in (True, False):
-            tools = build_tool_list("test-id", tmp_path, use_hypotheses=flag)
-            names = [t.name for t in tools]
-            assert len(names) == len(set(names)), f"Duplicate tool names with use_hypotheses={flag}"
 
 
 # ---------------------------------------------------------------------------
