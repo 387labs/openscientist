@@ -133,22 +133,6 @@ def test_build_options_passes_cwd_and_model(
     assert options.model == "custom-model"
 
 
-def test_init_does_not_call_build_tool_list(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """The cutover removed the eager `build_tool_list` call from __init__.
-
-    Tools now live in the standalone subprocess; constructing the executor
-    must not trigger the in-process tool registry.
-    """
-
-    def _boom(*_a: object, **_kw: object) -> None:
-        raise AssertionError("build_tool_list must not be called from __init__")
-
-    monkeypatch.setattr("openscientist.tools.registry.build_tool_list", _boom)
-    _make_executor(tmp_path)  # would raise if build_tool_list ran
-
-
 async def test_built_spec_spawns_subprocess_that_lists_all_tools(
     tmp_path: Path,
     test_database_url: str,

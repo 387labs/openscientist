@@ -104,9 +104,9 @@ class SDKAgentExecutor:
     """
     AgentExecutor that wraps the claude-agent-sdk ClaudeSDKClient.
 
-    Uses @tool-decorated Python callables (from openscientist.tools) exposed
-    via an in-process MCP server.  The SDK handles the agentic loop
-    internally.
+    Tools come from the standalone ``openscientist_tools`` package, spawned
+    as a stdio subprocess MCP server that the SDK manages. The SDK handles
+    the agentic loop internally.
 
     The client is connected lazily on first ``run_iteration`` call and
     kept alive for conversation continuity across iterations.  Pass
