@@ -98,6 +98,105 @@ class TestAnthropicSetupEnvironment:
             assert os.environ["CLAUDE_CODE_OAUTH_TOKEN"] == "my-oauth-token"
 
 
+def _mock_settings(
+    *,
+    api_key: str | None = "sk-ant-test-key",
+    oauth: str | None = None,
+    model: str | None = "claude-sonnet-4-6",
+) -> MagicMock:
+    mock_settings = MagicMock()
+    mock_settings.provider.anthropic_api_key = api_key
+    mock_settings.provider.claude_code_oauth_token = oauth
+    mock_settings.provider.model = model
+    return mock_settings
+
+
+class TestAnthropicClaudeCompatible:
+    """Tests for the ClaudeCompatible family methods added in the migration."""
+
+    def test_id_is_anthropic(self) -> None:
+        with patch("openscientist.providers.anthropic.get_settings", return_value=_mock_settings()):
+            assert AnthropicProvider().id == "anthropic"
+
+    def test_display_name_is_anthropic(self) -> None:
+        with patch("openscientist.providers.anthropic.get_settings", return_value=_mock_settings()):
+            assert AnthropicProvider().display_name == "Anthropic"
+
+    def test_is_claude_compatible_and_provider(self) -> None:
+        from openscientist.providers.base_v2 import (
+            ClaudeCompatible,
+            CodexCompatible,
+            Provider,
+        )
+
+        with patch("openscientist.providers.anthropic.get_settings", return_value=_mock_settings()):
+            provider = AnthropicProvider()
+        assert isinstance(provider, Provider)
+        assert isinstance(provider, ClaudeCompatible)
+        assert not isinstance(provider, CodexCompatible)
+
+    def test_validate_required_config_ok_with_api_key(self) -> None:
+        with patch("openscientist.providers.anthropic.get_settings", return_value=_mock_settings()):
+            assert AnthropicProvider().validate_required_config() == []
+
+    def test_validate_required_config_error_when_unset(self) -> None:
+        # Construct with a valid config (BaseProvider.__init__ would raise otherwise).
+        with patch("openscientist.providers.anthropic.get_settings", return_value=_mock_settings()):
+            provider = AnthropicProvider()
+        # Re-evaluate with both auth fields unset.
+        with patch(
+            "openscientist.providers.anthropic.get_settings",
+            return_value=_mock_settings(api_key=None, oauth=None),
+        ):
+            errors = provider.validate_required_config()
+        assert len(errors) == 1
+        assert "ANTHROPIC_API_KEY" in errors[0]
+
+    def test_private_validate_delegates_to_public(self) -> None:
+        with patch("openscientist.providers.anthropic.get_settings", return_value=_mock_settings()):
+            provider = AnthropicProvider()
+            assert provider._validate_required_config() == provider.validate_required_config()
+
+    def test_claude_sdk_env_api_key_mode(self) -> None:
+        settings = _mock_settings(api_key="sk-ant-xyz", oauth=None)
+        with patch("openscientist.providers.anthropic.get_settings", return_value=settings):
+            provider = AnthropicProvider()
+            assert provider.claude_sdk_env() == {"ANTHROPIC_API_KEY": "sk-ant-xyz"}
+
+    def test_claude_sdk_env_oauth_mode(self) -> None:
+        settings = _mock_settings(api_key=None, oauth="oauth-abc")
+        with patch("openscientist.providers.anthropic.get_settings", return_value=settings):
+            provider = AnthropicProvider()
+            assert provider.claude_sdk_env() == {"CLAUDE_CODE_OAUTH_TOKEN": "oauth-abc"}
+
+    def test_claude_sdk_env_api_key_wins_when_both_set(self) -> None:
+        """API key takes precedence over an OAuth token when both are present."""
+        settings = _mock_settings(api_key="sk-ant-both", oauth="oauth-both")
+        with patch("openscientist.providers.anthropic.get_settings", return_value=settings):
+            provider = AnthropicProvider()
+            assert provider.claude_sdk_env() == {"ANTHROPIC_API_KEY": "sk-ant-both"}
+
+    def test_claude_sdk_env_empty_when_neither_set(self) -> None:
+        # Construct with a valid config, then re-point settings to unset both.
+        with patch("openscientist.providers.anthropic.get_settings", return_value=_mock_settings()):
+            provider = AnthropicProvider()
+        with patch(
+            "openscientist.providers.anthropic.get_settings",
+            return_value=_mock_settings(api_key=None, oauth=None),
+        ):
+            assert provider.claude_sdk_env() == {}
+
+    def test_claude_model_name_uses_configured_model(self) -> None:
+        settings = _mock_settings(model="claude-custom-model")
+        with patch("openscientist.providers.anthropic.get_settings", return_value=settings):
+            assert AnthropicProvider().claude_model_name() == "claude-custom-model"
+
+    def test_claude_model_name_falls_back_to_default(self) -> None:
+        settings = _mock_settings(model=None)
+        with patch("openscientist.providers.anthropic.get_settings", return_value=settings):
+            assert AnthropicProvider().claude_model_name() == "claude-sonnet-4-20250514"
+
+
 class TestAnthropicGetCostInfo:
     """Tests for get_cost_info()."""
 
