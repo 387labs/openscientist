@@ -1,7 +1,8 @@
 """Tests for Vertex AI provider."""
 
 import os
-from unittest.mock import patch
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -160,3 +161,116 @@ class TestVertexSetupEnvironment:
             provider.setup_environment()
             assert "CLAUDE_CODE_USE_BEDROCK" not in os.environ
             assert "ANTHROPIC_API_KEY" not in os.environ
+
+
+def _mock_settings(
+    creds: str,
+    *,
+    project: str | None = "proj-123",
+    billing: str | None = "BILL-1234",
+    region: str | None = "us-east5",
+    sonnet: str | None = "us-east5",
+    haiku: str | None = "us-east5",
+    model: str | None = "claude-sonnet-4-6",
+) -> MagicMock:
+    mock_settings = MagicMock()
+    mock_settings.provider.anthropic_vertex_project_id = project
+    mock_settings.provider.google_application_credentials = creds
+    mock_settings.provider.gcp_billing_account_id = billing
+    mock_settings.provider.cloud_ml_region = region
+    mock_settings.provider.vertex_region_claude_4_5_sonnet = sonnet
+    mock_settings.provider.vertex_region_claude_4_5_haiku = haiku
+    mock_settings.provider.model = model
+    return mock_settings
+
+
+class TestVertexClaudeCompatible:
+    """Tests for the ClaudeCompatible family methods."""
+
+    def _creds_file(self, tmp_path: Path) -> str:
+        creds = tmp_path / "sa.json"
+        creds.write_text("{}")
+        return str(creds)
+
+    def test_id_is_vertex(self, tmp_path: Path) -> None:
+        settings = _mock_settings(self._creds_file(tmp_path))
+        with patch("openscientist.providers.vertex.get_settings", return_value=settings):
+            assert VertexProvider().id == "vertex"
+
+    def test_display_name_is_vertex_ai(self, tmp_path: Path) -> None:
+        settings = _mock_settings(self._creds_file(tmp_path))
+        with patch("openscientist.providers.vertex.get_settings", return_value=settings):
+            assert VertexProvider().display_name == "Vertex AI"
+
+    def test_is_claude_compatible_and_provider(self, tmp_path: Path) -> None:
+        from openscientist.providers.base_v2 import (
+            ClaudeCompatible,
+            CodexCompatible,
+            Provider,
+        )
+
+        settings = _mock_settings(self._creds_file(tmp_path))
+        with patch("openscientist.providers.vertex.get_settings", return_value=settings):
+            provider = VertexProvider()
+        assert isinstance(provider, Provider)
+        assert isinstance(provider, ClaudeCompatible)
+        assert not isinstance(provider, CodexCompatible)
+
+    def test_validate_required_config_ok(self, tmp_path: Path) -> None:
+        settings = _mock_settings(self._creds_file(tmp_path))
+        with patch("openscientist.providers.vertex.get_settings", return_value=settings):
+            assert VertexProvider().validate_required_config() == []
+
+    def test_validate_required_config_errors_when_unset(self, tmp_path: Path) -> None:
+        settings = _mock_settings(self._creds_file(tmp_path))
+        with patch("openscientist.providers.vertex.get_settings", return_value=settings):
+            provider = VertexProvider()
+        unset = _mock_settings("", project=None, billing=None, region=None)
+        unset.provider.google_application_credentials = None
+        with patch("openscientist.providers.vertex.get_settings", return_value=unset):
+            errors = provider.validate_required_config()
+        assert any("ANTHROPIC_VERTEX_PROJECT_ID" in e for e in errors)
+        assert any("GOOGLE_APPLICATION_CREDENTIALS" in e for e in errors)
+        assert any("GCP_BILLING_ACCOUNT_ID" in e for e in errors)
+        assert any("CLOUD_ML_REGION" in e for e in errors)
+
+    def test_private_validate_delegates_to_public(self, tmp_path: Path) -> None:
+        settings = _mock_settings(self._creds_file(tmp_path))
+        with patch("openscientist.providers.vertex.get_settings", return_value=settings):
+            provider = VertexProvider()
+            assert provider._validate_required_config() == provider.validate_required_config()
+
+    def test_claude_sdk_env_full_config(self, tmp_path: Path) -> None:
+        creds = self._creds_file(tmp_path)
+        settings = _mock_settings(creds)
+        with patch("openscientist.providers.vertex.get_settings", return_value=settings):
+            env = VertexProvider().claude_sdk_env()
+        assert env == {
+            "CLAUDE_CODE_USE_VERTEX": "1",
+            "ANTHROPIC_VERTEX_PROJECT_ID": "proj-123",
+            "GCP_BILLING_ACCOUNT_ID": "BILL-1234",
+            "CLOUD_ML_REGION": "us-east5",
+            "VERTEX_REGION_CLAUDE_4_5_SONNET": "us-east5",
+            "VERTEX_REGION_CLAUDE_4_5_HAIKU": "us-east5",
+            "GOOGLE_APPLICATION_CREDENTIALS": creds,
+        }
+
+    def test_claude_sdk_env_omits_unset_optional_regions(self, tmp_path: Path) -> None:
+        creds = self._creds_file(tmp_path)
+        settings = _mock_settings(creds, sonnet=None, haiku=None)
+        with patch("openscientist.providers.vertex.get_settings", return_value=settings):
+            env = VertexProvider().claude_sdk_env()
+        assert env["CLAUDE_CODE_USE_VERTEX"] == "1"
+        assert "VERTEX_REGION_CLAUDE_4_5_SONNET" not in env
+        assert "VERTEX_REGION_CLAUDE_4_5_HAIKU" not in env
+        assert env["ANTHROPIC_VERTEX_PROJECT_ID"] == "proj-123"
+
+    def test_claude_model_name_uses_configured_model(self, tmp_path: Path) -> None:
+        settings = _mock_settings(self._creds_file(tmp_path), model="claude-custom")
+        with patch("openscientist.providers.vertex.get_settings", return_value=settings):
+            assert VertexProvider().claude_model_name() == "claude-custom"
+
+    def test_claude_model_name_falls_back_to_vertex_default(self, tmp_path: Path) -> None:
+        settings = _mock_settings(self._creds_file(tmp_path), model=None)
+        with patch("openscientist.providers.vertex.get_settings", return_value=settings):
+            assert VertexProvider().claude_model_name() == "claude-sonnet-4-5@20250929"
