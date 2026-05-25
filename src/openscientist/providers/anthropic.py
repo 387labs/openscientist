@@ -16,11 +16,12 @@ from ._anthropic_common import (
 )
 from ._env_cleanup import VERTEX_PROVIDER_ENV_VARS, clear_env_vars, clear_provider_mode_flags
 from .base import BaseProvider, CostInfo
+from .base_v2 import ClaudeCompatible
 
 logger = logging.getLogger(__name__)
 
 
-class AnthropicProvider(BaseProvider):
+class AnthropicProvider(BaseProvider, ClaudeCompatible):
     """
     Direct Anthropic API provider.
 
@@ -32,7 +33,15 @@ class AnthropicProvider(BaseProvider):
     def name(self) -> str:
         return "Anthropic"
 
-    def _validate_required_config(self) -> list[str]:
+    @property
+    def id(self) -> str:
+        return "anthropic"
+
+    @property
+    def display_name(self) -> str:
+        return "Anthropic"
+
+    def validate_required_config(self) -> list[str]:
         """Check required Anthropic configuration."""
         errors = []
         settings = get_settings()
@@ -48,6 +57,23 @@ class AnthropicProvider(BaseProvider):
             )
 
         return errors
+
+    def _validate_required_config(self) -> list[str]:
+        """Legacy `BaseProvider` hook; delegates to the public method."""
+        return self.validate_required_config()
+
+    def claude_sdk_env(self) -> dict[str, str]:
+        """Auth env vars the claude-agent-sdk CLI must see."""
+        settings = get_settings()
+        if settings.provider.claude_code_oauth_token and not settings.provider.anthropic_api_key:
+            return {"CLAUDE_CODE_OAUTH_TOKEN": settings.provider.claude_code_oauth_token}
+        if settings.provider.anthropic_api_key:
+            return {"ANTHROPIC_API_KEY": settings.provider.anthropic_api_key}
+        return {}
+
+    def claude_model_name(self) -> str:
+        """Model name for ClaudeAgentOptions.model."""
+        return get_settings().provider.model or "claude-sonnet-4-20250514"
 
     def _validate_optional_config(self) -> list[str]:
         """Check optional configuration."""
