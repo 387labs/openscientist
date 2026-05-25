@@ -171,3 +171,92 @@ class TestCborgGetCostInfo:
 
             assert cost.budget_limit_usd is None
             assert cost.budget_remaining_usd is None
+
+
+def _mock_settings(
+    *,
+    token: str | None = "test-token",
+    base_url: str | None = "https://api.cborg.lbl.gov",
+    model: str | None = "claude-sonnet-4-6",
+) -> MagicMock:
+    mock_settings = MagicMock()
+    mock_settings.provider.anthropic_auth_token = token
+    mock_settings.provider.anthropic_base_url = base_url
+    mock_settings.provider.model = model
+    return mock_settings
+
+
+class TestCborgClaudeCompatible:
+    """Tests for the ClaudeCompatible family methods."""
+
+    def test_id_is_cborg(self) -> None:
+        with patch("openscientist.providers.cborg.get_settings", return_value=_mock_settings()):
+            assert CborgProvider().id == "cborg"
+
+    def test_display_name_is_cborg(self) -> None:
+        with patch("openscientist.providers.cborg.get_settings", return_value=_mock_settings()):
+            assert CborgProvider().display_name == "CBORG"
+
+    def test_is_claude_compatible_and_provider(self) -> None:
+        from openscientist.providers.base_v2 import (
+            ClaudeCompatible,
+            CodexCompatible,
+            Provider,
+        )
+
+        with patch("openscientist.providers.cborg.get_settings", return_value=_mock_settings()):
+            provider = CborgProvider()
+        assert isinstance(provider, Provider)
+        assert isinstance(provider, ClaudeCompatible)
+        assert not isinstance(provider, CodexCompatible)
+
+    def test_validate_required_config_ok(self) -> None:
+        with patch("openscientist.providers.cborg.get_settings", return_value=_mock_settings()):
+            assert CborgProvider().validate_required_config() == []
+
+    def test_validate_required_config_errors_when_both_missing(self) -> None:
+        with patch("openscientist.providers.cborg.get_settings", return_value=_mock_settings()):
+            provider = CborgProvider()
+        with patch(
+            "openscientist.providers.cborg.get_settings",
+            return_value=_mock_settings(token=None, base_url=None),
+        ):
+            errors = provider.validate_required_config()
+        assert len(errors) == 2
+        assert any("ANTHROPIC_AUTH_TOKEN" in e for e in errors)
+        assert any("ANTHROPIC_BASE_URL" in e for e in errors)
+
+    def test_private_validate_delegates_to_public(self) -> None:
+        with patch("openscientist.providers.cborg.get_settings", return_value=_mock_settings()):
+            provider = CborgProvider()
+            assert provider._validate_required_config() == provider.validate_required_config()
+
+    def test_claude_sdk_env_returns_token_and_base_url(self) -> None:
+        settings = _mock_settings(token="tok-123", base_url="https://api.cborg.lbl.gov")
+        with patch("openscientist.providers.cborg.get_settings", return_value=settings):
+            provider = CborgProvider()
+            assert provider.claude_sdk_env() == {
+                "ANTHROPIC_AUTH_TOKEN": "tok-123",
+                "ANTHROPIC_BASE_URL": "https://api.cborg.lbl.gov",
+            }
+
+    def test_claude_sdk_env_omits_unset_keys(self) -> None:
+        # Construct valid, then re-point settings so base_url is unset.
+        with patch("openscientist.providers.cborg.get_settings", return_value=_mock_settings()):
+            provider = CborgProvider()
+        with patch(
+            "openscientist.providers.cborg.get_settings",
+            return_value=_mock_settings(token="only-token", base_url=None),
+        ):
+            env = provider.claude_sdk_env()
+        assert env == {"ANTHROPIC_AUTH_TOKEN": "only-token"}
+
+    def test_claude_model_name_uses_configured_model(self) -> None:
+        settings = _mock_settings(model="claude-custom-model")
+        with patch("openscientist.providers.cborg.get_settings", return_value=settings):
+            assert CborgProvider().claude_model_name() == "claude-custom-model"
+
+    def test_claude_model_name_falls_back_to_default(self) -> None:
+        settings = _mock_settings(model=None)
+        with patch("openscientist.providers.cborg.get_settings", return_value=settings):
+            assert CborgProvider().claude_model_name() == "claude-sonnet-4-20250514"
