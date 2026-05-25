@@ -18,18 +18,27 @@ from ._anthropic_common import (
     send_anthropic_message_with_tools,
 )
 from ._env_cleanup import clear_env_vars, clear_provider_mode_flags
+from .base_v2 import ClaudeCompatible
 
 logger = logging.getLogger(__name__)
 
 
-class VertexProvider(BaseProvider):
+class VertexProvider(BaseProvider, ClaudeCompatible):
     """Google Cloud Vertex AI provider."""
 
     @property
     def name(self) -> str:
         return "Vertex AI"
 
-    def _validate_required_config(self) -> list[str]:
+    @property
+    def id(self) -> str:
+        return "vertex"
+
+    @property
+    def display_name(self) -> str:
+        return "Vertex AI"
+
+    def validate_required_config(self) -> list[str]:
         """Check required Vertex AI configuration."""
         errors = []
         settings = get_settings()
@@ -53,6 +62,34 @@ class VertexProvider(BaseProvider):
             errors.append("CLOUD_ML_REGION not set (e.g., us-east5)")
 
         return errors
+
+    def _validate_required_config(self) -> list[str]:
+        """Legacy `BaseProvider` hook; delegates to the public method."""
+        return self.validate_required_config()
+
+    def claude_sdk_env(self) -> dict[str, str]:
+        """Vertex routing/auth env vars the claude-agent-sdk CLI must see.
+
+        Mirrors `ProviderSettings._apply_vertex_env_vars` so the explicit
+        per-provider env stays consistent with the container-env builder.
+        """
+        p = get_settings().provider
+        env: dict[str, str] = {"CLAUDE_CODE_USE_VERTEX": "1"}
+        for key, value in (
+            ("ANTHROPIC_VERTEX_PROJECT_ID", p.anthropic_vertex_project_id),
+            ("GCP_BILLING_ACCOUNT_ID", p.gcp_billing_account_id),
+            ("CLOUD_ML_REGION", p.cloud_ml_region),
+            ("VERTEX_REGION_CLAUDE_4_5_SONNET", p.vertex_region_claude_4_5_sonnet),
+            ("VERTEX_REGION_CLAUDE_4_5_HAIKU", p.vertex_region_claude_4_5_haiku),
+            ("GOOGLE_APPLICATION_CREDENTIALS", p.google_application_credentials),
+        ):
+            if value:
+                env[key] = value
+        return env
+
+    def claude_model_name(self) -> str:
+        """Model name for ClaudeAgentOptions.model."""
+        return get_settings().provider.model or "claude-sonnet-4-5@20250929"
 
     def _validate_optional_config(self) -> list[str]:
         """Check optional Vertex AI configuration."""
