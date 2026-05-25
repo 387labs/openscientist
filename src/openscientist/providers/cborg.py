@@ -19,11 +19,12 @@ from ._anthropic_common import (
     send_anthropic_message_with_tools,
 )
 from ._env_cleanup import clear_env_vars, clear_provider_mode_flags
+from .base_v2 import ClaudeCompatible
 
 logger = logging.getLogger(__name__)
 
 
-class CborgProvider(BaseProvider):
+class CborgProvider(BaseProvider, ClaudeCompatible):
     """
     CBORG API provider (current implementation).
 
@@ -37,7 +38,15 @@ class CborgProvider(BaseProvider):
     def name(self) -> str:
         return "CBORG"
 
-    def _validate_required_config(self) -> list[str]:
+    @property
+    def id(self) -> str:
+        return "cborg"
+
+    @property
+    def display_name(self) -> str:
+        return "CBORG"
+
+    def validate_required_config(self) -> list[str]:
         """Check required CBORG configuration."""
         errors = []
         settings = get_settings()
@@ -49,6 +58,24 @@ class CborgProvider(BaseProvider):
             errors.append("ANTHROPIC_BASE_URL not set (should be https://api.cborg.lbl.gov)")
 
         return errors
+
+    def _validate_required_config(self) -> list[str]:
+        """Legacy `BaseProvider` hook; delegates to the public method."""
+        return self.validate_required_config()
+
+    def claude_sdk_env(self) -> dict[str, str]:
+        """Auth env vars the claude-agent-sdk CLI must see."""
+        settings = get_settings()
+        env: dict[str, str] = {}
+        if settings.provider.anthropic_auth_token:
+            env["ANTHROPIC_AUTH_TOKEN"] = settings.provider.anthropic_auth_token
+        if settings.provider.anthropic_base_url:
+            env["ANTHROPIC_BASE_URL"] = settings.provider.anthropic_base_url
+        return env
+
+    def claude_model_name(self) -> str:
+        """Model name for ClaudeAgentOptions.model."""
+        return get_settings().provider.model or "claude-sonnet-4-20250514"
 
     def _validate_optional_config(self) -> list[str]:
         """Check optional CBORG configuration."""
