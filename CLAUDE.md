@@ -6,7 +6,7 @@ OpenScientist (Scientific Hypothesis Agent for Novel Discovery) is a web applica
 
 ```text
 src/openscientist/
-├── agent/            # AgentExecutor protocol and SDKAgentExecutor
+├── agent/            # AgentExecutor protocol and ClaudeCodeAgent
 ├── api/              # FastAPI REST endpoints
 ├── auth/             # Authentication (OAuth, sessions, middleware)
 ├── database/         # SQLAlchemy models and migrations

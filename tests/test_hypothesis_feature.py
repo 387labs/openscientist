@@ -1,7 +1,7 @@
 """Comprehensive tests for the use_hypotheses feature.
 
 Tests cover the full vertical slice:
-  tools/knowledge.py → tools/registry.py → agent/sdk_executor.py →
+  tools/knowledge.py → tools/registry.py → agent/claude_code_agent.py →
   agent/factory.py → orchestrator/discovery.py → job_manager.py →
   database/models/job.py → webapp_components/pages/job_detail.py
 """
@@ -17,9 +17,33 @@ from uuid import uuid4
 import pytest_asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from openscientist.agent.base import AgentConfig
 from openscientist.database.models import User
 from openscientist.database.models.job import Job as JobModel
 from openscientist.job.types import JobInfo, JobStatus
+from openscientist.providers.base_v2 import ClaudeCompatible
+
+
+class _StubProvider(ClaudeCompatible):
+    """Minimal Claude-compatible provider for agent construction in tests."""
+
+    @property
+    def id(self) -> str:
+        return "stub"
+
+    @property
+    def display_name(self) -> str:
+        return "Stub"
+
+    def validate_required_config(self) -> list[str]:
+        return []
+
+    def claude_sdk_env(self) -> dict[str, str]:
+        return {}
+
+    def claude_model_name(self) -> str:
+        return "stub-model"
+
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -178,88 +202,79 @@ class TestJobInfoUseHypotheses:
 
 
 # ---------------------------------------------------------------------------
-# 5. agent/sdk_executor.py — SDKAgentExecutor wiring
+# 5. agent/claude_code_agent.py — ClaudeCodeAgent wiring
 # ---------------------------------------------------------------------------
 
 
-class TestSDKAgentExecutorHypotheses:
-    """SDKAgentExecutor must propagate use_hypotheses to the subprocess env."""
+class TestClaudeCodeAgentHypotheses:
+    """ClaudeCodeAgent must propagate use_hypotheses to the subprocess env."""
 
     def test_use_hypotheses_false_env_is_zero(self, tmp_path: Path) -> None:
-        from openscientist.agent.sdk_executor import SDKAgentExecutor
+        from openscientist.agent.claude_code_agent import ClaudeCodeAgent
 
-        exe = SDKAgentExecutor(
-            job_dir=tmp_path,
-            data_file=None,
-            system_prompt=None,
-            use_hypotheses=False,
+        agent = ClaudeCodeAgent(
+            AgentConfig(job_dir=tmp_path, use_hypotheses=False),
+            _StubProvider(),
         )
-        assert exe._build_subprocess_env()["OPENSCIENTIST_USE_HYPOTHESES"] == "0"
+        assert agent._build_subprocess_env()["OPENSCIENTIST_USE_HYPOTHESES"] == "0"
 
     def test_use_hypotheses_true_env_is_one(self, tmp_path: Path) -> None:
-        from openscientist.agent.sdk_executor import SDKAgentExecutor
+        from openscientist.agent.claude_code_agent import ClaudeCodeAgent
 
-        exe = SDKAgentExecutor(
-            job_dir=tmp_path,
-            data_file=None,
-            system_prompt=None,
-            use_hypotheses=True,
+        agent = ClaudeCodeAgent(
+            AgentConfig(job_dir=tmp_path, use_hypotheses=True),
+            _StubProvider(),
         )
-        assert exe._build_subprocess_env()["OPENSCIENTIST_USE_HYPOTHESES"] == "1"
+        assert agent._build_subprocess_env()["OPENSCIENTIST_USE_HYPOTHESES"] == "1"
 
     def test_default_use_hypotheses_env_is_zero(self, tmp_path: Path) -> None:
-        """SDKAgentExecutor default should disable hypothesis tools."""
-        from openscientist.agent.sdk_executor import SDKAgentExecutor
+        """ClaudeCodeAgent default should disable hypothesis tools."""
+        from openscientist.agent.claude_code_agent import ClaudeCodeAgent
 
-        exe = SDKAgentExecutor(
-            job_dir=tmp_path,
-            data_file=None,
-            system_prompt=None,
-        )
-        assert exe._build_subprocess_env()["OPENSCIENTIST_USE_HYPOTHESES"] == "0"
+        agent = ClaudeCodeAgent(AgentConfig(job_dir=tmp_path), _StubProvider())
+        assert agent._build_subprocess_env()["OPENSCIENTIST_USE_HYPOTHESES"] == "0"
 
 
 # ---------------------------------------------------------------------------
-# 6. agent/factory.py — get_agent_executor wiring
+# 6. agent/factory.py — get_agent wiring
 # ---------------------------------------------------------------------------
 
 
-class TestGetAgentExecutorHypotheses:
-    """get_agent_executor() must pass use_hypotheses through to SDKAgentExecutor."""
+class TestGetAgentHypotheses:
+    """get_agent() must pass use_hypotheses through to the agent.
+
+    The provider is stubbed so the wiring is exercised without requiring
+    real provider credentials.
+    """
 
     def test_use_hypotheses_false_propagates(self, tmp_path: Path) -> None:
-        from openscientist.agent.factory import get_agent_executor
+        from openscientist.agent.factory import get_agent
 
-        executor = get_agent_executor(
-            job_dir=tmp_path,
-            data_file=None,
-            system_prompt=None,
-            use_hypotheses=False,
-        )
-        env = executor._build_subprocess_env()  # type: ignore[attr-defined]
+        with patch(
+            "openscientist.agent.factory._instantiate_provider", return_value=_StubProvider()
+        ):
+            agent = get_agent(AgentConfig(job_dir=tmp_path, use_hypotheses=False))
+        env = agent._build_subprocess_env()  # type: ignore[attr-defined]
         assert env["OPENSCIENTIST_USE_HYPOTHESES"] == "0"
 
     def test_use_hypotheses_true_propagates(self, tmp_path: Path) -> None:
-        from openscientist.agent.factory import get_agent_executor
+        from openscientist.agent.factory import get_agent
 
-        executor = get_agent_executor(
-            job_dir=tmp_path,
-            data_file=None,
-            system_prompt=None,
-            use_hypotheses=True,
-        )
-        env = executor._build_subprocess_env()  # type: ignore[attr-defined]
+        with patch(
+            "openscientist.agent.factory._instantiate_provider", return_value=_StubProvider()
+        ):
+            agent = get_agent(AgentConfig(job_dir=tmp_path, use_hypotheses=True))
+        env = agent._build_subprocess_env()  # type: ignore[attr-defined]
         assert env["OPENSCIENTIST_USE_HYPOTHESES"] == "1"
 
     def test_default_does_not_include_hypothesis_tools(self, tmp_path: Path) -> None:
-        from openscientist.agent.factory import get_agent_executor
+        from openscientist.agent.factory import get_agent
 
-        executor = get_agent_executor(
-            job_dir=tmp_path,
-            data_file=None,
-            system_prompt=None,
-        )
-        env = executor._build_subprocess_env()  # type: ignore[attr-defined]
+        with patch(
+            "openscientist.agent.factory._instantiate_provider", return_value=_StubProvider()
+        ):
+            agent = get_agent(AgentConfig(job_dir=tmp_path))
+        env = agent._build_subprocess_env()  # type: ignore[attr-defined]
         assert env["OPENSCIENTIST_USE_HYPOTHESES"] == "0"
 
 
@@ -868,14 +883,14 @@ class TestEndToEndHypothesesFlow:
 
         assert runtime["use_hypotheses"] is False
 
-    async def test_build_agent_executor_passes_use_hypotheses_to_get_agent_executor(
+    async def test_build_agent_executor_passes_use_hypotheses_to_get_agent(
         self, tmp_path: Path
     ) -> None:
-        """_build_agent_executor(use_hypotheses=True) passes it to get_agent_executor."""
+        """_build_agent_executor(use_hypotheses=True) puts it on the AgentConfig."""
         from openscientist.orchestrator.discovery import _build_agent_executor
 
         with (
-            patch("openscientist.orchestrator.discovery.get_agent_executor") as mock_get_executor,
+            patch("openscientist.orchestrator.discovery.get_agent") as mock_get_agent,
             patch("openscientist.orchestrator.discovery.get_system_prompt", return_value="prompt"),
         ):
             _build_agent_executor(
@@ -883,14 +898,14 @@ class TestEndToEndHypothesesFlow:
                 data_file=None,
                 use_hypotheses=True,
             )
-            call_kwargs = mock_get_executor.call_args[1]
-            assert call_kwargs["use_hypotheses"] is True
+            config = mock_get_agent.call_args[0][0]
+            assert config.use_hypotheses is True
 
     async def test_build_agent_executor_false_passes_false(self, tmp_path: Path) -> None:
         from openscientist.orchestrator.discovery import _build_agent_executor
 
         with (
-            patch("openscientist.orchestrator.discovery.get_agent_executor") as mock_get_executor,
+            patch("openscientist.orchestrator.discovery.get_agent") as mock_get_agent,
             patch("openscientist.orchestrator.discovery.get_system_prompt", return_value="prompt"),
         ):
             _build_agent_executor(
@@ -898,8 +913,8 @@ class TestEndToEndHypothesesFlow:
                 data_file=None,
                 use_hypotheses=False,
             )
-            call_kwargs = mock_get_executor.call_args[1]
-            assert call_kwargs["use_hypotheses"] is False
+            config = mock_get_agent.call_args[0][0]
+            assert config.use_hypotheses is False
 
 
 # ---------------------------------------------------------------------------

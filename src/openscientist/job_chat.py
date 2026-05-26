@@ -2,7 +2,7 @@
 Job chat service for interactive Q&A about OpenScientist jobs.
 
 Allows users to ask questions about their job results, findings, and
-analysis process. Uses SDKAgentExecutor for responses, giving the agent
+analysis process. Uses ClaudeCodeAgent for responses, giving the agent
 access to tools (execute_code, search_pubmed, etc.) for follow-up analysis.
 """
 
@@ -199,7 +199,7 @@ async def send_chat_message(
     job_dir: Path,
 ) -> str:
     """
-    Send a chat message and get LLM response via SDKAgentExecutor.
+    Send a chat message and get LLM response via ClaudeCodeAgent.
 
     Args:
         session: Database session
@@ -243,14 +243,16 @@ async def _send_message_via_executor(
     job_dir: Path,
 ) -> str:
     """
-    Send message using SDKAgentExecutor.
+    Send message using ClaudeCodeAgent.
 
     Creates a short-lived executor with the chat system prompt and full
     tool access, allowing the agent to re-analyze data or search literature
     when answering follow-up questions.
     """
-    from openscientist.agent.sdk_executor import SDKAgentExecutor
+    from openscientist.agent.base import AgentConfig
+    from openscientist.agent.claude_code_agent import ClaudeCodeAgent
     from openscientist.providers import get_provider
+    from openscientist.providers.base_v2 import ClaudeCompatible
 
     # Get chat history for continuity
     history = await get_chat_history(session, job_id, limit=10)
@@ -318,12 +320,12 @@ Be concise, accurate, and cite specific papers or findings when relevant. Focus 
     provider_settings = get_settings().provider
     chat_model = provider_settings.anthropic_chat_model or provider_settings.model
 
-    executor = SDKAgentExecutor(
-        job_dir=job_dir,
-        data_file=None,
-        system_prompt=system_prompt,
-        model_override=chat_model,
-    )
+    if not isinstance(provider, ClaudeCompatible):
+        raise RuntimeError(
+            f"In-page chat requires a Claude-compatible provider, got {type(provider).__name__}"
+        )
+    config = AgentConfig(job_dir=job_dir, system_prompt=system_prompt)
+    executor = ClaudeCodeAgent(config, provider, model_override=chat_model)
 
     try:
         result = await executor.run_iteration(prompt, reset_session=True)

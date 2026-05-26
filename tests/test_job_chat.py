@@ -18,7 +18,36 @@ from openscientist.agent.protocol import IterationResult
 from openscientist.database.models import Job, JobChatMessage, User
 from openscientist.database.rls import set_current_user
 from openscientist.job_chat import get_chat_history, load_job_context, send_chat_message
+from openscientist.providers.base_v2 import ClaudeCompatible
 from tests.helpers import enable_rls
+
+
+class _ChatProvider(ClaudeCompatible):
+    """Claude-compatible stub standing in for `get_provider()` in chat tests.
+
+    Carries a no-op `setup_environment` so `send_chat_message` can call it,
+    and satisfies the `isinstance(provider, ClaudeCompatible)` guard.
+    """
+
+    @property
+    def id(self) -> str:
+        return "stub"
+
+    @property
+    def display_name(self) -> str:
+        return "Stub"
+
+    def validate_required_config(self) -> list[str]:
+        return []
+
+    def claude_sdk_env(self) -> dict[str, str]:
+        return {}
+
+    def claude_model_name(self) -> str:
+        return "stub-model"
+
+    def setup_environment(self) -> None:
+        return None
 
 
 @pytest.mark.asyncio
@@ -461,10 +490,10 @@ async def test_send_chat_message_success(
     )
 
     with (
-        patch("openscientist.agent.sdk_executor.SDKAgentExecutor", return_value=mock_executor),
+        patch("openscientist.agent.claude_code_agent.ClaudeCodeAgent", return_value=mock_executor),
         patch("openscientist.providers.get_provider") as mock_get_provider,
     ):
-        mock_get_provider.return_value.setup_environment.return_value = None
+        mock_get_provider.return_value = _ChatProvider()
 
         response = await send_chat_message(
             db_session, test_job.id, "What are the main findings?", job_dir
@@ -506,10 +535,10 @@ async def test_send_chat_message_raises_on_executor_failure(
     )
 
     with (
-        patch("openscientist.agent.sdk_executor.SDKAgentExecutor", return_value=mock_executor),
+        patch("openscientist.agent.claude_code_agent.ClaudeCodeAgent", return_value=mock_executor),
         patch("openscientist.providers.get_provider") as mock_get_provider,
     ):
-        mock_get_provider.return_value.setup_environment.return_value = None
+        mock_get_provider.return_value = _ChatProvider()
 
         with pytest.raises(RuntimeError, match="Process exited with code 1"):
             await send_chat_message(db_session, test_job.id, "What are the main findings?", job_dir)
@@ -540,10 +569,10 @@ async def test_send_chat_message_raises_generic_on_empty_error(
     )
 
     with (
-        patch("openscientist.agent.sdk_executor.SDKAgentExecutor", return_value=mock_executor),
+        patch("openscientist.agent.claude_code_agent.ClaudeCodeAgent", return_value=mock_executor),
         patch("openscientist.providers.get_provider") as mock_get_provider,
     ):
-        mock_get_provider.return_value.setup_environment.return_value = None
+        mock_get_provider.return_value = _ChatProvider()
 
         with pytest.raises(RuntimeError, match="Chat executor returned no output"):
             await send_chat_message(db_session, test_job.id, "Hello", job_dir)
@@ -570,10 +599,10 @@ async def test_system_prompt_does_not_include_job_context(
     captured_system_prompt = None
 
     class FakeExecutor:
-        def __init__(self, *, job_dir, data_file, system_prompt, model_override=None):
-            _ = (job_dir, data_file, model_override)
+        def __init__(self, config, provider, *, model_override=None):
+            _ = (provider, model_override)
             nonlocal captured_system_prompt
-            captured_system_prompt = system_prompt
+            captured_system_prompt = config.system_prompt
 
         async def run_iteration(self, prompt, *, reset_session=False):
             _ = (prompt, reset_session)
@@ -588,14 +617,14 @@ async def test_system_prompt_does_not_include_job_context(
             pass
 
     with (
-        patch("openscientist.agent.sdk_executor.SDKAgentExecutor", FakeExecutor),
+        patch("openscientist.agent.claude_code_agent.ClaudeCodeAgent", FakeExecutor),
         patch("openscientist.providers.get_provider") as mock_get_provider,
         patch(
             "openscientist.job_chat.KnowledgeState.load_from_database_sync",
             return_value=large_ks,
         ),
     ):
-        mock_get_provider.return_value.setup_environment.return_value = None
+        mock_get_provider.return_value = _ChatProvider()
 
         await send_chat_message(db_session, test_job.id, "Summarize findings", job_dir)
 

@@ -1,9 +1,9 @@
 """
-Agent executor package for OpenScientist.
+Agent package for OpenScientist.
 
-Provides the AgentExecutor protocol and the SDKAgentExecutor implementation
-(backed by claude-agent-sdk).  Use get_agent_executor() from agent.factory
-to get the executor.
+Provides the AgentExecutor protocol and the ClaudeCodeAgent implementation
+(backed by claude-agent-sdk).  Use get_agent() from agent.factory to get the
+agent for the configured provider.
 """
 
 from openscientist.agent.mcp_specs import (

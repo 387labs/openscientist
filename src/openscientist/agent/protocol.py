@@ -83,7 +83,7 @@ class AgentExecutor(Protocol):
 
     Usage::
 
-        executor: AgentExecutor = get_agent_executor(...)
+        executor: AgentExecutor = get_agent(...)
         result = await executor.run_iteration(prompt, reset_session=True)
         print(result.output)
         await executor.shutdown()

@@ -1,7 +1,7 @@
 """Tests for TokenUsage arithmetic and SDK usage parsing."""
 
+from openscientist.agent.claude_code_agent import ClaudeCodeAgent
 from openscientist.agent.protocol import TokenUsage
-from openscientist.agent.sdk_executor import SDKAgentExecutor
 
 
 def test_add_accumulates_all_fields() -> None:
@@ -61,7 +61,7 @@ def test_anthropic_payload_maps_to_additive_fields() -> None:
         "cache_creation_input_tokens": 10,
         "cache_read_input_tokens": 20,
     }
-    assert SDKAgentExecutor._usage_from_payload(usage) == TokenUsage(
+    assert ClaudeCodeAgent._usage_from_payload(usage) == TokenUsage(
         input_tokens=100,
         output_tokens=200,
         cache_write_tokens=10,
@@ -77,7 +77,7 @@ def test_anthropic_object_payload_maps_to_additive_fields() -> None:
         cache_creation_input_tokens = 10
         cache_read_input_tokens = 20
 
-    assert SDKAgentExecutor._usage_from_payload(_UsageObj()) == TokenUsage(
+    assert ClaudeCodeAgent._usage_from_payload(_UsageObj()) == TokenUsage(
         input_tokens=100,
         output_tokens=200,
         cache_write_tokens=10,
@@ -89,4 +89,4 @@ def test_anthropic_object_payload_maps_to_additive_fields() -> None:
 def test_anthropic_payload_reasoning_is_zero() -> None:
     """Anthropic's API does not expose extended-thinking tokens separately."""
     usage = {"input_tokens": 100, "output_tokens": 200}
-    assert SDKAgentExecutor._usage_from_payload(usage).reasoning_tokens == 0
+    assert ClaudeCodeAgent._usage_from_payload(usage).reasoning_tokens == 0
