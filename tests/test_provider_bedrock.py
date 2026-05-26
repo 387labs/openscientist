@@ -166,3 +166,102 @@ class TestBedrockSetupEnvironment:
             provider = BedrockProvider()
             provider.setup_environment()
             assert "ANTHROPIC_API_KEY" not in os.environ
+
+
+def _mock_settings(
+    *,
+    region: str | None = "us-east-1",
+    access_key: str | None = "AKIATEST",
+    secret: str | None = "secret-key",
+    profile: str | None = None,
+    bearer: str | None = None,
+    model: str | None = "claude-sonnet-4-6",
+) -> MagicMock:
+    mock_settings = MagicMock()
+    mock_settings.provider.aws_region = region
+    mock_settings.provider.aws_access_key_id = access_key
+    mock_settings.provider.aws_secret_access_key = secret
+    mock_settings.provider.aws_profile = profile
+    mock_settings.provider.aws_bearer_token_bedrock = bearer
+    mock_settings.provider.model = model
+    return mock_settings
+
+
+class TestBedrockClaudeCompatible:
+    """Tests for the ClaudeCompatible family methods."""
+
+    def test_id_is_bedrock(self) -> None:
+        with patch("openscientist.providers.bedrock.get_settings", return_value=_mock_settings()):
+            assert BedrockProvider().id == "bedrock"
+
+    def test_display_name_is_aws_bedrock(self) -> None:
+        with patch("openscientist.providers.bedrock.get_settings", return_value=_mock_settings()):
+            assert BedrockProvider().display_name == "AWS Bedrock"
+
+    def test_is_claude_compatible_and_provider(self) -> None:
+        from openscientist.providers.base_v2 import (
+            ClaudeCompatible,
+            CodexCompatible,
+            Provider,
+        )
+
+        with patch("openscientist.providers.bedrock.get_settings", return_value=_mock_settings()):
+            provider = BedrockProvider()
+        assert isinstance(provider, Provider)
+        assert isinstance(provider, ClaudeCompatible)
+        assert not isinstance(provider, CodexCompatible)
+
+    def test_validate_required_config_ok(self) -> None:
+        with patch("openscientist.providers.bedrock.get_settings", return_value=_mock_settings()):
+            assert BedrockProvider().validate_required_config() == []
+
+    def test_validate_required_config_errors_when_unset(self) -> None:
+        with patch("openscientist.providers.bedrock.get_settings", return_value=_mock_settings()):
+            provider = BedrockProvider()
+        unset = _mock_settings(region=None, access_key=None, secret=None)
+        with patch("openscientist.providers.bedrock.get_settings", return_value=unset):
+            errors = provider.validate_required_config()
+        assert len(errors) == 2
+        assert any("AWS_REGION" in e for e in errors)
+        assert any("credentials" in e.lower() for e in errors)
+
+    def test_private_validate_delegates_to_public(self) -> None:
+        with patch("openscientist.providers.bedrock.get_settings", return_value=_mock_settings()):
+            provider = BedrockProvider()
+            assert provider._validate_required_config() == provider.validate_required_config()
+
+    def test_claude_sdk_env_access_key_mode(self) -> None:
+        settings = _mock_settings(region="eu-west-1", access_key="AKIA9", secret="shh")
+        with patch("openscientist.providers.bedrock.get_settings", return_value=settings):
+            env = BedrockProvider().claude_sdk_env()
+        assert env == {
+            "CLAUDE_CODE_USE_BEDROCK": "1",
+            "AWS_REGION": "eu-west-1",
+            "AWS_ACCESS_KEY_ID": "AKIA9",
+            "AWS_SECRET_ACCESS_KEY": "shh",
+        }
+
+    def test_claude_sdk_env_profile_mode(self) -> None:
+        settings = _mock_settings(
+            region="us-east-1", access_key=None, secret=None, profile="bedrock-prof"
+        )
+        with patch("openscientist.providers.bedrock.get_settings", return_value=settings):
+            env = BedrockProvider().claude_sdk_env()
+        assert env == {
+            "CLAUDE_CODE_USE_BEDROCK": "1",
+            "AWS_REGION": "us-east-1",
+            "AWS_PROFILE": "bedrock-prof",
+        }
+
+    def test_claude_model_name_uses_configured_model(self) -> None:
+        settings = _mock_settings(model="bedrock-custom")
+        with patch("openscientist.providers.bedrock.get_settings", return_value=settings):
+            assert BedrockProvider().claude_model_name() == "bedrock-custom"
+
+    def test_claude_model_name_falls_back_to_bedrock_default(self) -> None:
+        settings = _mock_settings(model=None)
+        with patch("openscientist.providers.bedrock.get_settings", return_value=settings):
+            assert (
+                BedrockProvider().claude_model_name()
+                == "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+            )

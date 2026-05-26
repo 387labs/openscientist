@@ -22,18 +22,27 @@ from ._env_cleanup import (
     clear_env_vars,
     clear_provider_mode_flags,
 )
+from .base_v2 import ClaudeCompatible
 
 logger = logging.getLogger(__name__)
 
 
-class BedrockProvider(BaseProvider):
+class BedrockProvider(BaseProvider, ClaudeCompatible):
     """AWS Bedrock provider."""
 
     @property
     def name(self) -> str:
         return "AWS Bedrock"
 
-    def _validate_required_config(self) -> list[str]:
+    @property
+    def id(self) -> str:
+        return "bedrock"
+
+    @property
+    def display_name(self) -> str:
+        return "AWS Bedrock"
+
+    def validate_required_config(self) -> list[str]:
         """Check required Bedrock configuration."""
         errors = []
         settings = get_settings()
@@ -55,6 +64,33 @@ class BedrockProvider(BaseProvider):
             )
 
         return errors
+
+    def _validate_required_config(self) -> list[str]:
+        """Legacy `BaseProvider` hook; delegates to the public method."""
+        return self.validate_required_config()
+
+    def claude_sdk_env(self) -> dict[str, str]:
+        """Bedrock routing/auth env vars the claude-agent-sdk CLI must see.
+
+        Mirrors `ProviderSettings._apply_bedrock_env_vars` so the explicit
+        per-provider env stays consistent with the container-env builder.
+        """
+        p = get_settings().provider
+        env: dict[str, str] = {"CLAUDE_CODE_USE_BEDROCK": "1"}
+        for key, value in (
+            ("AWS_REGION", p.aws_region),
+            ("AWS_ACCESS_KEY_ID", p.aws_access_key_id),
+            ("AWS_SECRET_ACCESS_KEY", p.aws_secret_access_key),
+            ("AWS_PROFILE", p.aws_profile),
+            ("AWS_BEARER_TOKEN_BEDROCK", p.aws_bearer_token_bedrock),
+        ):
+            if value:
+                env[key] = value
+        return env
+
+    def claude_model_name(self) -> str:
+        """Model name for ClaudeAgentOptions.model."""
+        return get_settings().provider.model or "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
 
     def _validate_optional_config(self) -> list[str]:
         """Check optional Bedrock configuration."""
