@@ -23,6 +23,7 @@ from ._env_cleanup import (
     clear_env_vars,
     clear_provider_mode_flags,
 )
+from .base_v2 import ClaudeCompatible
 
 logger = logging.getLogger(__name__)
 
@@ -61,14 +62,22 @@ def _query_azure_cost_usd(
     return float(result.rows[0][0])
 
 
-class FoundryProvider(BaseProvider):
+class FoundryProvider(BaseProvider, ClaudeCompatible):
     """Azure AI Foundry provider."""
 
     @property
     def name(self) -> str:
         return "Azure AI Foundry"
 
-    def _validate_required_config(self) -> list[str]:
+    @property
+    def id(self) -> str:
+        return "foundry"
+
+    @property
+    def display_name(self) -> str:
+        return "Azure AI Foundry"
+
+    def validate_required_config(self) -> list[str]:
         """Check required Foundry configuration."""
         errors = []
         settings = get_settings()
@@ -101,6 +110,30 @@ class FoundryProvider(BaseProvider):
                 )
 
         return errors
+
+    def _validate_required_config(self) -> list[str]:
+        """Legacy `BaseProvider` hook; delegates to the public method."""
+        return self.validate_required_config()
+
+    def claude_sdk_env(self) -> dict[str, str]:
+        """Foundry routing/auth env vars the claude-agent-sdk CLI must see.
+
+        Mirrors `ProviderSettings._apply_foundry_env_vars`, including the
+        resource/base-url mutual exclusion (Claude Code rejects both).
+        """
+        p = get_settings().provider
+        env: dict[str, str] = {"CLAUDE_CODE_USE_FOUNDRY": "1"}
+        if p.anthropic_foundry_resource:
+            env["ANTHROPIC_FOUNDRY_RESOURCE"] = p.anthropic_foundry_resource
+        elif p.anthropic_foundry_base_url:
+            env["ANTHROPIC_FOUNDRY_BASE_URL"] = p.anthropic_foundry_base_url
+        if p.anthropic_foundry_api_key:
+            env["ANTHROPIC_FOUNDRY_API_KEY"] = p.anthropic_foundry_api_key
+        return env
+
+    def claude_model_name(self) -> str:
+        """Model name for ClaudeAgentOptions.model."""
+        return get_settings().provider.model or "claude-sonnet-4-5"
 
     def _validate_optional_config(self) -> list[str]:
         """Check optional Foundry configuration."""
