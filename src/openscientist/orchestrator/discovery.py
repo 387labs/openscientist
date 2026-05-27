@@ -16,7 +16,8 @@ from uuid import UUID
 
 from sqlalchemy import select
 
-from openscientist.agent.factory import get_agent_executor
+from openscientist.agent.base import AgentConfig
+from openscientist.agent.factory import get_agent
 from openscientist.agent.protocol import AgentExecutor, IterationResult, TokenUsage
 from openscientist.database.models import JobDataFile
 from openscientist.database.models.job import Job as JobModel
@@ -74,16 +75,17 @@ def _build_agent_executor(
     use_hypotheses: bool = False,
     data_files: list[Path] | None = None,
 ) -> AgentExecutor:
-    """Create a configured agent executor for discovery/report phases."""
+    """Create a configured agent for discovery/report phases."""
     system_prompt = get_system_prompt()
     logger.info("Built system prompt (%d chars)", len(system_prompt))
-    return get_agent_executor(
+    config = AgentConfig(
         job_dir=job_dir,
         data_file=data_file,
         system_prompt=system_prompt,
         use_hypotheses=use_hypotheses,
-        data_files=data_files,
+        data_files=tuple(data_files or ()),
     )
+    return get_agent(config)
 
 
 def _append_iteration_artifacts(
@@ -544,7 +546,7 @@ async def run_discovery_async(job_dir: Path) -> dict[str, Any]:
     Run autonomous discovery using the configured agent executor.
 
     This is an async entry point that JobManager (or the container entrypoint)
-    calls.  The executor is chosen by agent.factory.get_agent_executor() based
+    calls.  The agent is chosen by agent.factory.get_agent() based
     on the configured provider.
 
     Args:

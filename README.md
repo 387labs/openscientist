@@ -95,7 +95,7 @@ Open your browser to `http://localhost:8080`
 ```
 openscientist/
 ├── src/openscientist/            # Core Python package
-│   ├── agent/             # AgentExecutor protocol and SDKAgentExecutor
+│   ├── agent/             # AgentExecutor protocol and ClaudeCodeAgent
 │   ├── job/               # Job lifecycle, scheduling, and types
 │   ├── orchestrator/      # Discovery orchestration (setup, iteration, report)
 │   ├── providers/         # Model provider integrations

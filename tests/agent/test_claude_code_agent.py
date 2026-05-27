@@ -1,4 +1,4 @@
-"""Unit tests for `SDKAgentExecutor` cutover to the standalone MCP."""
+"""Unit tests for `ClaudeCodeAgent` and its standalone-MCP wiring."""
 
 from __future__ import annotations
 
@@ -9,29 +9,60 @@ from typing import Any, cast
 
 import pytest
 
-from openscientist.agent.sdk_executor import SDKAgentExecutor
+from openscientist.agent.base import AgentConfig
+from openscientist.agent.claude_code_agent import ClaudeCodeAgent
+from openscientist.providers.base_v2 import ClaudeCompatible
 
 
-def _make_executor(
+class _StubProvider(ClaudeCompatible):
+    """Minimal Claude-compatible provider for exercising the agent."""
+
+    def __init__(self, *, sdk_env: dict[str, str] | None = None) -> None:
+        self._sdk_env = sdk_env or {}
+
+    @property
+    def id(self) -> str:
+        return "stub"
+
+    @property
+    def display_name(self) -> str:
+        return "Stub"
+
+    def validate_required_config(self) -> list[str]:
+        return []
+
+    def claude_sdk_env(self) -> dict[str, str]:
+        return dict(self._sdk_env)
+
+    def claude_model_name(self) -> str:
+        return "stub-model"
+
+
+def _make_agent(
     tmp_path: Path,
     *,
     data_file: Path | None = None,
     data_files: list[Path] | None = None,
     use_hypotheses: bool = False,
     model_override: str | None = None,
-) -> SDKAgentExecutor:
-    return SDKAgentExecutor(
+    provider: ClaudeCompatible | None = None,
+) -> ClaudeCodeAgent:
+    config = AgentConfig(
         job_dir=tmp_path,
         data_file=data_file,
         system_prompt="test prompt",
         use_hypotheses=use_hypotheses,
-        data_files=data_files,
+        data_files=tuple(data_files or ()),
+    )
+    return ClaudeCodeAgent(
+        config,
+        provider or _StubProvider(),
         model_override=model_override,
     )
 
 
 def test_build_options_uses_stdio_spec_for_openscientist_tools(tmp_path: Path) -> None:
-    executor = _make_executor(tmp_path)
+    executor = _make_agent(tmp_path)
     options = executor._build_options()
 
     mcp_servers = options.mcp_servers
@@ -57,7 +88,7 @@ def test_subprocess_env_passes_through_unrelated_openscientist_vars(
     monkeypatch.setenv("OPENSCIENTIST_EXECUTOR_IMAGE", "custom-executor:latest")
     monkeypatch.setenv("OPENSCIENTIST_EXECUTOR_TIMEOUT", "180")
 
-    env = _make_executor(tmp_path)._build_subprocess_env()
+    env = _make_agent(tmp_path)._build_subprocess_env()
     assert env["OPENSCIENTIST_PROVIDER"] == "anthropic"
     assert env["OPENSCIENTIST_MODEL"] == "claude-sonnet-test"
     assert env["OPENSCIENTIST_EXECUTOR_IMAGE"] == "custom-executor:latest"
@@ -65,7 +96,7 @@ def test_subprocess_env_passes_through_unrelated_openscientist_vars(
 
 
 def test_subprocess_env_includes_job_id_and_job_dir(tmp_path: Path) -> None:
-    executor = _make_executor(tmp_path)
+    executor = _make_agent(tmp_path)
     env = executor._build_subprocess_env()
 
     assert env["OPENSCIENTIST_JOB_ID"] == tmp_path.name
@@ -79,7 +110,7 @@ def test_subprocess_env_inherits_critical_parent_vars(
     monkeypatch.setenv("OPENSCIENTIST_SECRET_KEY", "test-key")
     monkeypatch.setenv("PATH", "/test/bin:/usr/bin")
 
-    executor = _make_executor(tmp_path)
+    executor = _make_agent(tmp_path)
     env = executor._build_subprocess_env()
 
     assert env["DATABASE_URL"] == "postgresql+asyncpg://test/db"
@@ -91,7 +122,7 @@ def test_subprocess_env_inherits_critical_parent_vars(
 def test_subprocess_env_use_hypotheses_flag(
     tmp_path: Path, use_hypotheses: bool, expected: str
 ) -> None:
-    executor = _make_executor(tmp_path, use_hypotheses=use_hypotheses)
+    executor = _make_agent(tmp_path, use_hypotheses=use_hypotheses)
     assert executor._build_subprocess_env()["OPENSCIENTIST_USE_HYPOTHESES"] == expected
 
 
@@ -99,17 +130,17 @@ def test_subprocess_env_data_file_optional(tmp_path: Path) -> None:
     data_file = tmp_path / "primary.csv"
     data_file.write_text("col\n1\n")
 
-    with_file = _make_executor(tmp_path, data_file=data_file)._build_subprocess_env()
+    with_file = _make_agent(tmp_path, data_file=data_file)._build_subprocess_env()
     assert with_file["OPENSCIENTIST_DATA_FILE"] == str(data_file)
 
-    without_file = _make_executor(tmp_path, data_file=None)._build_subprocess_env()
+    without_file = _make_agent(tmp_path, data_file=None)._build_subprocess_env()
     assert "OPENSCIENTIST_DATA_FILE" not in without_file
 
 
 def test_subprocess_env_data_files_pathsep_joined(tmp_path: Path) -> None:
     a = tmp_path / "a.csv"
     b = tmp_path / "b.csv"
-    executor = _make_executor(tmp_path, data_files=[a, b])
+    executor = _make_agent(tmp_path, data_files=[a, b])
     env = executor._build_subprocess_env()
     assert env["OPENSCIENTIST_DATA_FILES"] == f"{a}{os.pathsep}{b}"
 
@@ -118,19 +149,39 @@ def test_subprocess_env_data_files_empty_unsets_var(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("OPENSCIENTIST_DATA_FILES", "/should/be/removed")
-    executor = _make_executor(tmp_path, data_files=None)
+    executor = _make_agent(tmp_path, data_files=None)
     env = executor._build_subprocess_env()
     assert "OPENSCIENTIST_DATA_FILES" not in env
 
 
-def test_build_options_passes_cwd_and_model(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    executor = _make_executor(tmp_path, model_override="custom-model")
-    options = executor._build_options()
+def test_build_options_uses_model_override_when_set(tmp_path: Path) -> None:
+    agent = _make_agent(tmp_path, model_override="custom-model")
+    options = agent._build_options()
 
     assert options.cwd == str(tmp_path)
     assert options.model == "custom-model"
+
+
+def test_build_options_defaults_to_provider_model(tmp_path: Path) -> None:
+    """Without an override the model comes from the provider, not settings."""
+    agent = _make_agent(tmp_path)
+    options = agent._build_options()
+
+    assert options.model == "stub-model"
+
+
+def test_apply_provider_env_sets_vars(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The agent pushes the provider's auth/routing env into the process so
+    the SDK CLI and the tools subprocess inherit it."""
+    # Seed via monkeypatch so teardown removes the var even though
+    # `_apply_provider_env` mutates os.environ directly.
+    monkeypatch.setenv("STUB_AUTH_TOKEN", "before")
+    provider = _StubProvider(sdk_env={"STUB_AUTH_TOKEN": "secret"})
+    agent = _make_agent(tmp_path, provider=provider)
+
+    agent._apply_provider_env()
+
+    assert os.environ["STUB_AUTH_TOKEN"] == "secret"
 
 
 async def test_built_spec_spawns_subprocess_that_lists_all_tools(
@@ -148,7 +199,7 @@ async def test_built_spec_spawns_subprocess_that_lists_all_tools(
 
     monkeypatch.setenv("DATABASE_URL", test_database_url)
 
-    executor = _make_executor(tmp_path, use_hypotheses=True)
+    executor = _make_agent(tmp_path, use_hypotheses=True)
     options = executor._build_options()
     mcp_servers = options.mcp_servers
     assert isinstance(mcp_servers, dict)

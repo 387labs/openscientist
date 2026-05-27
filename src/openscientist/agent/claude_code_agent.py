@@ -1,10 +1,11 @@
 """
-SDKAgentExecutor — uses the claude-agent-sdk for all providers.
+ClaudeCodeAgent — drives the claude-agent-sdk for Claude-compatible providers.
 
 The claude-agent-sdk provides automatic tool-use loops, built-in tools
 (Bash, file read/write), and the full Claude Code capability set.
 
-The provider's ``setup_environment()`` configures env vars so the SDK's
+The agent sources its model from ``provider.claude_model_name()`` and
+applies ``provider.claude_sdk_env()`` to the environment so the SDK's
 bundled CLI routes to the correct backend (Anthropic, CBORG, Vertex,
 Bedrock, Foundry).
 """
@@ -15,7 +16,6 @@ import logging
 import os
 import sys
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, cast
 
 from claude_agent_sdk import (
@@ -31,8 +31,10 @@ from claude_agent_sdk.types import (
     ToolUseBlock,
 )
 
+from openscientist.agent.base import AbstractAgent, AgentConfig
 from openscientist.agent.mcp_specs import StdioMcpServerSpec
 from openscientist.agent.protocol import IterationResult, TokenUsage
+from openscientist.providers.base_v2 import ClaudeCompatible
 from openscientist.transcript import CLAUDE
 
 logger = logging.getLogger(__name__)
@@ -100,9 +102,9 @@ class _IterationState:
 _install_parse_message_patch()
 
 
-class SDKAgentExecutor:
+class ClaudeCodeAgent(AbstractAgent[ClaudeCompatible]):
     """
-    AgentExecutor that wraps the claude-agent-sdk ClaudeSDKClient.
+    Agent that wraps the claude-agent-sdk ClaudeSDKClient.
 
     Tools come from the standalone ``openscientist_tools`` package, spawned
     as a stdio subprocess MCP server that the SDK manages. The SDK handles
@@ -112,24 +114,19 @@ class SDKAgentExecutor:
     kept alive for conversation continuity across iterations.  Pass
     ``reset_session=True`` to disconnect and start a fresh session.
 
+    ``model_override`` lets callers route a single run to a different model
+    than the provider's default (used by in-page chat).
     """
 
     def __init__(
         self,
-        job_dir: Path,
-        data_file: Path | None,
-        system_prompt: str | None,
-        use_hypotheses: bool = False,
-        data_files: list[Path] | None = None,
+        config: AgentConfig,
+        provider: ClaudeCompatible,
+        *,
         model_override: str | None = None,
     ) -> None:
-        self._job_dir = job_dir
-        self._data_file = data_file
-        self._data_files: tuple[Path, ...] = tuple(data_files or ())
-        self._use_hypotheses = use_hypotheses
-        self._system_prompt = system_prompt
+        super().__init__(config, provider)
         self._model_override = model_override
-        self._token_usage = TokenUsage()
         self._client: ClaudeSDKClient | None = None
         self._stderr_lines: list[str] = []
 
@@ -156,16 +153,17 @@ class SDKAgentExecutor:
         spec must carry the full map (PATH, DATABASE_URL, etc. inherited
         from the agent container plus the per-job overlays).
         """
+        config = self._config
         env = dict(os.environ)
-        env["OPENSCIENTIST_JOB_ID"] = self._job_dir.name
-        env["OPENSCIENTIST_JOB_DIR"] = str(self._job_dir)
-        env["OPENSCIENTIST_USE_HYPOTHESES"] = "1" if self._use_hypotheses else "0"
-        if self._data_file is not None:
-            env["OPENSCIENTIST_DATA_FILE"] = str(self._data_file)
+        env["OPENSCIENTIST_JOB_ID"] = config.job_dir.name
+        env["OPENSCIENTIST_JOB_DIR"] = str(config.job_dir)
+        env["OPENSCIENTIST_USE_HYPOTHESES"] = "1" if config.use_hypotheses else "0"
+        if config.data_file is not None:
+            env["OPENSCIENTIST_DATA_FILE"] = str(config.data_file)
         else:
             env.pop("OPENSCIENTIST_DATA_FILE", None)
-        if self._data_files:
-            env["OPENSCIENTIST_DATA_FILES"] = os.pathsep.join(str(p) for p in self._data_files)
+        if config.data_files:
+            env["OPENSCIENTIST_DATA_FILES"] = os.pathsep.join(str(p) for p in config.data_files)
         else:
             env.pop("OPENSCIENTIST_DATA_FILES", None)
         return env
@@ -173,33 +171,37 @@ class SDKAgentExecutor:
     def _build_options(self) -> ClaudeAgentOptions:
         """Build ClaudeAgentOptions with tools exposed via the standalone
         `openscientist_tools` subprocess MCP server."""
-        from openscientist.settings import get_settings
-
-        settings = get_settings()
+        job_dir = self._config.job_dir
 
         spec = StdioMcpServerSpec(
             name="openscientist-tools",
             command=sys.executable,
             args=("-m", "openscientist_tools"),
             env=self._build_subprocess_env(),
-            cwd=str(self._job_dir),
+            cwd=str(job_dir),
         )
 
         return ClaudeAgentOptions(
-            system_prompt=self._system_prompt,
+            system_prompt=self._config.system_prompt,
             mcp_servers={
                 "openscientist-tools": cast(McpStdioServerConfig, spec.to_sdk_config()),
             },
-            model=self._model_override or settings.provider.model,
+            model=self._model_override or self._provider.claude_model_name(),
             can_use_tool=self._allow_all_tools,
-            cwd=str(self._job_dir),
+            cwd=str(job_dir),
             stderr=self._stderr_callback,
             extra_args={},
         )
 
+    def _apply_provider_env(self) -> None:
+        """Apply the provider's required auth/routing env vars to the process
+        environment so the SDK CLI and the tools subprocess inherit them."""
+        os.environ.update(self._provider.claude_sdk_env())  # env-ok
+
     async def _ensure_client(self) -> ClaudeSDKClient:
         """Return a connected ClaudeSDKClient, creating one if needed."""
         if self._client is None:
+            self._apply_provider_env()
             options = self._build_options()
             self._client = ClaudeSDKClient(options=options)
             await self._client.connect()
@@ -414,8 +416,4 @@ class SDKAgentExecutor:
             except Exception:
                 logger.debug("Error during client disconnect", exc_info=True)
             self._client = None
-        logger.debug("SDKAgentExecutor shut down")
-
-    @property
-    def total_tokens(self) -> TokenUsage:
-        return self._token_usage
+        logger.debug("ClaudeCodeAgent shut down")

@@ -6,12 +6,12 @@ from claude_agent_sdk._internal import (
     message_parser as sdk_message_parser,  # type: ignore[import-not-found]
 )
 
-from openscientist.agent import sdk_executor
+from openscientist.agent import claude_code_agent
 
 
 def test_unknown_message_type_returns_sentinel() -> None:
     parsed = sdk_message_parser.parse_message({"type": "rate_limit_event"})
-    assert isinstance(parsed, sdk_executor._Sentinel)
+    assert isinstance(parsed, claude_code_agent._Sentinel)
     assert parsed.type == "rate_limit_event"
 
 
@@ -28,5 +28,5 @@ def test_non_dict_payload_still_raises_message_parse_error() -> None:
 
 def test_install_parse_message_patch_is_idempotent() -> None:
     patched = sdk_message_parser.parse_message
-    sdk_executor._install_parse_message_patch()
+    claude_code_agent._install_parse_message_patch()
     assert sdk_message_parser.parse_message is patched
