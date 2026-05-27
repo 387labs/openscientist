@@ -14,7 +14,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from openscientist.agent.protocol import IterationResult
+from openscientist.agent.base import IterationResult
 from openscientist.database.models import Job, JobChatMessage, User
 from openscientist.database.rls import set_current_user
 from openscientist.job_chat import get_chat_history, load_job_context, send_chat_message

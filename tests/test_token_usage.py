@@ -1,7 +1,7 @@
 """Tests for TokenUsage arithmetic and SDK usage parsing."""
 
+from openscientist.agent.base import TokenUsage
 from openscientist.agent.claude_code_agent import ClaudeCodeAgent
-from openscientist.agent.protocol import TokenUsage
 
 
 def test_add_accumulates_all_fields() -> None:

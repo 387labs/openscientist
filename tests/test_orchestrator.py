@@ -220,7 +220,7 @@ class TestDiscoveryCancellationAndFailure:
 
     @pytest.mark.asyncio
     async def test_run_discovery_stops_when_cancelled_before_next_iteration(self, tmp_path):
-        from openscientist.agent.protocol import IterationResult, TokenUsage
+        from openscientist.agent.base import IterationResult, TokenUsage
         from openscientist.orchestrator.discovery import run_discovery_async
 
         job_id = str(uuid4())
@@ -304,7 +304,7 @@ class TestDiscoveryCancellationAndFailure:
 
     @pytest.mark.asyncio
     async def test_run_discovery_marks_failed_when_iteration_fails(self, tmp_path):
-        from openscientist.agent.protocol import IterationResult, TokenUsage
+        from openscientist.agent.base import IterationResult, TokenUsage
         from openscientist.orchestrator.discovery import run_discovery_async
 
         job_id = str(uuid4())
