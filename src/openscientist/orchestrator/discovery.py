@@ -16,9 +16,8 @@ from uuid import UUID
 
 from sqlalchemy import select
 
-from openscientist.agent.base import AgentConfig
+from openscientist.agent.base import AbstractAgent, AgentConfig, IterationResult, TokenUsage
 from openscientist.agent.factory import get_agent
-from openscientist.agent.protocol import AgentExecutor, IterationResult, TokenUsage
 from openscientist.database.models import JobDataFile
 from openscientist.database.models.job import Job as JobModel
 from openscientist.database.session import AsyncSessionLocal
@@ -40,6 +39,7 @@ from openscientist.prompts import (
     get_system_prompt,
 )
 from openscientist.providers import get_provider
+from openscientist.providers.base_v2 import Provider
 from openscientist.settings import get_settings
 from openscientist.transcript import TranscriptEntry, save_transcript
 from openscientist.version import get_version_string
@@ -74,7 +74,7 @@ def _build_agent_executor(
     data_file: Path | None,
     use_hypotheses: bool = False,
     data_files: list[Path] | None = None,
-) -> AgentExecutor:
+) -> AbstractAgent[Provider]:
     """Create a configured agent for discovery/report phases."""
     system_prompt = get_system_prompt()
     logger.info("Built system prompt (%d chars)", len(system_prompt))
@@ -144,7 +144,7 @@ async def _assert_job_not_cancelled(job_id: str) -> None:
 
 async def _run_primary_discovery_loop(
     *,
-    executor: AgentExecutor,
+    executor: AbstractAgent[Provider],
     job_dir: Path,
     runtime: dict[str, Any],
     provenance_dir: Path,
@@ -334,7 +334,7 @@ async def _try_generate_report_pdf(report_path: Path) -> None:
 
 
 async def _run_report_generation_phase(
-    executor: AgentExecutor,
+    executor: AbstractAgent[Provider],
     job_dir: Path,
     research_question: str,
     description: str | None = None,
