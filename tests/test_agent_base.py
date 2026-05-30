@@ -14,26 +14,8 @@ from openscientist.agent.base import (
     TokenUsage,
 )
 from openscientist.agent.mcp_specs import StdioMcpServerSpec
-from openscientist.providers.base_v2 import ClaudeCompatible
-
-
-class _StubProvider(ClaudeCompatible):
-    @property
-    def id(self) -> str:
-        return "stub"
-
-    @property
-    def display_name(self) -> str:
-        return "Stub"
-
-    def validate_required_config(self) -> list[str]:
-        return []
-
-    def claude_sdk_env(self) -> dict[str, str]:
-        return {}
-
-    def claude_model_name(self) -> str:
-        return "stub-model"
+from openscientist.providers.base import ClaudeCompatible
+from tests.helpers import StubClaudeProvider as _StubProvider
 
 
 class _StubAgent(AbstractAgent[ClaudeCompatible]):

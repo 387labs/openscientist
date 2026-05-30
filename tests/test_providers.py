@@ -2,7 +2,6 @@
 
 import os
 from contextlib import ExitStack
-from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -10,18 +9,18 @@ import pytest
 from openscientist.exceptions import ProviderError
 from openscientist.providers import get_provider
 from openscientist.providers.anthropic import AnthropicProvider
-from openscientist.providers.base import BaseProvider, CostInfo
+from openscientist.providers.base import CostInfo, Provider
 from openscientist.providers.bedrock import BedrockProvider
 from openscientist.providers.cborg import CborgProvider
 from openscientist.providers.foundry import FoundryProvider
 from openscientist.providers.vertex import VertexProvider
 from openscientist.settings import clear_settings_cache
 
-# ─── Concrete stub for testing BaseProvider ───────────────────────────
+# ─── Concrete stub for testing the Provider base ──────────────────────
 
 
-class StubProvider(BaseProvider):
-    """Minimal concrete provider for testing BaseProvider logic."""
+class StubProvider(Provider):
+    """Minimal concrete provider for testing Provider validation and budget logic."""
 
     def __init__(
         self,
@@ -34,43 +33,25 @@ class StubProvider(BaseProvider):
         self._optional_warnings = optional_warnings or []
         super().__init__()
 
-    def _validate_required_config(self) -> list[str]:
+    @property
+    def id(self) -> str:
+        return "stub"
+
+    @property
+    def display_name(self) -> str:
+        return "StubProvider"
+
+    def validate_required_config(self) -> list[str]:
         return self._required_errors
 
     def _validate_optional_config(self) -> list[str]:
         return self._optional_warnings
-
-    def setup_environment(self) -> None:
-        pass
 
     def get_cost_info(self, lookback_hours: int = 24) -> CostInfo:
         _ = lookback_hours
         if self._cost_info is None:
             raise ProviderError("No cost info configured")
         return self._cost_info
-
-    @property
-    def name(self) -> str:
-        return "StubProvider"
-
-    async def send_message(
-        self,
-        messages: list[dict[str, str]],
-        system: str | None = None,
-        model: str | None = None,
-        max_tokens: int = 4096,
-    ) -> str:
-        raise NotImplementedError("StubProvider does not send messages")
-
-    async def send_message_with_tools(
-        self,
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]],
-        system: str | None = None,
-        model: str | None = None,
-        max_tokens: int = 4096,
-    ) -> dict[str, Any]:
-        raise NotImplementedError("StubProvider does not send messages")
 
 
 # ─── Tests ────────────────────────────────────────────────────────────
@@ -97,7 +78,7 @@ class TestGetProvider:
     )
     def test_cborg_provider(self):
         provider = get_provider()
-        assert provider.name.lower() == "cborg"
+        assert provider.display_name.lower() == "cborg"
 
     def test_vertex_provider(self, tmp_path):
         creds_file = tmp_path / "creds.json"
@@ -113,7 +94,7 @@ class TestGetProvider:
             },
         ):
             provider = get_provider()
-            assert "vertex" in provider.name.lower()
+            assert "vertex" in provider.display_name.lower()
 
     @patch.dict(
         os.environ,
@@ -127,7 +108,7 @@ class TestGetProvider:
     def test_bedrock_provider(self):
         """Bedrock provider initializes with valid AWS config."""
         provider = get_provider()
-        assert "bedrock" in provider.name.lower()
+        assert "bedrock" in provider.display_name.lower()
 
     @patch.dict(os.environ, {"OPENSCIENTIST_PROVIDER": "unknown_provider"})
     def test_unknown_provider_raises(self):
@@ -149,12 +130,12 @@ class TestGetProvider:
             get_provider()
 
 
-class TestBaseProviderInit:
-    """Tests for BaseProvider initialisation and validation."""
+class TestProviderInit:
+    """Tests for Provider initialisation and validation."""
 
     def test_valid_config_no_errors(self):
         provider = StubProvider()
-        assert provider.name == "StubProvider"
+        assert provider.display_name == "StubProvider"
 
     def test_required_config_errors_raise(self):
         with pytest.raises(ValueError, match="configuration errors"):
@@ -190,7 +171,7 @@ class TestCostInfo:
 
 
 class TestCheckBudgetLimits:
-    """Tests for BaseProvider.check_budget_limits()."""
+    """Tests for Provider.check_budget_limits()."""
 
     def _make_provider(self, **cost_kwargs) -> StubProvider:
         cost = CostInfo(
@@ -358,7 +339,7 @@ class TestGetProviderAllNames:
     )
     def test_anthropic(self):
         provider = get_provider()
-        assert provider.name == "Anthropic"
+        assert provider.display_name == "Anthropic"
 
     @patch.dict(
         os.environ,
@@ -370,7 +351,7 @@ class TestGetProviderAllNames:
     )
     def test_cborg(self):
         provider = get_provider()
-        assert provider.name == "CBORG"
+        assert provider.display_name == "CBORG"
 
     @patch.dict(
         os.environ,
@@ -383,7 +364,7 @@ class TestGetProviderAllNames:
     )
     def test_bedrock(self):
         provider = get_provider()
-        assert provider.name == "AWS Bedrock"
+        assert provider.display_name == "AWS Bedrock"
 
     def test_vertex(self, tmp_path):
         creds = tmp_path / "creds.json"
@@ -399,7 +380,7 @@ class TestGetProviderAllNames:
             },
         ):
             provider = get_provider()
-            assert provider.name == "Vertex AI"
+            assert provider.display_name == "Vertex AI"
 
     @patch.dict(os.environ, {"OPENSCIENTIST_PROVIDER": "unknown_xyz"})
     def test_unknown_raises_with_valid_options(self):

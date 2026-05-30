@@ -203,7 +203,7 @@ class TestFoundryClaudeCompatible:
             assert FoundryProvider().display_name == "Azure AI Foundry"
 
     def test_is_claude_compatible_and_provider(self) -> None:
-        from openscientist.providers.base_v2 import (
+        from openscientist.providers.base import (
             ClaudeCompatible,
             CodexCompatible,
             Provider,
@@ -226,11 +226,6 @@ class TestFoundryClaudeCompatible:
         with patch("openscientist.providers.foundry.get_settings", return_value=no_endpoint):
             errors = provider.validate_required_config()
         assert any("ANTHROPIC_FOUNDRY_RESOURCE" in e for e in errors)
-
-    def test_private_validate_delegates_to_public(self) -> None:
-        with patch("openscientist.providers.foundry.get_settings", return_value=_mock_settings()):
-            provider = FoundryProvider()
-            assert provider._validate_required_config() == provider.validate_required_config()
 
     def test_claude_sdk_env_resource_mode(self) -> None:
         settings = _mock_settings(resource="res-a", base_url=None, api_key="k1")

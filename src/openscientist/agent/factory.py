@@ -14,7 +14,7 @@ import logging
 from openscientist.agent.base import AbstractAgent, AgentConfig
 from openscientist.agent.claude_code_agent import ClaudeCodeAgent
 from openscientist.providers.anthropic import AnthropicProvider
-from openscientist.providers.base_v2 import ClaudeCompatible, Provider
+from openscientist.providers.base import ClaudeCompatible, Provider
 from openscientist.providers.bedrock import BedrockProvider
 from openscientist.providers.cborg import CborgProvider
 from openscientist.providers.foundry import FoundryProvider

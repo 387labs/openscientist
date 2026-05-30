@@ -32,7 +32,7 @@ class TestAnthropicProviderValidation:
         mock_settings.provider.model = "claude-sonnet-4-6"
         with patch("openscientist.providers.anthropic.get_settings", return_value=mock_settings):
             provider = AnthropicProvider()
-            assert provider.name == "Anthropic"
+            assert provider.display_name == "Anthropic"
 
     def test_oauth_present_no_error(self):
         mock_settings = MagicMock()
@@ -41,7 +41,7 @@ class TestAnthropicProviderValidation:
         mock_settings.provider.model = "claude-sonnet-4-6"
         with patch("openscientist.providers.anthropic.get_settings", return_value=mock_settings):
             provider = AnthropicProvider()
-            assert provider.name == "Anthropic"
+            assert provider.display_name == "Anthropic"
 
     def test_optional_no_model_warns(self):
         mock_settings = MagicMock()
@@ -51,7 +51,7 @@ class TestAnthropicProviderValidation:
         with patch("openscientist.providers.anthropic.get_settings", return_value=mock_settings):
             provider = AnthropicProvider()
             # Provider should still initialize (warnings don't prevent init)
-            assert provider.name == "Anthropic"
+            assert provider.display_name == "Anthropic"
 
 
 class TestAnthropicSetupEnvironment:
@@ -123,7 +123,7 @@ class TestAnthropicClaudeCompatible:
             assert AnthropicProvider().display_name == "Anthropic"
 
     def test_is_claude_compatible_and_provider(self) -> None:
-        from openscientist.providers.base_v2 import (
+        from openscientist.providers.base import (
             ClaudeCompatible,
             CodexCompatible,
             Provider,
@@ -140,7 +140,7 @@ class TestAnthropicClaudeCompatible:
             assert AnthropicProvider().validate_required_config() == []
 
     def test_validate_required_config_error_when_unset(self) -> None:
-        # Construct with a valid config (BaseProvider.__init__ would raise otherwise).
+        # Construct with a valid config (Provider.__init__ would raise otherwise).
         with patch("openscientist.providers.anthropic.get_settings", return_value=_mock_settings()):
             provider = AnthropicProvider()
         # Re-evaluate with both auth fields unset.
@@ -151,11 +151,6 @@ class TestAnthropicClaudeCompatible:
             errors = provider.validate_required_config()
         assert len(errors) == 1
         assert "ANTHROPIC_API_KEY" in errors[0]
-
-    def test_private_validate_delegates_to_public(self) -> None:
-        with patch("openscientist.providers.anthropic.get_settings", return_value=_mock_settings()):
-            provider = AnthropicProvider()
-            assert provider._validate_required_config() == provider.validate_required_config()
 
     def test_claude_sdk_env_api_key_mode(self) -> None:
         settings = _mock_settings(api_key="sk-ant-xyz", oauth=None)

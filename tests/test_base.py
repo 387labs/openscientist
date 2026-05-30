@@ -1,14 +1,24 @@
-"""Tests for the `Provider` ABC family in `providers/base_v2.py`."""
+"""Tests for the `Provider` ABC family in `providers/base.py`."""
 
 from __future__ import annotations
 
 import pytest
 
-from openscientist.providers.base_v2 import (
+from openscientist.providers.base import (
     ClaudeCompatible,
     CodexCompatible,
+    CostInfo,
     Provider,
 )
+
+
+def _stub_cost_info(provider_name: str, lookback_hours: int = 24) -> CostInfo:
+    return CostInfo(
+        provider_name=provider_name,
+        total_spend_usd=None,
+        recent_spend_usd=None,
+        recent_period_hours=lookback_hours,
+    )
 
 
 class _StubClaude(ClaudeCompatible):
@@ -22,6 +32,12 @@ class _StubClaude(ClaudeCompatible):
 
     def validate_required_config(self) -> list[str]:
         return []
+
+    def get_cost_info(self, lookback_hours: int = 24) -> CostInfo:
+        return _stub_cost_info(self.display_name, lookback_hours)
+
+    def setup_environment(self) -> None:
+        return None
 
     def claude_sdk_env(self) -> dict[str, str]:
         return {"ANTHROPIC_API_KEY": "sk-test"}
@@ -40,7 +56,10 @@ class _StubCodex(CodexCompatible):
         return "Stub Codex"
 
     def validate_required_config(self) -> list[str]:
-        return ["missing OPENAI_API_KEY"]
+        return []
+
+    def get_cost_info(self, lookback_hours: int = 24) -> CostInfo:
+        return _stub_cost_info(self.display_name, lookback_hours)
 
     def codex_config_overrides(self) -> list[str]:
         return ["model_reasoning_effort=high"]
@@ -63,6 +82,12 @@ class _StubHybrid(ClaudeCompatible, CodexCompatible):
 
     def validate_required_config(self) -> list[str]:
         return []
+
+    def get_cost_info(self, lookback_hours: int = 24) -> CostInfo:
+        return _stub_cost_info(self.display_name, lookback_hours)
+
+    def setup_environment(self) -> None:
+        return None
 
     def claude_sdk_env(self) -> dict[str, str]:
         return {}
@@ -108,6 +133,12 @@ def test_incomplete_claude_subclass_cannot_instantiate() -> None:
         def validate_required_config(self) -> list[str]:
             return []
 
+        def get_cost_info(self, lookback_hours: int = 24) -> CostInfo:
+            return _stub_cost_info(self.display_name, lookback_hours)
+
+        def setup_environment(self) -> None:
+            return None
+
         def claude_model_name(self) -> str:
             return "m"
 
@@ -115,6 +146,17 @@ def test_incomplete_claude_subclass_cannot_instantiate() -> None:
 
     with pytest.raises(TypeError):
         _Incomplete()  # type: ignore[abstract]
+
+
+def test_construction_raises_on_required_config_errors() -> None:
+    """The Provider base validates configuration on construction."""
+
+    class _Misconfigured(_StubClaude):
+        def validate_required_config(self) -> list[str]:
+            return ["missing OPENAI_API_KEY"]
+
+    with pytest.raises(ValueError, match="missing OPENAI_API_KEY"):
+        _Misconfigured()
 
 
 def test_complete_claude_provider_instantiates_and_returns_values() -> None:
@@ -130,7 +172,7 @@ def test_complete_codex_provider_instantiates_and_returns_values() -> None:
     provider = _StubCodex()
     assert provider.id == "stub-codex"
     assert provider.display_name == "Stub Codex"
-    assert provider.validate_required_config() == ["missing OPENAI_API_KEY"]
+    assert provider.validate_required_config() == []
     assert provider.codex_config_overrides() == ["model_reasoning_effort=high"]
     assert provider.codex_model_name() == "gpt-codex-test"
     assert provider.codex_model_provider_id() == "openai"

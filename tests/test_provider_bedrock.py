@@ -61,7 +61,7 @@ class TestBedrockProviderValidation:
 
         with patch("openscientist.providers.bedrock.get_settings", return_value=mock_settings):
             provider = BedrockProvider()
-            assert "bedrock" in provider.name.lower()
+            assert "bedrock" in provider.display_name.lower()
 
     def test_valid_profile_config(self):
         mock_settings = MagicMock()
@@ -75,7 +75,7 @@ class TestBedrockProviderValidation:
 
         with patch("openscientist.providers.bedrock.get_settings", return_value=mock_settings):
             provider = BedrockProvider()
-            assert provider.name == "AWS Bedrock"
+            assert provider.display_name == "AWS Bedrock"
 
     def test_valid_bearer_token_config(self):
         mock_settings = MagicMock()
@@ -89,7 +89,7 @@ class TestBedrockProviderValidation:
 
         with patch("openscientist.providers.bedrock.get_settings", return_value=mock_settings):
             provider = BedrockProvider()
-            assert provider.name == "AWS Bedrock"
+            assert provider.display_name == "AWS Bedrock"
 
 
 class TestBedrockSetupEnvironment:
@@ -199,7 +199,7 @@ class TestBedrockClaudeCompatible:
             assert BedrockProvider().display_name == "AWS Bedrock"
 
     def test_is_claude_compatible_and_provider(self) -> None:
-        from openscientist.providers.base_v2 import (
+        from openscientist.providers.base import (
             ClaudeCompatible,
             CodexCompatible,
             Provider,
@@ -224,11 +224,6 @@ class TestBedrockClaudeCompatible:
         assert len(errors) == 2
         assert any("AWS_REGION" in e for e in errors)
         assert any("credentials" in e.lower() for e in errors)
-
-    def test_private_validate_delegates_to_public(self) -> None:
-        with patch("openscientist.providers.bedrock.get_settings", return_value=_mock_settings()):
-            provider = BedrockProvider()
-            assert provider._validate_required_config() == provider.validate_required_config()
 
     def test_claude_sdk_env_access_key_mode(self) -> None:
         settings = _mock_settings(region="eu-west-1", access_key="AKIA9", secret="shh")

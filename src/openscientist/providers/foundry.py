@@ -10,7 +10,7 @@ import os
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from openscientist.providers.base import BaseProvider, CostInfo
+from openscientist.providers.base import ClaudeCompatible, CostInfo
 from openscientist.settings import get_settings
 
 from ._anthropic_common import (
@@ -23,7 +23,6 @@ from ._env_cleanup import (
     clear_env_vars,
     clear_provider_mode_flags,
 )
-from .base_v2 import ClaudeCompatible
 
 logger = logging.getLogger(__name__)
 
@@ -62,12 +61,8 @@ def _query_azure_cost_usd(
     return float(result.rows[0][0])
 
 
-class FoundryProvider(BaseProvider, ClaudeCompatible):
+class FoundryProvider(ClaudeCompatible):
     """Azure AI Foundry provider."""
-
-    @property
-    def name(self) -> str:
-        return "Azure AI Foundry"
 
     @property
     def id(self) -> str:
@@ -110,10 +105,6 @@ class FoundryProvider(BaseProvider, ClaudeCompatible):
                 )
 
         return errors
-
-    def _validate_required_config(self) -> list[str]:
-        """Legacy `BaseProvider` hook; delegates to the public method."""
-        return self.validate_required_config()
 
     def claude_sdk_env(self) -> dict[str, str]:
         """Foundry routing/auth env vars the claude-agent-sdk CLI must see.

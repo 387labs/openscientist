@@ -1,9 +1,16 @@
-"""
-Base provider interface and shared types.
+"""Provider base hierarchy (two-axis Provider x Agent model).
+
+A `Provider` is a model-hosting service (Anthropic, Vertex, Bedrock,
+OpenAI, ...). It owns cross-family concerns: configuration validation
+and cost/budget tracking. The `ClaudeCompatible` and `CodexCompatible`
+subclasses add the wire-format-specific methods that let a provider be
+driven by the Claude Code agent or the Codex agent respectively.
 """
 
+from __future__ import annotations
+
+import abc
 import logging
-from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -42,15 +49,17 @@ class CostInfo:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-class BaseProvider(ABC):
-    """Abstract base class for model providers."""
+class Provider(abc.ABC):
+    """A model-hosting service. Family-specific behavior lives on the
+    marker subclasses below; configuration validation and cost/budget
+    tracking are shared here."""
 
     def __init__(self) -> None:
-        """Initialize and validate provider configuration."""
-        errors = self._validate_required_config()
+        """Validate configuration on construction."""
+        errors = self.validate_required_config()
         if errors:
             raise ValueError(
-                f"{self.name} provider configuration errors:\n"
+                f"{self.display_name} provider configuration errors:\n"
                 + "\n".join(f"  - {err}" for err in errors)
             )
 
@@ -58,36 +67,32 @@ class BaseProvider(ABC):
         if warnings:
             logger.warning(
                 "%s provider configuration warnings:\n%s",
-                self.name,
+                self.display_name,
                 "\n".join(f"  - {warn}" for warn in warnings),
             )
 
-    @abstractmethod
-    def _validate_required_config(self) -> list[str]:
-        """
-        Validate required configuration.
+    @property
+    @abc.abstractmethod
+    def id(self) -> str:
+        """Stable identifier used by the factory selector."""
 
-        Returns:
-            List of error messages (empty if valid)
-        """
+    @property
+    @abc.abstractmethod
+    def display_name(self) -> str: ...
+
+    @abc.abstractmethod
+    def validate_required_config(self) -> list[str]:
+        """Return a list of error strings if the provider is
+        misconfigured; empty list otherwise."""
 
     def _validate_optional_config(self) -> list[str]:
-        """
-        Validate optional configuration.
+        """Return warning messages for optional misconfiguration (empty by
+        default)."""
+        return []
 
-        Returns:
-            List of warning messages (empty if valid)
-        """
-        return []  # Default: no optional config
-
-    @abstractmethod
-    def setup_environment(self) -> None:
-        """Configure environment variables for Claude CLI."""
-
-    @abstractmethod
+    @abc.abstractmethod
     def get_cost_info(self, lookback_hours: int = 24) -> CostInfo:
-        """
-        Get project spending information.
+        """Return project spending information.
 
         Args:
             lookback_hours: Time window for recent_spend_usd
@@ -97,15 +102,10 @@ class BaseProvider(ABC):
         """
 
     def check_budget_limits(self, lookback_hours: int = 24) -> dict[str, Any]:
-        """
-        Check if budget limits are exceeded.
+        """Check if budget limits are exceeded.
 
         Returns:
-            {
-                "can_proceed": bool,
-                "warnings": List[str],
-                "errors": List[str]
-            }
+            {"can_proceed": bool, "warnings": List[str], "errors": List[str]}
         """
         try:
             cost_info = self.get_cost_info(lookback_hours=lookback_hours)
@@ -121,18 +121,13 @@ class BaseProvider(ABC):
         return self.evaluate_budget(cost_info)
 
     def evaluate_budget(self, cost_info: CostInfo) -> dict[str, Any]:
-        """
-        Evaluate budget limits against pre-fetched cost info.
+        """Evaluate budget limits against pre-fetched cost info.
 
         Use this instead of check_budget_limits() when you already have a
         CostInfo object to avoid duplicate API calls.
 
         Returns:
-            {
-                "can_proceed": bool,
-                "warnings": List[str],
-                "errors": List[str]
-            }
+            {"can_proceed": bool, "warnings": List[str], "errors": List[str]}
         """
         warnings = []
         errors = []
@@ -177,79 +172,51 @@ class BaseProvider(ABC):
         if cost_info.budget_remaining_usd is not None:
             if cost_info.budget_remaining_usd <= 0:
                 errors.append(
-                    f"{self.name} budget exhausted (${cost_info.budget_limit_usd or 0:.2f} limit)"
+                    f"{self.display_name} budget exhausted "
+                    f"(${cost_info.budget_limit_usd or 0:.2f} limit)"
                 )
             elif cost_info.budget_remaining_usd < 10:
                 warnings.append(
-                    f"{self.name} budget low: ${cost_info.budget_remaining_usd:.2f} remaining"
+                    f"{self.display_name} budget low: "
+                    f"${cost_info.budget_remaining_usd:.2f} remaining"
                 )
 
         return {"can_proceed": len(errors) == 0, "warnings": warnings, "errors": errors}
 
-    @property
-    @abstractmethod
-    def name(self) -> str:
-        """Provider name for logging/display."""
 
-    @abstractmethod
-    async def send_message(
-        self,
-        messages: list[dict[str, str]],
-        system: str | None = None,
-        model: str | None = None,
-        max_tokens: int = 4096,
-    ) -> str:
-        """
-        Send a message using the provider's SDK and return response text.
+class ClaudeCompatible(Provider, abc.ABC):
+    """Provider that speaks the Anthropic Messages API and can be driven
+    by the Claude Code agent."""
 
-        This method bypasses the Claude Code CLI and calls the API directly,
-        avoiding the CLI's local pre-flight content filter which can produce
-        false positives on legitimate scientific content.
+    @abc.abstractmethod
+    def setup_environment(self) -> None:
+        """Configure process environment variables for the Claude CLI
+        (auth + routing flags), clearing any conflicting flags from a
+        previously-selected provider."""
 
-        Args:
-            messages: List of message dicts with 'role' and 'content' keys
-            system: Optional system prompt
-            model: Optional model override (uses provider default if not set)
-            max_tokens: Maximum tokens in response (default 4096)
+    @abc.abstractmethod
+    def claude_sdk_env(self) -> dict[str, str]:
+        """Environment variables the claude-agent-sdk CLI must see
+        (e.g., ANTHROPIC_API_KEY, ANTHROPIC_BASE_URL, AWS_REGION)."""
 
-        Returns:
-            The assistant's response text
+    @abc.abstractmethod
+    def claude_model_name(self) -> str:
+        """Model name to pass to ClaudeAgentOptions.model."""
 
-        Raises:
-            Exception: If the API call fails
-        """
 
-    @abstractmethod
-    async def send_message_with_tools(
-        self,
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]],
-        system: str | None = None,
-        model: str | None = None,
-        max_tokens: int = 4096,
-    ) -> dict[str, Any]:
-        """
-        Send a message with tool definitions and return full response.
+class CodexCompatible(Provider, abc.ABC):
+    """Provider that speaks the OpenAI Responses API and can be driven by
+    the Codex agent."""
 
-        This method supports the agentic loop pattern where the model can
-        request tool calls, and the caller handles execution.
+    @abc.abstractmethod
+    def codex_config_overrides(self) -> list[str]:
+        """`key=value` entries for AppServerConfig.config_overrides."""
 
-        Args:
-            messages: List of message dicts with 'role' and 'content' keys.
-                     Content can be a string or list of content blocks.
-            tools: List of tool definitions in Anthropic format:
-                   [{"name": str, "description": str, "input_schema": dict}, ...]
-            system: Optional system prompt
-            model: Optional model override (uses provider default if not set)
-            max_tokens: Maximum tokens in response (default 4096)
+    @abc.abstractmethod
+    def codex_model_name(self) -> str:
+        """Model name to pass to thread_start(model=...)."""
 
-        Returns:
-            Dict with:
-                - stop_reason: str ("end_turn", "tool_use", "max_tokens", etc.)
-                - content: List of content blocks (text and/or tool_use)
-                - model: str (the model used)
-                - usage: dict (token usage info)
-
-        Raises:
-            Exception: If the API call fails
-        """
+    @abc.abstractmethod
+    def codex_model_provider_id(self) -> str:
+        """The model_providers.<id> key to pass to
+        thread_start(model_provider=...)."""

@@ -15,23 +15,18 @@ from ._anthropic_common import (
     send_anthropic_message_with_tools,
 )
 from ._env_cleanup import VERTEX_PROVIDER_ENV_VARS, clear_env_vars, clear_provider_mode_flags
-from .base import BaseProvider, CostInfo
-from .base_v2 import ClaudeCompatible
+from .base import ClaudeCompatible, CostInfo
 
 logger = logging.getLogger(__name__)
 
 
-class AnthropicProvider(BaseProvider, ClaudeCompatible):
+class AnthropicProvider(ClaudeCompatible):
     """
     Direct Anthropic API provider.
 
     Uses ANTHROPIC_API_KEY for authentication directly with Anthropic's API.
     This is for users who want to bring their own personal API key.
     """
-
-    @property
-    def name(self) -> str:
-        return "Anthropic"
 
     @property
     def id(self) -> str:
@@ -57,10 +52,6 @@ class AnthropicProvider(BaseProvider, ClaudeCompatible):
             )
 
         return errors
-
-    def _validate_required_config(self) -> list[str]:
-        """Legacy `BaseProvider` hook; delegates to the public method."""
-        return self.validate_required_config()
 
     def claude_sdk_env(self) -> dict[str, str]:
         """Auth env vars the claude-agent-sdk CLI must see."""
@@ -113,7 +104,7 @@ class AnthropicProvider(BaseProvider, ClaudeCompatible):
         so we return unknown for cost tracking.
         """
         return CostInfo(
-            provider_name=self.name,
+            provider_name=self.display_name,
             total_spend_usd=None,
             recent_spend_usd=None,
             recent_period_hours=lookback_hours,

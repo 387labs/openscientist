@@ -273,7 +273,7 @@ class ProviderSettings(BaseSettings):
         Credential checks remain warn-only so that settings can always be
         constructed (e.g. during testing or when only a subset of env vars
         is available); the authoritative credential validation lives in each
-        provider's ``_validate_required_config``. Model-name mismatches do
+        provider's ``validate_required_config``. Model-name mismatches do
         raise here because a wrong-family model id is a hard incompatibility
         the user must fix before any agent call can succeed.
         """

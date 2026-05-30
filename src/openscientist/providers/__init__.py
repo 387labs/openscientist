@@ -7,11 +7,11 @@ Providers handle:
 - Provider-specific authentication and setup
 """
 
-from openscientist.providers.base import BaseProvider, CostInfo
+from openscientist.providers.base import ClaudeCompatible, CostInfo
 from openscientist.settings import get_settings
 
 
-def get_provider() -> BaseProvider:
+def get_provider() -> ClaudeCompatible:
     """
     Get the configured provider based on environment.
 
@@ -100,4 +100,4 @@ def check_provider_config() -> tuple[bool, str, list[str]]:
         return (False, provider_name, errors)
 
 
-__all__ = ["BaseProvider", "CostInfo", "check_provider_config", "get_provider"]
+__all__ = ["ClaudeCompatible", "CostInfo", "check_provider_config", "get_provider"]
