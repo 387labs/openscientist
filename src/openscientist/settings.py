@@ -201,7 +201,7 @@ class ProviderSettings(BaseSettings):
     def _unknown_provider_warnings(provider: str) -> list[str]:
         return [
             f"Unknown provider '{provider}'. "
-            "Valid options: anthropic, cborg, vertex, bedrock, codex, foundry"
+            "Valid options: anthropic, cborg, vertex, bedrock, foundry, openai"
         ]
 
     _LEGACY_ENV_VAR_RENAMES = (
@@ -286,6 +286,7 @@ class ProviderSettings(BaseSettings):
             "vertex": self._vertex_warnings,
             "bedrock": self._bedrock_warnings,
             "foundry": lambda: [],
+            "openai": lambda: [],
         }
         warnings = warning_builders.get(
             provider, lambda: self._unknown_provider_warnings(provider)

@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
@@ -96,6 +97,23 @@ class CodexAgent(AbstractAgent[CodexCompatible]):
         if self._config.system_prompt:
             (self._config.job_dir / "AGENTS.md").write_text(self._config.system_prompt)
 
+    def _ensure_auth(self) -> None:
+        """Make the per-job ``CODEX_HOME`` able to authenticate.
+
+        If an API key is available (provider env or ``OPENAI_API_KEY``),
+        codex uses it directly. Otherwise copy the codex CLI's stored OAuth
+        login (``~/.codex/auth.json``) into the per-job home so ``codex
+        exec`` can authenticate via the ChatGPT subscription.
+        """
+        if self._provider.codex_sdk_env() or os.environ.get("OPENAI_API_KEY"):
+            return
+        source = Path.home() / ".codex" / "auth.json"
+        dest = self._codex_home() / "auth.json"
+        if source.exists() and not dest.exists():
+            shutil.copy2(source, dest)
+            dest.chmod(0o600)
+            logger.info("Provisioned codex auth into per-job CODEX_HOME")
+
     def _make_codex(self) -> Codex:
         """Build a ``Codex`` whose child reads the per-job config home and
         the provider's auth env."""
@@ -113,12 +131,16 @@ class CodexAgent(AbstractAgent[CodexCompatible]):
         if self._thread is None:
             self._write_codex_config()
             self._write_agents_md()
+            self._ensure_auth()
             codex = self._make_codex()
             self._thread = codex.start_thread(
                 ThreadOptions(
                     model=self._provider.codex_model_name(),
                     working_directory=str(self._config.job_dir),
                     sandbox_mode="workspace-write",
+                    # Job dirs are not git repos. Without this, codex exec
+                    # refuses to run ("not inside a trusted directory").
+                    skip_git_repo_check=True,
                 )
             )
             logger.info("Codex thread started")

@@ -7,24 +7,25 @@ Providers handle:
 - Provider-specific authentication and setup
 """
 
-from openscientist.providers.base import ClaudeCompatible, CostInfo
+from openscientist.providers.base import CostInfo, Provider
 from openscientist.settings import get_settings
 
 
-def get_provider() -> ClaudeCompatible:
+def get_provider() -> Provider:
     """
     Get the configured provider based on environment.
 
     Returns:
-        Provider instance (AnthropicProvider, CborgProvider, VertexProvider,
-        BedrockProvider, or FoundryProvider)
+        Provider instance (Anthropic/CBORG/Vertex/Bedrock/Foundry, all
+        ClaudeCompatible, or OpenAI, which is CodexCompatible)
 
     Raises:
         ValueError: If provider is unknown or misconfigured
 
     Environment:
-        OPENSCIENTIST_PROVIDER: Provider name ("anthropic", "cborg", "vertex", "bedrock", "foundry").
-                               Defaults to "anthropic" if not set.
+        OPENSCIENTIST_PROVIDER: Provider name ("anthropic", "cborg", "vertex",
+                               "bedrock", "foundry", "openai"). Defaults to
+                               "anthropic" if not set.
     """
     settings = get_settings()
     provider_name = settings.provider.provider_id.lower()
@@ -49,8 +50,13 @@ def get_provider() -> ClaudeCompatible:
         from openscientist.providers.foundry import FoundryProvider
 
         return FoundryProvider()
+    if provider_name == "openai":
+        from openscientist.providers.openai import OpenAIDirectProvider
+
+        return OpenAIDirectProvider()
     raise ValueError(
-        f"Unknown provider '{provider_name}'. Valid options: anthropic, cborg, vertex, bedrock, foundry"
+        f"Unknown provider '{provider_name}'. Valid options: anthropic, cborg, "
+        "vertex, bedrock, foundry, openai"
     )
 
 
@@ -82,7 +88,7 @@ def check_provider_config() -> tuple[bool, str, list[str]]:
 
     provider_name = settings.provider.provider_id.lower()
 
-    valid_providers = ("anthropic", "cborg", "vertex", "bedrock", "foundry")
+    valid_providers = ("anthropic", "cborg", "vertex", "bedrock", "foundry", "openai")
     if provider_name not in valid_providers:
         return (
             False,

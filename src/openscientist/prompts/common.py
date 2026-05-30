@@ -1,25 +1,42 @@
 """
-Prompt templates for OpenScientist orchestrator.
+Shared (backend-agnostic) prompt building blocks for the OpenScientist
+orchestrator.
 
-System prompts and discovery iteration prompts for the autonomous agent.
+The system prompt and per-job doc bodies live here, parameterised over a
+small set of backend-divergent fragments (`BackendFragments`) so the
+Claude and Codex variants share one body. See `prompts.claude` /
+`prompts.codex` for the concrete fragments and public entry points.
 """
 
+from dataclasses import dataclass
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .database.models import Skill
+from ..database.models import Skill
 
 
-def get_system_prompt() -> str:
-    """
-    Get system prompt for Claude.
+@dataclass(frozen=True)
+class BackendFragments:
+    """The handful of strings that differ between the Claude and Codex
+    agents' built-in tool vocabulary and environment."""
 
-    Returns:
-        System prompt string
-    """
-    return """You are an autonomous scientific discovery agent. Your goal is to discover mechanistic insights from scientific data through iterative hypothesis testing.
+    skills_location: str
+    """Phrase naming where workflow/domain skills live (e.g. the
+    ``.claude/skills/`` directory for Claude)."""
+
+    builtin_read_tool: str
+    """Phrase naming the agent's built-in file-reading tool (long form, as it
+    appears in the file-type table)."""
+
+    builtin_read_tool_short: str
+    """Shorter form of the same, as it appears in the warning line."""
+
+
+def build_system_prompt(frags: BackendFragments) -> str:
+    """Backend-agnostic system prompt body, with backend fragments inserted."""
+    return f"""You are an autonomous scientific discovery agent. Your goal is to discover mechanistic insights from scientific data through iterative hypothesis testing.
 
 **Your Capabilities:**
 
@@ -34,7 +51,7 @@ IMPORTANT:
 - Call `set_job_title` early (iteration 1) to give the job a meaningful, concise title — a short noun phrase
 - Call `set_status` at the START of each significant action to let users know what you're working on
 
-Domain-specific analysis skills are in `.claude/skills/`. Read ALL workflow skills (category `workflow`) in iteration 1 and follow them throughout your investigation. Read domain skills that match your data type. These skills are mandatory methodology — not optional references.
+Domain-specific analysis skills are in {frags.skills_location}. Read ALL workflow skills (category `workflow`) in iteration 1 and follow them throughout your investigation. Read domain skills that match your data type. These skills are mandatory methodology — not optional references.
 
 **Your Approach:**
 
@@ -221,19 +238,22 @@ def format_skills_list(skills: dict[str, dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def generate_job_claude_md(*, use_hypotheses: bool = False, phenix_available: bool = False) -> str:
-    """
-    Generate JOB_CLAUDE.md content for the discovery agent.
+def build_job_doc(
+    *,
+    use_hypotheses: bool = False,
+    phenix_available: bool = False,
+    frags: BackendFragments,
+) -> str:
+    """Backend-agnostic per-job instructions doc (the `CLAUDE.md` / `AGENTS.md`
+    content), with backend fragments substituted at the end.
 
-    When use_hypotheses is False, the add_hypothesis/update_hypothesis tool docs
-    and the Hypothesis Tracking Workflow section are omitted so the agent is not
-    instructed to call tools that don't exist.
+    The body is authored in Claude's vocabulary; the backend-divergent
+    phrases are swapped for ``frags`` so the Claude path is byte-identical
+    (identity substitution) and the Codex path gets its own vocabulary.
 
-    Args:
-        use_hypotheses: Include hypothesis-specific sections.
-
-    Returns:
-        Full JOB_CLAUDE.md content as a string.
+    When use_hypotheses is False, the add_hypothesis/update_hypothesis tool
+    docs and the Hypothesis Tracking Workflow section are omitted so the
+    agent is not instructed to call tools that don't exist.
     """
     parts: list[str] = []
 
@@ -526,7 +546,13 @@ Then call `set_consensus_answer` with a 1–3 sentence direct answer.
 
 **Remember:** You are autonomous. Make bold scientific decisions. Pursue interesting leads. Be creative but rigorous.""")
 
-    return "\n".join(parts)
+    doc = "\n".join(parts)
+    # Swap the backend-divergent phrases. For the Claude fragments these are
+    # identity substitutions, so the Claude doc is unchanged.
+    doc = doc.replace("`.claude/skills/`", frags.skills_location)
+    doc = doc.replace("Claude's built-in `Read` tool", frags.builtin_read_tool)
+    doc = doc.replace("Claude's `Read` tool", frags.builtin_read_tool_short)
+    return doc
 
 
 async def get_enabled_skills(

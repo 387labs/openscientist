@@ -3,6 +3,8 @@
 from openscientist.prompts import (
     build_discovery_prompt,
     format_skills_list,
+    generate_job_agents_md,
+    generate_job_claude_md,
     get_system_prompt,
 )
 
@@ -23,6 +25,39 @@ class TestGetSystemPrompt:
         prompt = get_system_prompt()
         assert "effect sizes" in prompt
         assert "Negative results" in prompt
+
+    def test_claude_backend_explicit_matches_default(self):
+        assert get_system_prompt(agent_backend="claude_code") == get_system_prompt()
+
+    def test_codex_backend_drops_claude_paths(self):
+        prompt = get_system_prompt(agent_backend="codex")
+        assert ".claude/" not in prompt
+        # the shared, backend-agnostic body is still present
+        assert "execute_code" in prompt
+        assert "effect sizes" in prompt
+
+
+class TestBackendJobDocs:
+    """The Claude (CLAUDE.md) and Codex (AGENTS.md) per-job docs."""
+
+    def test_claude_doc_keeps_claude_vocabulary(self):
+        doc = generate_job_claude_md(use_hypotheses=True, phenix_available=True)
+        assert ".claude/skills/" in doc
+        assert "Claude's built-in `Read` tool" in doc
+
+    def test_codex_doc_drops_claude_vocabulary(self):
+        doc = generate_job_agents_md(use_hypotheses=True, phenix_available=True)
+        assert ".claude/" not in doc
+        assert "Claude's" not in doc
+        # shared body intact (a hypothesis tool, a core tool)
+        assert "add_hypothesis" in doc
+        assert "save_iteration_summary" in doc
+
+    def test_codex_doc_respects_use_hypotheses_flag(self):
+        with_h = generate_job_agents_md(use_hypotheses=True)
+        without_h = generate_job_agents_md(use_hypotheses=False)
+        assert "add_hypothesis" in with_h
+        assert "add_hypothesis" not in without_h
 
 
 class TestBuildDiscoveryPrompt:

@@ -13,6 +13,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from openai_codex_sdk import Usage
 from openai_codex_sdk.types import (
     AgentMessageItem,
@@ -320,3 +321,52 @@ def test_unknown_item_becomes_unknown_entry() -> None:
     assert len(entries) == 1
     assert entries[0].type == "unknown_entry"
     assert entries[0].source == "codex"
+
+
+# ── codex exec env: git-repo check + auth provisioning ─────────────────
+
+
+class _KeylessProvider(_Provider):
+    """Codex stub with no API key (forces auth.json provisioning)."""
+
+    def codex_sdk_env(self) -> dict[str, str]:
+        return {}
+
+
+async def test_thread_options_skip_git_repo_check(tmp_path: Path) -> None:
+    """Job dirs are not git repos; codex exec otherwise refuses to run."""
+    agent = _agent(tmp_path)
+    mock_codex_cls, _ = _patch_codex(_turn(usage=None))
+    with patch("openscientist.agent.codex_agent.Codex", mock_codex_cls):
+        await agent.run_iteration("go")
+    opts = mock_codex_cls.return_value.start_thread.call_args.args[0]
+    assert opts.skip_git_repo_check is True
+
+
+async def test_auth_not_provisioned_when_key_present(tmp_path: Path) -> None:
+    agent = _agent(tmp_path)  # _Provider supplies OPENAI_API_KEY
+    mock_codex_cls, _ = _patch_codex(_turn(usage=None))
+    with patch("openscientist.agent.codex_agent.Codex", mock_codex_cls):
+        await agent.run_iteration("go")
+    assert not (tmp_path / ".codex" / "auth.json").exists()
+
+
+async def test_auth_provisioned_from_codex_home_when_no_key(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    fake_home = tmp_path / "home"
+    (fake_home / ".codex").mkdir(parents=True)
+    (fake_home / ".codex" / "auth.json").write_text('{"tokens": {}}')
+
+    config = AgentConfig(job_dir=tmp_path / "job")
+    agent = CodexAgent(config, _KeylessProvider())
+    mock_codex_cls, _ = _patch_codex(_turn(usage=None))
+    with (
+        patch("openscientist.agent.codex_agent.Path.home", return_value=fake_home),
+        patch("openscientist.agent.codex_agent.Codex", mock_codex_cls),
+    ):
+        await agent.run_iteration("go")
+    copied = config.job_dir / ".codex" / "auth.json"
+    assert copied.exists()
+    assert copied.read_text() == '{"tokens": {}}'

@@ -894,6 +894,25 @@ class TestEndToEndHypothesesFlow:
             config = mock_get_agent.call_args[0][0]
             assert config.use_hypotheses is False
 
+    async def test_build_agent_executor_codex_uses_agents_doc(self, tmp_path: Path) -> None:
+        """For the Codex backend the system prompt is the full AGENTS.md doc
+        (no .claude/ vocabulary), not the concise Claude system prompt."""
+        from openscientist.orchestrator.discovery import _build_agent_executor
+
+        with patch("openscientist.orchestrator.discovery.get_agent") as mock_get_agent:
+            _build_agent_executor(
+                job_dir=tmp_path,
+                data_file=None,
+                agent_backend="codex",
+                use_hypotheses=True,
+            )
+            config = mock_get_agent.call_args[0][0]
+            assert ".claude/" not in config.system_prompt
+            assert "Claude's" not in config.system_prompt
+            # the rich doc body is present (a hypothesis tool, a core tool)
+            assert "add_hypothesis" in config.system_prompt
+            assert "save_iteration_summary" in config.system_prompt
+
 
 # ---------------------------------------------------------------------------
 # 14. generate_job_claude_md — dynamic JOB_CLAUDE.md generation

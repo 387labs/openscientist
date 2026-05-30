@@ -34,12 +34,14 @@ from openscientist.orchestrator.iteration import (
     wait_for_feedback_or_timeout,
 )
 from openscientist.prompts import (
+    AgentBackend,
+    generate_job_agents_md,
     generate_job_claude_md,
     get_enabled_skills,
     get_system_prompt,
 )
 from openscientist.providers import get_provider
-from openscientist.providers.base import Provider
+from openscientist.providers.base import ClaudeCompatible, Provider
 from openscientist.settings import get_settings
 from openscientist.transcript import TranscriptEntry, save_transcript
 from openscientist.version import get_version_string
@@ -69,15 +71,33 @@ def _resolve_primary_data_file(data_files: list[str]) -> Path | None:
     return data_file
 
 
+def _backend_for(provider: Provider) -> AgentBackend:
+    """Map a provider to its agent backend name (for prompt selection)."""
+    return "claude_code" if isinstance(provider, ClaudeCompatible) else "codex"
+
+
 def _build_agent_executor(
     job_dir: Path,
     data_file: Path | None,
+    *,
+    agent_backend: AgentBackend = "claude_code",
     use_hypotheses: bool = False,
     data_files: list[Path] | None = None,
 ) -> AbstractAgent[Provider]:
-    """Create a configured agent for discovery/report phases."""
-    system_prompt = get_system_prompt()
-    logger.info("Built system prompt (%d chars)", len(system_prompt))
+    """Create a configured agent for discovery/report phases.
+
+    Claude gets a concise system prompt (its rich ``CLAUDE.md`` is written
+    separately into ``.claude/``). Codex reads a single ``AGENTS.md``, so
+    its system prompt is the full per-job doc, written there by the agent.
+    """
+    if agent_backend == "codex":
+        system_prompt = generate_job_agents_md(
+            use_hypotheses=use_hypotheses,
+            phenix_available=get_settings().phenix.is_available,
+        )
+    else:
+        system_prompt = get_system_prompt(agent_backend="claude_code")
+    logger.info("Built %s system prompt (%d chars)", agent_backend, len(system_prompt))
     config = AgentConfig(
         job_dir=job_dir,
         data_file=data_file,
@@ -561,15 +581,23 @@ async def run_discovery_async(job_dir: Path) -> dict[str, Any]:
     logger.info("Starting discovery for job %s (mode=%s)", job_id, runtime["investigation_mode"])
 
     provider = get_provider()
-    provider.setup_environment()
+    # setup_environment() is a Claude-family concern (env/routing flags).
+    # Codex providers configure the child via the agent's config.toml.
+    if isinstance(provider, ClaudeCompatible):
+        provider.setup_environment()
+    backend = _backend_for(provider)
     await update_job_status(job_dir, "running")
 
     use_hypotheses = runtime["use_hypotheses"]
     all_data_files = [Path(p) for p in runtime["data_files"]]
-    await _write_skills_to_claude_dir(job_dir, use_hypotheses=use_hypotheses)
+    # The .claude/ skills + CLAUDE.md are Claude-only. The Codex agent reads
+    # its instructions from the AGENTS.md it writes from the system prompt.
+    if backend == "claude_code":
+        await _write_skills_to_claude_dir(job_dir, use_hypotheses=use_hypotheses)
     executor = _build_agent_executor(
         job_dir=job_dir,
         data_file=_resolve_primary_data_file(runtime["data_files"]),
+        agent_backend=backend,
         use_hypotheses=use_hypotheses,
         data_files=all_data_files,
     )
