@@ -82,6 +82,9 @@ class StubCodexProvider(CodexCompatible):
     def codex_model_provider_id(self) -> str:
         return "stub"
 
+    def codex_sdk_env(self) -> dict[str, str]:
+        return {}
+
 
 async def enable_rls(session: AsyncSession) -> None:
     """Switch session from admin role to app role (enables RLS enforcement).

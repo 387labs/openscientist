@@ -1,23 +1,168 @@
-"""Codex agent backend (skeleton).
+"""Codex agent backend.
 
-`CodexAgent` drives the Codex CLI via the ``openai-codex-sdk``. This is a
-scaffold: the abstract methods raise ``NotImplementedError`` and gain real
-implementations in a later change. The generic bound ties it to
-``CodexCompatible`` providers, so mypy rejects pairing it with a
-Claude-only provider.
+``CodexAgent`` drives the Codex CLI via ``openai-codex-sdk``. The SDK
+spawns ``codex exec`` as a one-shot subprocess per turn; it exposes no
+programmatic MCP/config parameter, so per-job configuration (the active
+``model_provider``, its ``[model_providers.<id>]`` table, and the
+``openscientist-tools`` MCP server) is written to
+``$CODEX_HOME/config.toml`` and the child is pointed at it via the
+``CODEX_HOME`` environment variable. The system prompt is delivered as
+an ``AGENTS.md`` in the working directory (codex's project-doc
+mechanism, symmetric to how ``ClaudeCodeAgent`` writes ``CLAUDE.md``).
+
+Transcript translation (``ThreadItem`` -> ``TranscriptEntry``) is not
+yet implemented here; ``run_iteration`` returns an empty transcript for
+now.
 """
 
 from __future__ import annotations
 
-from openscientist.agent.base import AbstractAgent, IterationResult
+import logging
+import os
+import sys
+from pathlib import Path
+
+from openai_codex_sdk import Codex, Thread, ThreadOptions, Usage
+
+from openscientist.agent.base import AbstractAgent, AgentConfig, IterationResult, TokenUsage
 from openscientist.providers.base import CodexCompatible
+
+logger = logging.getLogger(__name__)
+
+_MCP_SERVER_NAME = "openscientist-tools"
+
+
+def _toml_str(value: str) -> str:
+    """Quote a string as a TOML basic string (escaping ``\\`` and ``"``)."""
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
 
 
 class CodexAgent(AbstractAgent[CodexCompatible]):
     """Agent that drives the Codex CLI (``openai-codex-sdk``)."""
 
+    def __init__(self, config: AgentConfig, provider: CodexCompatible) -> None:
+        super().__init__(config, provider)
+        self._thread: Thread | None = None
+
+    def _codex_home(self) -> Path:
+        return self._config.job_dir / ".codex"
+
+    def _mcp_env(self) -> dict[str, str]:
+        """Per-job ``OPENSCIENTIST_*`` overlays the tools MCP server reads.
+
+        Codex injects this table into the MCP child's environment; the
+        rest of the environment (PATH, DATABASE_URL, ...) is inherited.
+        """
+        config = self._config
+        env = {
+            "OPENSCIENTIST_JOB_ID": config.job_dir.name,
+            "OPENSCIENTIST_JOB_DIR": str(config.job_dir),
+            "OPENSCIENTIST_USE_HYPOTHESES": "1" if config.use_hypotheses else "0",
+        }
+        if config.data_file is not None:
+            env["OPENSCIENTIST_DATA_FILE"] = str(config.data_file)
+        if config.data_files:
+            env["OPENSCIENTIST_DATA_FILES"] = os.pathsep.join(str(p) for p in config.data_files)
+        return env
+
+    def _write_codex_config(self) -> None:
+        """Write the per-job ``$CODEX_HOME/config.toml`` selecting the
+        provider and wiring the ``openscientist-tools`` MCP server."""
+        home = self._codex_home()
+        home.mkdir(parents=True, exist_ok=True)
+
+        lines = [
+            f"model_provider = {_toml_str(self._provider.codex_model_provider_id())}",
+            *self._provider.codex_config_overrides(),
+            "",
+            f"[mcp_servers.{_MCP_SERVER_NAME}]",
+            f"command = {_toml_str(sys.executable)}",
+            'args = ["-m", "openscientist_tools"]',
+            f"[mcp_servers.{_MCP_SERVER_NAME}.env]",
+            *(f"{key} = {_toml_str(value)}" for key, value in self._mcp_env().items()),
+        ]
+        (home / "config.toml").write_text("\n".join(lines) + "\n")
+
+    def _write_agents_md(self) -> None:
+        """Deliver the system prompt as ``AGENTS.md`` in the working dir."""
+        if self._config.system_prompt:
+            (self._config.job_dir / "AGENTS.md").write_text(self._config.system_prompt)
+
+    def _make_codex(self) -> Codex:
+        """Build a ``Codex`` whose child reads the per-job config home and
+        the provider's auth env."""
+        env = {
+            **os.environ,
+            **self._provider.codex_sdk_env(),
+            "CODEX_HOME": str(self._codex_home()),
+        }
+        return Codex({"env": env})
+
+    def _ensure_thread(self, reset_session: bool) -> Thread:
+        """Return a started thread, (re)building it when requested."""
+        if reset_session:
+            self._thread = None
+        if self._thread is None:
+            self._write_codex_config()
+            self._write_agents_md()
+            codex = self._make_codex()
+            self._thread = codex.start_thread(
+                ThreadOptions(
+                    model=self._provider.codex_model_name(),
+                    working_directory=str(self._config.job_dir),
+                    sandbox_mode="workspace-write",
+                )
+            )
+            logger.info("Codex thread started")
+        return self._thread
+
+    @staticmethod
+    def _usage_from_payload(usage: Usage) -> TokenUsage:
+        """Normalize a codex ``Usage`` to ``TokenUsage``.
+
+        Codex reports ``input_tokens`` inclusive of ``cached_input_tokens``
+        (Responses-API shape), so the fresh-input count is the difference.
+        Codex exposes no reasoning-token count, so ``reasoning_tokens`` is
+        always 0; there is no prompt-cache write bucket either.
+        """
+        return TokenUsage(
+            input_tokens=usage.input_tokens - usage.cached_input_tokens,
+            output_tokens=usage.output_tokens,
+            cache_read_tokens=usage.cached_input_tokens,
+            cache_write_tokens=0,
+            reasoning_tokens=0,
+        )
+
     async def run_iteration(self, prompt: str, *, reset_session: bool = False) -> IterationResult:
-        raise NotImplementedError("CodexAgent.run_iteration is not implemented yet")
+        """Run one turn via ``codex exec`` and return its result.
+
+        The transcript is empty until the ``ThreadItem`` translator is
+        implemented; token usage from ``Turn.usage`` is accumulated.
+        """
+        try:
+            thread = self._ensure_thread(reset_session)
+            turn = await thread.run(prompt)
+        except Exception as e:
+            logger.error("Codex run failed: %s", e, exc_info=True)
+            self._thread = None
+            return IterationResult(
+                success=False, output="", tool_calls=0, transcript=[], error=str(e)
+            )
+
+        if turn.usage is not None:
+            self._token_usage += self._usage_from_payload(turn.usage)
+
+        tool_calls = sum(1 for item in turn.items if item.type != "agent_message")
+        return IterationResult(
+            success=True,
+            output=turn.final_response,
+            tool_calls=tool_calls,
+            transcript=[],
+            error="",
+        )
 
     async def shutdown(self) -> None:
-        raise NotImplementedError("CodexAgent.shutdown is not implemented yet")
+        """No-op: ``codex exec`` is one-shot per turn, nothing to close."""
+        self._thread = None
+        logger.debug("CodexAgent shut down")

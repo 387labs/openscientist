@@ -70,6 +70,9 @@ class _StubCodex(CodexCompatible):
     def codex_model_provider_id(self) -> str:
         return "openai"
 
+    def codex_sdk_env(self) -> dict[str, str]:
+        return {"OPENAI_API_KEY": "sk-test"}
+
 
 class _StubHybrid(ClaudeCompatible, CodexCompatible):
     @property
@@ -103,6 +106,9 @@ class _StubHybrid(ClaudeCompatible, CodexCompatible):
 
     def codex_model_provider_id(self) -> str:
         return "hybrid"
+
+    def codex_sdk_env(self) -> dict[str, str]:
+        return {}
 
 
 def test_provider_cannot_be_instantiated() -> None:
