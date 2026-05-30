@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from openscientist.agent.mcp_specs import McpServerSpec
-from openscientist.providers.base_v2 import Provider
+from openscientist.providers.base import Provider
 from openscientist.transcript import TranscriptEntry
 
 __all__ = [

@@ -21,29 +21,7 @@ from openscientist.agent.base import AgentConfig
 from openscientist.database.models import User
 from openscientist.database.models.job import Job as JobModel
 from openscientist.job.types import JobInfo, JobStatus
-from openscientist.providers.base_v2 import ClaudeCompatible
-
-
-class _StubProvider(ClaudeCompatible):
-    """Minimal Claude-compatible provider for agent construction in tests."""
-
-    @property
-    def id(self) -> str:
-        return "stub"
-
-    @property
-    def display_name(self) -> str:
-        return "Stub"
-
-    def validate_required_config(self) -> list[str]:
-        return []
-
-    def claude_sdk_env(self) -> dict[str, str]:
-        return {}
-
-    def claude_model_name(self) -> str:
-        return "stub-model"
-
+from tests.helpers import StubClaudeProvider as _StubProvider
 
 # ---------------------------------------------------------------------------
 # Fixtures

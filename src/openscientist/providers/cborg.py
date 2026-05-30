@@ -11,7 +11,7 @@ from typing import Any
 import requests
 
 from openscientist.exceptions import ProviderError
-from openscientist.providers.base import BaseProvider, CostInfo
+from openscientist.providers.base import ClaudeCompatible, CostInfo
 from openscientist.settings import get_settings
 
 from ._anthropic_common import (
@@ -19,12 +19,11 @@ from ._anthropic_common import (
     send_anthropic_message_with_tools,
 )
 from ._env_cleanup import clear_env_vars, clear_provider_mode_flags
-from .base_v2 import ClaudeCompatible
 
 logger = logging.getLogger(__name__)
 
 
-class CborgProvider(BaseProvider, ClaudeCompatible):
+class CborgProvider(ClaudeCompatible):
     """
     CBORG API provider (current implementation).
 
@@ -33,10 +32,6 @@ class CborgProvider(BaseProvider, ClaudeCompatible):
       causing HTTP 400 errors. If you encounter authentication or request errors,
       check your Claude CLI version and consider using an older version if needed.
     """
-
-    @property
-    def name(self) -> str:
-        return "CBORG"
 
     @property
     def id(self) -> str:
@@ -58,10 +53,6 @@ class CborgProvider(BaseProvider, ClaudeCompatible):
             errors.append("ANTHROPIC_BASE_URL not set (should be https://api.cborg.lbl.gov)")
 
         return errors
-
-    def _validate_required_config(self) -> list[str]:
-        """Legacy `BaseProvider` hook; delegates to the public method."""
-        return self.validate_required_config()
 
     def claude_sdk_env(self) -> dict[str, str]:
         """Auth env vars the claude-agent-sdk CLI must see."""

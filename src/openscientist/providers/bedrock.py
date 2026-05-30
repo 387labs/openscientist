@@ -9,7 +9,7 @@ import os
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from openscientist.providers.base import BaseProvider, CostInfo
+from openscientist.providers.base import ClaudeCompatible, CostInfo
 from openscientist.settings import get_settings
 
 from ._anthropic_common import (
@@ -22,17 +22,12 @@ from ._env_cleanup import (
     clear_env_vars,
     clear_provider_mode_flags,
 )
-from .base_v2 import ClaudeCompatible
 
 logger = logging.getLogger(__name__)
 
 
-class BedrockProvider(BaseProvider, ClaudeCompatible):
+class BedrockProvider(ClaudeCompatible):
     """AWS Bedrock provider."""
-
-    @property
-    def name(self) -> str:
-        return "AWS Bedrock"
 
     @property
     def id(self) -> str:
@@ -64,10 +59,6 @@ class BedrockProvider(BaseProvider, ClaudeCompatible):
             )
 
         return errors
-
-    def _validate_required_config(self) -> list[str]:
-        """Legacy `BaseProvider` hook; delegates to the public method."""
-        return self.validate_required_config()
 
     def claude_sdk_env(self) -> dict[str, str]:
         """Bedrock routing/auth env vars the claude-agent-sdk CLI must see.

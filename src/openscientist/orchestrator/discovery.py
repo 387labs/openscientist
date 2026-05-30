@@ -39,7 +39,7 @@ from openscientist.prompts import (
     get_system_prompt,
 )
 from openscientist.providers import get_provider
-from openscientist.providers.base_v2 import Provider
+from openscientist.providers.base import Provider
 from openscientist.settings import get_settings
 from openscientist.transcript import TranscriptEntry, save_transcript
 from openscientist.version import get_version_string
@@ -645,9 +645,9 @@ async def run_discovery_async(job_dir: Path) -> dict[str, Any]:
             model_name = (
                 settings.provider.model
                 or settings.provider.anthropic_default_sonnet_model
-                or _PROVIDER_DEFAULT_MODELS.get(provider.name, "unknown")
+                or _PROVIDER_DEFAULT_MODELS.get(provider.display_name, "unknown")
             )
-            await _persist_job_cost_record(job_id, tokens, provider.name, model_name)
+            await _persist_job_cost_record(job_id, tokens, provider.display_name, model_name)
         except Exception as cost_err:
             logger.warning("Failed to persist cost record for job %s: %s", job_id, cost_err)
         await executor.shutdown()

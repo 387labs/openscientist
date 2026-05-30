@@ -252,7 +252,7 @@ async def _send_message_via_executor(
     from openscientist.agent.base import AgentConfig
     from openscientist.agent.claude_code_agent import ClaudeCodeAgent
     from openscientist.providers import get_provider
-    from openscientist.providers.base_v2 import ClaudeCompatible
+    from openscientist.providers.base import ClaudeCompatible
 
     # Get chat history for continuity
     history = await get_chat_history(session, job_id, limit=10)

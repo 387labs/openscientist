@@ -15,26 +15,8 @@ from openscientist.agent.factory import (
     get_agent,
 )
 from openscientist.providers.anthropic import AnthropicProvider
-from openscientist.providers.base_v2 import ClaudeCompatible, Provider
-
-
-class _ClaudeStub(ClaudeCompatible):
-    @property
-    def id(self) -> str:
-        return "claude-stub"
-
-    @property
-    def display_name(self) -> str:
-        return "Claude Stub"
-
-    def validate_required_config(self) -> list[str]:
-        return []
-
-    def claude_sdk_env(self) -> dict[str, str]:
-        return {}
-
-    def claude_model_name(self) -> str:
-        return "stub-model"
+from openscientist.providers.base import CostInfo, Provider
+from tests.helpers import StubClaudeProvider as _ClaudeStub
 
 
 class _FamilylessProvider(Provider):
@@ -50,6 +32,14 @@ class _FamilylessProvider(Provider):
 
     def validate_required_config(self) -> list[str]:
         return []
+
+    def get_cost_info(self, lookback_hours: int = 24) -> CostInfo:
+        return CostInfo(
+            provider_name=self.display_name,
+            total_spend_usd=None,
+            recent_spend_usd=None,
+            recent_period_hours=lookback_hours,
+        )
 
 
 def test_registry_maps_known_ids() -> None:

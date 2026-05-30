@@ -11,31 +11,18 @@ import pytest
 
 from openscientist.agent.base import AgentConfig
 from openscientist.agent.claude_code_agent import ClaudeCodeAgent
-from openscientist.providers.base_v2 import ClaudeCompatible
+from openscientist.providers.base import ClaudeCompatible
+from tests.helpers import StubClaudeProvider
 
 
-class _StubProvider(ClaudeCompatible):
-    """Minimal Claude-compatible provider for exercising the agent."""
+class _StubProvider(StubClaudeProvider):
+    """Stub provider with a configurable `claude_sdk_env`."""
 
     def __init__(self, *, sdk_env: dict[str, str] | None = None) -> None:
         self._sdk_env = sdk_env or {}
 
-    @property
-    def id(self) -> str:
-        return "stub"
-
-    @property
-    def display_name(self) -> str:
-        return "Stub"
-
-    def validate_required_config(self) -> list[str]:
-        return []
-
     def claude_sdk_env(self) -> dict[str, str]:
         return dict(self._sdk_env)
-
-    def claude_model_name(self) -> str:
-        return "stub-model"
 
 
 def _make_agent(

@@ -18,36 +18,8 @@ from openscientist.agent.base import IterationResult
 from openscientist.database.models import Job, JobChatMessage, User
 from openscientist.database.rls import set_current_user
 from openscientist.job_chat import get_chat_history, load_job_context, send_chat_message
-from openscientist.providers.base_v2 import ClaudeCompatible
+from tests.helpers import StubClaudeProvider as _ChatProvider
 from tests.helpers import enable_rls
-
-
-class _ChatProvider(ClaudeCompatible):
-    """Claude-compatible stub standing in for `get_provider()` in chat tests.
-
-    Carries a no-op `setup_environment` so `send_chat_message` can call it,
-    and satisfies the `isinstance(provider, ClaudeCompatible)` guard.
-    """
-
-    @property
-    def id(self) -> str:
-        return "stub"
-
-    @property
-    def display_name(self) -> str:
-        return "Stub"
-
-    def validate_required_config(self) -> list[str]:
-        return []
-
-    def claude_sdk_env(self) -> dict[str, str]:
-        return {}
-
-    def claude_model_name(self) -> str:
-        return "stub-model"
-
-    def setup_environment(self) -> None:
-        return None
 
 
 @pytest.mark.asyncio

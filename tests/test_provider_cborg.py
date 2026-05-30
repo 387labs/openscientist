@@ -24,7 +24,7 @@ class TestCborgProviderValidation:
         ):
             clear_settings_cache()
             provider = CborgProvider()
-            assert provider.name == "CBORG"
+            assert provider.display_name == "CBORG"
 
     def test_missing_token_raises(self):
         # Mock get_settings so .env file values don't leak in
@@ -198,7 +198,7 @@ class TestCborgClaudeCompatible:
             assert CborgProvider().display_name == "CBORG"
 
     def test_is_claude_compatible_and_provider(self) -> None:
-        from openscientist.providers.base_v2 import (
+        from openscientist.providers.base import (
             ClaudeCompatible,
             CodexCompatible,
             Provider,
@@ -225,11 +225,6 @@ class TestCborgClaudeCompatible:
         assert len(errors) == 2
         assert any("ANTHROPIC_AUTH_TOKEN" in e for e in errors)
         assert any("ANTHROPIC_BASE_URL" in e for e in errors)
-
-    def test_private_validate_delegates_to_public(self) -> None:
-        with patch("openscientist.providers.cborg.get_settings", return_value=_mock_settings()):
-            provider = CborgProvider()
-            assert provider._validate_required_config() == provider.validate_required_config()
 
     def test_claude_sdk_env_returns_token_and_base_url(self) -> None:
         settings = _mock_settings(token="tok-123", base_url="https://api.cborg.lbl.gov")

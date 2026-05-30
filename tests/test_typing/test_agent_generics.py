@@ -17,7 +17,7 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 _VALID_SUBCLASS = """
 from openscientist.agent.base import AbstractAgent, IterationResult
-from openscientist.providers.base_v2 import ClaudeCompatible
+from openscientist.providers.base import ClaudeCompatible
 
 
 class MyAgent(AbstractAgent[ClaudeCompatible]):
@@ -62,7 +62,7 @@ def test_accepts_claude_compatible_subclass(tmp_path: Path) -> None:
 def test_rejects_subclass_missing_abstract_method(tmp_path: Path) -> None:
     code = """
         from openscientist.agent.base import AbstractAgent, AgentConfig, IterationResult
-        from openscientist.providers.base_v2 import ClaudeCompatible
+        from openscientist.providers.base import ClaudeCompatible
         from pathlib import Path
 
 

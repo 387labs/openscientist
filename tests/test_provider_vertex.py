@@ -28,7 +28,7 @@ class TestVertexProviderValidation:
         ):
             clear_settings_cache()
             provider = VertexProvider()
-            assert "vertex" in provider.name.lower()
+            assert "vertex" in provider.display_name.lower()
 
     def test_missing_creds_file_raises(self):
         with patch.dict(
@@ -118,7 +118,7 @@ class TestVertexProviderValidation:
         ):
             # Should not raise — optional warnings don't prevent init
             provider = VertexProvider()
-            assert provider.name == "Vertex AI"
+            assert provider.display_name == "Vertex AI"
 
 
 class TestVertexSetupEnvironment:
@@ -203,7 +203,7 @@ class TestVertexClaudeCompatible:
             assert VertexProvider().display_name == "Vertex AI"
 
     def test_is_claude_compatible_and_provider(self, tmp_path: Path) -> None:
-        from openscientist.providers.base_v2 import (
+        from openscientist.providers.base import (
             ClaudeCompatible,
             CodexCompatible,
             Provider,
@@ -233,12 +233,6 @@ class TestVertexClaudeCompatible:
         assert any("GOOGLE_APPLICATION_CREDENTIALS" in e for e in errors)
         assert any("GCP_BILLING_ACCOUNT_ID" in e for e in errors)
         assert any("CLOUD_ML_REGION" in e for e in errors)
-
-    def test_private_validate_delegates_to_public(self, tmp_path: Path) -> None:
-        settings = _mock_settings(self._creds_file(tmp_path))
-        with patch("openscientist.providers.vertex.get_settings", return_value=settings):
-            provider = VertexProvider()
-            assert provider._validate_required_config() == provider.validate_required_config()
 
     def test_claude_sdk_env_full_config(self, tmp_path: Path) -> None:
         creds = self._creds_file(tmp_path)

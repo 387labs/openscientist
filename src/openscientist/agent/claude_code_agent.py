@@ -33,7 +33,7 @@ from claude_agent_sdk.types import (
 
 from openscientist.agent.base import AbstractAgent, AgentConfig, IterationResult, TokenUsage
 from openscientist.agent.mcp_specs import StdioMcpServerSpec
-from openscientist.providers.base_v2 import ClaudeCompatible
+from openscientist.providers.base import ClaudeCompatible
 from openscientist.transcript import CLAUDE
 
 logger = logging.getLogger(__name__)
