@@ -361,6 +361,12 @@ def execute_code(
         _restore_plot_hooks(original_show, original_savefig)
 
 
+# A descriptive User-Agent is required by public SPARQL endpoints such as
+# Wikidata (see its User-Agent policy). Generic library defaults get
+# throttled or blocked, especially from datacenter IPs.
+SPARQL_USER_AGENT = "OpenScientist/1.0 (+https://github.com/openscientist-io/openscientist)"
+
+
 def execute_sparql_code(
     code: str,
     plots_dir: Path,
@@ -422,7 +428,7 @@ def execute_sparql_code(
         }
 
     try:
-        sparql = SPARQLWrapper(endpoint)
+        sparql = SPARQLWrapper(endpoint, agent=SPARQL_USER_AGENT)
         sparql.setQuery(code)
         sparql.setReturnFormat(JSON)
         sparql.setTimeout(timeout)

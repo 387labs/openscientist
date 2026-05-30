@@ -9,6 +9,7 @@ import pandas as pd
 import pytest
 
 from openscientist.code_executor import (
+    SPARQL_USER_AGENT,
     ForbiddenImportError,
     execute_code,
     execute_rust_code,
@@ -302,6 +303,17 @@ class TestExecuteSparqlCode:
         assert result["success"] is False
         assert "ENDPOINT" in result["error"]
         assert result["plots"] == []
+
+    def test_sets_descriptive_user_agent(self, plots_dir):
+        """A descriptive User-Agent is required by Wikidata's policy (generic
+        library defaults get throttled/blocked). The wrapper must carry ours."""
+        sparql_json = {"head": {"vars": []}, "results": {"bindings": []}}
+        query = "# ENDPOINT: https://example.org/sparql\nSELECT ?s WHERE { }"
+        with patch("SPARQLWrapper.SPARQLWrapper") as mock_cls:
+            mock_cls.return_value.query.return_value.convert.return_value = sparql_json
+            execute_sparql_code(query, plots_dir)
+        assert mock_cls.call_args.kwargs.get("agent") == SPARQL_USER_AGENT
+        assert "OpenScientist" in SPARQL_USER_AGENT
 
     def test_endpoint_parsed_case_insensitive(self, plots_dir):
         """# endpoint: (lowercase) should also be accepted."""

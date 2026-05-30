@@ -481,36 +481,13 @@ async def test_execute_python_with_multiple_data_files_via_subprocess(
         assert "cell: bravo" in text
 
 
-@DOCKER_REQUIRED
-async def test_execute_sparql_via_subprocess(
-    tmp_path: Path,
-    server_env: Callable[..., dict[str, str]],
-    server_params: Callable[[dict[str, str]], StdioServerParameters],
-    test_database_url: str,
-    _apply_migrations_once: None,
-) -> None:
-    """Run a real SPARQL query against Wikidata end-to-end."""
-    job_id = uuid4()
-    code = (
-        "# ENDPOINT: https://query.wikidata.org/sparql\n"
-        "SELECT ?item WHERE { ?item wdt:P31 wd:Q5 } LIMIT 1\n"
-    )
-
-    async with _spawned_for_job(
-        server_env, server_params, tmp_path, test_database_url, job_id
-    ) as mcp:
-        response = await mcp.call_tool(
-            "execute_code",
-            {"code": code, "language": "sparql"},
-        )
-        text = _text(response)
-        # Wikidata returns at least one row; the formatter emits an item URI.
-        assert "item" in text.lower() or "wikidata" in text.lower()
-
-        reloaded = KnowledgeState.load_from_database_sync(str(job_id))
-        last_log = reloaded.data["analysis_log"][-1]
-        assert last_log["action"] == "execute_code"
-        assert last_log["success"] is True
+# NOTE: the SPARQL execution path is covered hermetically in
+# tests/test_code_executor.py (mocked SPARQLWrapper: endpoint parsing,
+# result formatting, error handling, and the Wikidata-compliant
+# User-Agent). A live-Wikidata smoke is intentionally not kept here --
+# it gates CI on a third-party service whose rate limits we do not
+# control, and adds nothing beyond that hermetic coverage plus the
+# container-execution path already exercised by the python tests below.
 
 
 @DOCKER_REQUIRED
