@@ -10,9 +10,8 @@ programmatic MCP/config parameter, so per-job configuration (the active
 an ``AGENTS.md`` in the working directory (codex's project-doc
 mechanism, symmetric to how ``ClaudeCodeAgent`` writes ``CLAUDE.md``).
 
-Transcript translation (``ThreadItem`` -> ``TranscriptEntry``) is not
-yet implemented here; ``run_iteration`` returns an empty transcript for
-now.
+Each turn's ``ThreadItem`` objects are translated to transcript entries
+by the shared ``CODEX`` deserializer (see ``_to_transcript``).
 """
 
 from __future__ import annotations
@@ -21,11 +20,19 @@ import logging
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
-from openai_codex_sdk import Codex, Thread, ThreadOptions, Usage
+from openai_codex_sdk import Codex, Thread, ThreadItem, ThreadOptions, Usage
 
-from openscientist.agent.base import AbstractAgent, AgentConfig, IterationResult, TokenUsage
+from openscientist.agent.base import (
+    AbstractAgent,
+    AgentConfig,
+    IterationResult,
+    TokenUsage,
+    TranscriptEntry,
+)
 from openscientist.providers.base import CodexCompatible
+from openscientist.transcript import CODEX
 
 logger = logging.getLogger(__name__)
 
@@ -134,11 +141,27 @@ class CodexAgent(AbstractAgent[CodexCompatible]):
             reasoning_tokens=0,
         )
 
+    @staticmethod
+    def _to_transcript(items: list[ThreadItem]) -> list[TranscriptEntry]:
+        """Translate the turn's ``ThreadItem`` objects into transcript
+        entries by reusing the ``CODEX`` deserializer.
+
+        The SDK hands us parsed items; ``CODEX.deserialize`` consumes the
+        raw ``item.completed`` event shape, so each item is dumped back to
+        its wire dict and wrapped in an envelope. This delegates every
+        mapping (the ``mcp_tool_call`` split, ``file_change`` fan-out,
+        unknown-item handling) to the single tested translator.
+        """
+        events: list[dict[str, Any]] = [
+            {"type": "item.completed", "item": item.model_dump(mode="json")} for item in items
+        ]
+        return CODEX.deserialize(events)
+
     async def run_iteration(self, prompt: str, *, reset_session: bool = False) -> IterationResult:
         """Run one turn via ``codex exec`` and return its result.
 
-        The transcript is empty until the ``ThreadItem`` translator is
-        implemented; token usage from ``Turn.usage`` is accumulated.
+        The turn's items are translated to a transcript and token usage
+        from ``Turn.usage`` is accumulated.
         """
         try:
             thread = self._ensure_thread(reset_session)
@@ -158,7 +181,7 @@ class CodexAgent(AbstractAgent[CodexCompatible]):
             success=True,
             output=turn.final_response,
             tool_calls=tool_calls,
-            transcript=[],
+            transcript=self._to_transcript(turn.items),
             error="",
         )
 

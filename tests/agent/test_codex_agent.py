@@ -14,6 +14,13 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from openai_codex_sdk import Usage
+from openai_codex_sdk.types import (
+    AgentMessageItem,
+    CommandExecutionItem,
+    McpToolCallItem,
+    McpToolCallResult,
+    UnknownThreadItem,
+)
 
 from openscientist.agent.base import AbstractAgent, AgentConfig, TokenUsage
 from openscientist.agent.codex_agent import CodexAgent
@@ -44,8 +51,19 @@ def _agent(tmp_path: Path, **cfg_kwargs: object) -> CodexAgent:
 def _turn(
     *, final: str = "done", items: list[object] | None = None, usage: Usage | None = None
 ) -> SimpleNamespace:
+    # Real SDK items (they carry `model_dump`, which `_to_transcript` calls).
     if items is None:
-        items = [SimpleNamespace(type="agent_message"), SimpleNamespace(type="command_execution")]
+        items = [
+            AgentMessageItem(id="a1", type="agent_message", text=final),
+            CommandExecutionItem(
+                id="c1",
+                type="command_execution",
+                command="ls",
+                aggregated_output="out",
+                exit_code=0,
+                status="completed",
+            ),
+        ]
     return SimpleNamespace(items=items, final_response=final, usage=usage)
 
 
@@ -92,7 +110,8 @@ async def test_run_iteration_success(tmp_path: Path) -> None:
     assert result.output == "the answer"
     # one non-agent_message item -> one tool call
     assert result.tool_calls == 1
-    assert result.transcript == []
+    # transcript is populated from the turn items (default _turn has two)
+    assert [e.type for e in result.transcript] == ["assistant_text", "shell_execution"]
     thread.run.assert_awaited_once_with("hello")
 
 
@@ -194,3 +213,110 @@ async def test_shutdown_is_noop(tmp_path: Path) -> None:
     assert agent._thread is not None
     await agent.shutdown()
     assert agent._thread is None
+
+
+# ── transcript bridge (SDK item -> model_dump -> CODEX) ────────────────
+#
+# The CODEX item->entry mappings are exhaustively covered in
+# tests/transcript/test_codex_translator.py. These target only the new
+# bridge: real SDK `*Item` objects routed through `model_dump(mode="json")`
+# into the translator, plus the run_iteration wiring.
+
+
+def test_to_transcript_empty() -> None:
+    assert CodexAgent._to_transcript([]) == []
+
+
+def test_to_transcript_routes_every_item_type() -> None:
+    """`model_dump` of each real SDK item routes to the right variant."""
+    from openai_codex_sdk.types import (
+        ErrorItem,
+        FileChangeItem,
+        FileUpdateChange,
+        ReasoningItem,
+        TodoItem,
+        TodoListItem,
+        WebSearchItem,
+    )
+
+    items = [
+        AgentMessageItem(id="a", type="agent_message", text="hi"),
+        ReasoningItem(id="r", type="reasoning", text="think"),
+        CommandExecutionItem(
+            id="c",
+            type="command_execution",
+            command="ls",
+            aggregated_output="o",
+            exit_code=0,
+            status="completed",
+        ),
+        FileChangeItem(
+            id="f",
+            type="file_change",
+            changes=[FileUpdateChange(path="x.py", kind="update")],
+            status="completed",
+        ),
+        McpToolCallItem(
+            id="m",
+            type="mcp_tool_call",
+            server="srv",
+            tool="t",
+            arguments={"q": 1},
+            result=McpToolCallResult(
+                content=[{"type": "text", "text": "res"}], structured_content=None
+            ),
+            error=None,
+            status="completed",
+        ),
+        WebSearchItem(id="w", type="web_search", query="cells"),
+        TodoListItem(id="t", type="todo_list", items=[TodoItem(text="step", completed=False)]),
+        ErrorItem(id="e", type="error", message="oops"),
+    ]
+    entries = CodexAgent._to_transcript(items)  # type: ignore[arg-type]
+    assert [e.type for e in entries] == [
+        "assistant_text",
+        "reasoning",
+        "shell_execution",
+        "file_change",
+        "tool_call",
+        "tool_result",
+        "web_search",
+        "plan",
+        "task_notification",
+    ]
+    assert not any(e.type == "unknown_entry" for e in entries)
+
+
+def test_bridge_preserves_mcp_tool_call_result() -> None:
+    """The nested `McpToolCallResult` survives `model_dump`: the split
+    yields a linked ToolCall + ToolResult with the flattened text."""
+    item = McpToolCallItem(
+        id="call-7",
+        type="mcp_tool_call",
+        server="openscientist-tools",
+        tool="search",
+        arguments={"query": "x"},
+        result=McpToolCallResult(
+            content=[{"type": "text", "text": "first"}, {"type": "text", "text": "second"}],
+            structured_content={"hits": 2},
+        ),
+        error=None,
+        status="completed",
+    )
+    entries = CodexAgent._to_transcript([item])  # type: ignore[arg-type]
+    call = next(e for e in entries if e.type == "tool_call")
+    res = next(e for e in entries if e.type == "tool_result")
+    assert call.id == "call-7"
+    assert call.tool == "search"
+    assert res.call_id == "call-7"  # linked to the call
+    assert res.output == "first\nsecond"  # text blocks flattened
+    assert res.success is True
+    assert res.structured_content == {"hits": 2}
+
+
+def test_unknown_item_becomes_unknown_entry() -> None:
+    item = UnknownThreadItem(id="u1", type="future_thing")
+    entries = CodexAgent._to_transcript([item])  # type: ignore[arg-type]
+    assert len(entries) == 1
+    assert entries[0].type == "unknown_entry"
+    assert entries[0].source == "codex"
