@@ -12,7 +12,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from openscientist.providers.base import ClaudeCompatible, CostInfo
+from openscientist.providers.base import ClaudeCompatible, CodexCompatible, CostInfo
 
 
 class StubClaudeProvider(ClaudeCompatible):
@@ -47,6 +47,40 @@ class StubClaudeProvider(ClaudeCompatible):
 
     def claude_model_name(self) -> str:
         return "stub-model"
+
+
+class StubCodexProvider(CodexCompatible):
+    """Minimal concrete `CodexCompatible` for tests that need a Codex-family
+    provider instance. Implements every abstract member with inert defaults;
+    subclass and override as needed."""
+
+    @property
+    def id(self) -> str:
+        return "stub-codex"
+
+    @property
+    def display_name(self) -> str:
+        return "Stub Codex"
+
+    def validate_required_config(self) -> list[str]:
+        return []
+
+    def get_cost_info(self, lookback_hours: int = 24) -> CostInfo:
+        return CostInfo(
+            provider_name=self.display_name,
+            total_spend_usd=None,
+            recent_spend_usd=None,
+            recent_period_hours=lookback_hours,
+        )
+
+    def codex_config_overrides(self) -> list[str]:
+        return []
+
+    def codex_model_name(self) -> str:
+        return "stub-codex-model"
+
+    def codex_model_provider_id(self) -> str:
+        return "stub"
 
 
 async def enable_rls(session: AsyncSession) -> None:

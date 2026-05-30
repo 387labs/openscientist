@@ -80,3 +80,34 @@ def test_rejects_subclass_missing_abstract_method(tmp_path: Path) -> None:
     rc, out = _run_mypy(code, tmp_path)
     assert rc != 0
     assert "abstract" in out.lower()
+
+
+def test_codex_agent_rejects_claude_provider(tmp_path: Path) -> None:
+    """`CodexAgent` is bound to `CodexCompatible`; a Claude-only provider
+    must be rejected at construction time."""
+    code = """
+        from openscientist.agent.base import AgentConfig
+        from openscientist.agent.codex_agent import CodexAgent
+        from openscientist.providers.base import ClaudeCompatible
+
+
+        def _make(config: AgentConfig, provider: ClaudeCompatible) -> None:
+            CodexAgent(config, provider)
+    """
+    rc, out = _run_mypy(code, tmp_path)
+    assert rc != 0
+    assert "incompatible type" in out.lower()
+
+
+def test_codex_agent_accepts_codex_provider(tmp_path: Path) -> None:
+    code = """
+        from openscientist.agent.base import AgentConfig
+        from openscientist.agent.codex_agent import CodexAgent
+        from openscientist.providers.base import CodexCompatible
+
+
+        def _make(config: AgentConfig, provider: CodexCompatible) -> None:
+            CodexAgent(config, provider)
+    """
+    rc, out = _run_mypy(code, tmp_path)
+    assert rc == 0, out
