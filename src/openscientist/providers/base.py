@@ -210,13 +210,25 @@ class CodexCompatible(Provider, abc.ABC):
 
     @abc.abstractmethod
     def codex_config_overrides(self) -> list[str]:
-        """`key=value` entries for AppServerConfig.config_overrides."""
+        """TOML lines written into the per-job ``$CODEX_HOME/config.toml``
+        for this provider — typically a ``[model_providers.<id>]`` table
+        (``base_url``, ``env_key``, ``wire_api``, ``query_params``, ...).
+        The codex CLI loads them from config.toml; the SDK exposes no
+        programmatic config override."""
 
     @abc.abstractmethod
     def codex_model_name(self) -> str:
-        """Model name to pass to thread_start(model=...)."""
+        """Model name to pass to ``ThreadOptions(model=...)``."""
 
     @abc.abstractmethod
     def codex_model_provider_id(self) -> str:
-        """The model_providers.<id> key to pass to
-        thread_start(model_provider=...)."""
+        """The ``model_providers.<id>`` key, written as the top-level
+        ``model_provider = "<id>"`` in config.toml to select this
+        provider."""
+
+    @abc.abstractmethod
+    def codex_sdk_env(self) -> dict[str, str]:
+        """Auth env vars the codex child must see — at minimum the secret
+        named by this provider's ``model_providers.<id>.env_key``. The
+        codex analog of ``claude_sdk_env()``; merged into the codex child
+        environment."""
