@@ -90,6 +90,9 @@ dependencies = [
     # Claude Agent SDK (required – powers the agent execution path)
     "claude-agent-sdk>=0.1.46",
 
+    # Codex SDK (second agent backend; wraps the bundled codex CLI)
+    "openai-codex-sdk>=0.1.11",
+
     # SPARQL queries against remote endpoints
     "SPARQLWrapper>=2.0.0",
 ]
