@@ -217,8 +217,10 @@ class CodexCompatible(Provider, abc.ABC):
         programmatic config override."""
 
     @abc.abstractmethod
-    def codex_model_name(self) -> str:
-        """Model name to pass to ``ThreadOptions(model=...)``."""
+    def codex_model_name(self) -> str | None:
+        """Model name to pass to ``ThreadOptions(model=...)``. Return None to
+        let codex use its account/config default (some accounts reject an
+        explicit model id, e.g. ChatGPT-auth rejects ``gpt-5-codex``)."""
 
     @abc.abstractmethod
     def codex_model_provider_id(self) -> str:

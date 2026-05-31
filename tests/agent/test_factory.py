@@ -44,7 +44,14 @@ class _FamilylessProvider(Provider):
 
 def test_registry_maps_known_ids() -> None:
     assert _PROVIDER_REGISTRY["anthropic"] is AnthropicProvider
-    assert set(_PROVIDER_REGISTRY) == {"anthropic", "cborg", "vertex", "bedrock", "foundry"}
+    assert set(_PROVIDER_REGISTRY) == {
+        "anthropic",
+        "cborg",
+        "vertex",
+        "bedrock",
+        "foundry",
+        "openai",
+    }
 
 
 def test_instantiate_provider_unknown_id_raises() -> None:
@@ -61,6 +68,52 @@ def test_get_agent_returns_claude_code_agent(tmp_path: Path) -> None:
     assert isinstance(agent, ClaudeCodeAgent)
     assert agent.config is config
     assert agent.provider is provider
+
+
+def test_get_agent_returns_codex_agent(tmp_path: Path) -> None:
+    from openscientist.agent.codex_agent import CodexAgent
+    from tests.helpers import StubCodexProvider
+
+    provider = StubCodexProvider()
+    config = AgentConfig(job_dir=tmp_path)
+    with patch("openscientist.agent.factory._instantiate_provider", return_value=provider):
+        agent = get_agent(config)
+
+    assert isinstance(agent, CodexAgent)
+    assert agent.provider is provider
+
+
+def test_openai_registered_for_codex() -> None:
+    from openscientist.providers.openai import OpenAIDirectProvider
+
+    assert _PROVIDER_REGISTRY["openai"] is OpenAIDirectProvider
+
+
+def test_factory_imports_without_codex_sdk() -> None:
+    """The factory (and thus discovery) must import even where the codex SDK
+    is absent, e.g. the web image. The codex SDK is imported lazily on the
+    codex dispatch branch only. Guards a real regression that broke the
+    container build."""
+    import subprocess
+    import sys
+    import textwrap
+
+    code = textwrap.dedent(
+        """
+        import builtins
+        _orig = builtins.__import__
+        def _blocked(name, *a, **k):
+            if name == "openai_codex_sdk" or name.startswith("openai_codex_sdk."):
+                raise ModuleNotFoundError("blocked for test")
+            return _orig(name, *a, **k)
+        builtins.__import__ = _blocked
+        import openscientist.agent.factory  # noqa: F401
+        print("IMPORT_OK")
+        """
+    )
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    assert "IMPORT_OK" in result.stdout
 
 
 def test_get_agent_rejects_provider_without_family(tmp_path: Path) -> None:

@@ -299,8 +299,12 @@ Be concise, accurate, and cite specific papers or findings when relevant. Focus 
         len(system_prompt),
     )
 
-    # Set up provider environment
+    # Set up provider environment. In-page chat is Claude-only.
     provider = get_provider()
+    if not isinstance(provider, ClaudeCompatible):
+        raise RuntimeError(
+            f"In-page chat requires a Claude-compatible provider, got {type(provider).__name__}"
+        )
     provider.setup_environment()
 
     # Overwrite CLAUDE.md with chat-specific content (discovery wrote JOB_CLAUDE.md here)
@@ -320,10 +324,6 @@ Be concise, accurate, and cite specific papers or findings when relevant. Focus 
     provider_settings = get_settings().provider
     chat_model = provider_settings.anthropic_chat_model or provider_settings.model
 
-    if not isinstance(provider, ClaudeCompatible):
-        raise RuntimeError(
-            f"In-page chat requires a Claude-compatible provider, got {type(provider).__name__}"
-        )
     config = AgentConfig(job_dir=job_dir, system_prompt=system_prompt)
     executor = ClaudeCodeAgent(config, provider, model_override=chat_model)
 
