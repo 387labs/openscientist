@@ -145,7 +145,12 @@ def test_usage_from_payload_math() -> None:
     )
 
 
-async def test_run_iteration_writes_config_and_agents_md(tmp_path: Path) -> None:
+async def test_run_iteration_writes_config_and_agents_md(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Codex passes only the config env table to the MCP child, never its own
+    # process env, so the parent environment must be forwarded explicitly.
+    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://u:p@db:5432/x")
     agent = _agent(tmp_path, system_prompt="do science", use_hypotheses=True)
     mock_codex_cls, _ = _patch_codex(_turn(usage=None))
 
@@ -159,6 +164,8 @@ async def test_run_iteration_writes_config_and_agents_md(tmp_path: Path) -> None
     assert mcp["args"] == ["-m", "openscientist_tools"]
     assert mcp["env"]["OPENSCIENTIST_JOB_DIR"] == str(tmp_path)
     assert mcp["env"]["OPENSCIENTIST_USE_HYPOTHESES"] == "1"
+    # Parent env the tools need is forwarded into the table.
+    assert mcp["env"]["DATABASE_URL"] == "postgresql+asyncpg://u:p@db:5432/x"
     assert (tmp_path / "AGENTS.md").read_text() == "do science"
 
     # CODEX_HOME points the child at the per-job config home + provider auth
@@ -341,6 +348,53 @@ async def test_thread_options_skip_git_repo_check(tmp_path: Path) -> None:
         await agent.run_iteration("go")
     opts = mock_codex_cls.return_value.start_thread.call_args.args[0]
     assert opts.skip_git_repo_check is True
+
+
+async def test_thread_options_approval_never(tmp_path: Path) -> None:
+    """Headless runs have no human approver. Without "never" codex cancels
+    every command and MCP tool call ("user cancelled MCP tool call")."""
+    agent = _agent(tmp_path)
+    mock_codex_cls, _ = _patch_codex(_turn(usage=None))
+    with patch("openscientist.agent.codex_agent.Codex", mock_codex_cls):
+        await agent.run_iteration("go")
+    opts = mock_codex_cls.return_value.start_thread.call_args.args[0]
+    assert opts.approval_policy == "never"
+
+
+def test_toml_str_escapes_control_chars() -> None:
+    """Forwarded env values can contain quotes and newlines. The result must
+    be a parseable TOML basic string."""
+    from openscientist.agent.codex_agent import _toml_str
+
+    value = 'a"b\\c\nd\te'
+    parsed = tomllib.loads(f"k = {_toml_str(value)}")
+    assert parsed["k"] == value
+
+
+def test_file_change_in_progress_parses() -> None:
+    """The pinned codex binary emits file_change items with status
+    'in_progress', which SDK 0.1.11's strict model rejects. The shim in
+    codex_agent must keep parsing alive."""
+    from openai_codex_sdk.parsing import parse_thread_item
+
+    from openscientist.agent.codex_agent import _LenientFileChangeItem
+
+    item = parse_thread_item(
+        {"id": "i0", "type": "file_change", "changes": [], "status": "in_progress"}
+    )
+    assert isinstance(item, _LenientFileChangeItem)
+    assert item.status == "in_progress"
+
+
+async def test_thread_options_sandbox_full_access(tmp_path: Path) -> None:
+    """The container is the sandbox. Codex's workspace-write sandbox otherwise
+    cancels every MCP tool call in headless mode."""
+    agent = _agent(tmp_path)
+    mock_codex_cls, _ = _patch_codex(_turn(usage=None))
+    with patch("openscientist.agent.codex_agent.Codex", mock_codex_cls):
+        await agent.run_iteration("go")
+    opts = mock_codex_cls.return_value.start_thread.call_args.args[0]
+    assert opts.sandbox_mode == "danger-full-access"
 
 
 async def test_auth_not_provisioned_when_key_present(tmp_path: Path) -> None:

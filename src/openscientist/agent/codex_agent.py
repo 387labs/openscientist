@@ -24,6 +24,8 @@ from pathlib import Path
 from typing import Any
 
 from openai_codex_sdk import Codex, Thread, ThreadItem, ThreadOptions, Usage
+from openai_codex_sdk import parsing as _codex_parsing
+from openai_codex_sdk.types import FileChangeItem as _SdkFileChangeItem
 
 from openscientist.agent.base import (
     AbstractAgent,
@@ -40,9 +42,39 @@ logger = logging.getLogger(__name__)
 _MCP_SERVER_NAME = "openscientist-tools"
 
 
+class _LenientFileChangeItem(_SdkFileChangeItem):
+    """``file_change`` item that tolerates an in-progress status.
+
+    The pinned codex binary streams ``file_change`` items with
+    ``status="in_progress"``, but openai-codex-sdk 0.1.11 (the latest
+    release) types ``FileChangeItem.status`` as ``Literal["completed",
+    "failed"]`` only, so its strict parsing raises and fails the whole turn
+    the moment codex writes a file. The status string is informational for
+    our transcript, so we widen it to whatever codex emits and keep the run
+    alive.
+    """
+
+    status: str  # type: ignore[assignment]
+
+
+# Patch the SDK's event-to-model map so the lenient model is used during parsing.
+_codex_parsing._ITEM_MODELS["file_change"] = _LenientFileChangeItem
+
+
 def _toml_str(value: str) -> str:
-    """Quote a string as a TOML basic string (escaping ``\\`` and ``"``)."""
-    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    """Quote a string as a TOML basic string.
+
+    Escapes backslash and quote, plus the control characters that can appear
+    in forwarded environment values (newline, carriage return, tab) which
+    would otherwise produce invalid TOML.
+    """
+    escaped = (
+        value.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+        .replace("\t", "\\t")
+    )
     return f'"{escaped}"'
 
 
@@ -57,17 +89,24 @@ class CodexAgent(AbstractAgent[CodexCompatible]):
         return self._config.job_dir / ".codex"
 
     def _mcp_env(self) -> dict[str, str]:
-        """Per-job ``OPENSCIENTIST_*`` overlays the tools MCP server reads.
+        """Full environment for the tools MCP server, written into the codex
+        config.toml ``[mcp_servers.<name>.env]`` table.
 
-        Codex injects this table into the MCP child's environment; the
-        rest of the environment (PATH, DATABASE_URL, ...) is inherited.
+        Unlike a normal subprocess, codex does NOT pass its own process
+        environment to MCP server children. It passes only this table. So we
+        forward the whole parent environment (PATH, DATABASE_URL,
+        OPENSCIENTIST_SECRET_KEY, provider creds, executor image, ...) that the
+        tools need, then overlay the per-job ``OPENSCIENTIST_*`` values.
         """
         config = self._config
-        env = {
-            "OPENSCIENTIST_JOB_ID": config.job_dir.name,
-            "OPENSCIENTIST_JOB_DIR": str(config.job_dir),
-            "OPENSCIENTIST_USE_HYPOTHESES": "1" if config.use_hypotheses else "0",
-        }
+        env = dict(os.environ)
+        env.update(
+            {
+                "OPENSCIENTIST_JOB_ID": config.job_dir.name,
+                "OPENSCIENTIST_JOB_DIR": str(config.job_dir),
+                "OPENSCIENTIST_USE_HYPOTHESES": "1" if config.use_hypotheses else "0",
+            }
+        )
         if config.data_file is not None:
             env["OPENSCIENTIST_DATA_FILE"] = str(config.data_file)
         if config.data_files:
@@ -137,7 +176,16 @@ class CodexAgent(AbstractAgent[CodexCompatible]):
                 ThreadOptions(
                     model=self._provider.codex_model_name(),
                     working_directory=str(self._config.job_dir),
-                    sandbox_mode="workspace-write",
+                    # The agent already runs locked down in its own ephemeral
+                    # container, which is the real security boundary. Codex's
+                    # own "workspace-write" sandbox additionally gates MCP tool
+                    # calls and the headless exec auto-cancels them ("user
+                    # cancelled MCP tool call"), so no tool ever runs. Full
+                    # access defers sandboxing to the container, as codex
+                    # recommends for externally sandboxed automation.
+                    sandbox_mode="danger-full-access",
+                    # Headless: no human to approve actions, so never ask.
+                    approval_policy="never",
                     # Job dirs are not git repos. Without this, codex exec
                     # refuses to run ("not inside a trusted directory").
                     skip_git_repo_check=True,
