@@ -59,6 +59,9 @@ class ProviderSettings(BaseSettings):
     claude_code_oauth_token: str | None = Field(default=None, alias="CLAUDE_CODE_OAUTH_TOKEN")
     anthropic_base_url: str | None = Field(default=None, alias="ANTHROPIC_BASE_URL")
 
+    # OpenAI (Codex agent backend)
+    openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
+
     # Model settings
     model: str | None = Field(default=None, alias="OPENSCIENTIST_MODEL")
     anthropic_chat_model: str | None = Field(
@@ -98,6 +101,10 @@ class ProviderSettings(BaseSettings):
     )
     # Host path for GCP credentials (for agent container mounts when running in Docker)
     gcp_credentials_host_path: str | None = Field(default=None, alias="GCP_CREDENTIALS_HOST_PATH")
+    # Host path to the codex CLI auth file. The runner copies it into the
+    # per-job CODEX_HOME so the Codex backend can authenticate via ChatGPT
+    # login when no API key is set.
+    codex_auth_host_path: str | None = Field(default=None, alias="CODEX_AUTH_HOST_PATH")
     gcp_billing_account_id: str | None = Field(default=None, alias="GCP_BILLING_ACCOUNT_ID")
     cloud_ml_region: str | None = Field(default=None, alias="CLOUD_ML_REGION")
     vertex_region_claude_4_5_sonnet: str | None = Field(
@@ -326,6 +333,14 @@ class ProviderSettings(BaseSettings):
         self._set_env_if_present(env_vars, "CLAUDE_CODE_OAUTH_TOKEN", self.claude_code_oauth_token)
         self._set_env_if_present(env_vars, "ANTHROPIC_BASE_URL", self.anthropic_base_url)
 
+    def _apply_openai_env_vars(self, env_vars: dict[str, str]) -> None:
+        self._set_env_if_present(env_vars, "OPENAI_API_KEY", self.openai_api_key)
+        # Signal to the agent container that codex auth was provisioned into the
+        # per-job CODEX_HOME (the runner copies the file in). The container does
+        # not read the host path itself, only its presence, so the provider's
+        # config validation passes.
+        self._set_env_if_present(env_vars, "CODEX_AUTH_HOST_PATH", self.codex_auth_host_path)
+
     def _apply_vertex_env_vars(
         self,
         env_vars: dict[str, str],
@@ -392,6 +407,7 @@ class ProviderSettings(BaseSettings):
         env_vars: dict[str, str] = {"OPENSCIENTIST_PROVIDER": self.provider_id}
         self._apply_model_env_vars(env_vars)
         self._apply_auth_env_vars(env_vars)
+        self._apply_openai_env_vars(env_vars)
         self._apply_vertex_env_vars(env_vars, gcp_credentials_container_path)
         self._apply_bedrock_env_vars(env_vars)
         self._apply_foundry_env_vars(env_vars)

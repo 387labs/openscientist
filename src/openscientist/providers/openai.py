@@ -32,11 +32,19 @@ class OpenAIDirectProvider(CodexCompatible):
         return "OpenAI API"
 
     def validate_required_config(self) -> list[str]:
-        if os.environ.get("OPENAI_API_KEY") or _codex_auth_json().exists():
+        # Auth is satisfied by an API key, a configured codex auth file (which
+        # the container runner provisions into the per-job CODEX_HOME), or a
+        # local codex CLI login.
+        if (
+            os.environ.get("OPENAI_API_KEY")
+            or get_settings().provider.codex_auth_host_path
+            or _codex_auth_json().exists()
+        ):
             return []
         return [
-            "OpenAI provider needs auth: set OPENAI_API_KEY, or log in with "
-            "the codex CLI ('codex login') so ~/.codex/auth.json exists."
+            "OpenAI provider needs auth: set OPENAI_API_KEY, set "
+            "CODEX_AUTH_HOST_PATH, or log in with the codex CLI ('codex login') "
+            "so ~/.codex/auth.json exists."
         ]
 
     def get_cost_info(self, lookback_hours: int = 24) -> CostInfo:

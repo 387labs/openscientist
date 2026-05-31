@@ -353,6 +353,21 @@ class TestProviderContainerEnvVars:
         assert env["AWS_SECRET_ACCESS_KEY"] == "secret"
         assert "CLAUDE_CODE_USE_VERTEX" not in env
 
+    def test_openai_api_key_passed_for_codex_provider(self):
+        settings = ProviderSettings(
+            OPENSCIENTIST_PROVIDER="openai",
+            OPENAI_API_KEY="sk-openai-test",
+        )
+
+        env = settings.get_container_env_vars()
+
+        assert env["OPENSCIENTIST_PROVIDER"] == "openai"
+        assert env["OPENAI_API_KEY"] == "sk-openai-test"
+
+    def test_openai_api_key_omitted_when_unset(self):
+        settings = ProviderSettings(OPENSCIENTIST_PROVIDER="openai")
+        assert "OPENAI_API_KEY" not in settings.get_container_env_vars()
+
     def test_optional_model_and_token_env_vars_are_included(self):
         settings = ProviderSettings(
             OPENSCIENTIST_PROVIDER="anthropic",

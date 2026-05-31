@@ -58,6 +58,11 @@ services:
       # can mount it on the host side (GOOGLE_APPLICATION_CREDENTIALS is set in Dockerfile)
       GCP_CREDENTIALS_HOST_PATH: ${GCP_CREDENTIALS_FILE:-}
 
+      # Codex (OpenAI) auth: CODEX_AUTH_FILE is the codex CLI auth.json on the host
+      # (ChatGPT login). It is mounted read-only into this web container, which copies
+      # it into each per-job CODEX_HOME for the agent. Unused when OPENAI_API_KEY is set.
+      CODEX_AUTH_HOST_PATH: ${CODEX_AUTH_FILE:+/app/codex-auth.json}
+
       # Container isolation defaults
       OPENSCIENTIST_USE_CONTAINER_ISOLATION: ${OPENSCIENTIST_USE_CONTAINER_ISOLATION:-true}
       OPENSCIENTIST_EXECUTOR_IMAGE: ${OPENSCIENTIST_EXECUTOR_IMAGE:-openscientist-executor:latest}
@@ -79,6 +84,9 @@ services:
 
       # Mount GCP credentials if using Vertex AI (set GCP_CREDENTIALS_FILE in .env)
       - ${GCP_CREDENTIALS_FILE:-/dev/null}:/app/gcp-credentials.json:ro
+
+      # Mount codex CLI auth if using OpenAI/codex ChatGPT login (set CODEX_AUTH_FILE in .env)
+      - ${CODEX_AUTH_FILE:-/dev/null}:/app/codex-auth.json:ro
 
       # Mount Linux Phenix installation if available (set PHENIX_HOST_PATH in .env)
       - ${PHENIX_HOST_PATH:-/dev/null}:/opt/phenix:ro
