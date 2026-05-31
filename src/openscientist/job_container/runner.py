@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 from pathlib import Path
 from typing import Any, cast
 
@@ -154,6 +155,35 @@ class JobContainerRunner:
             return None
         return str(os.stat(socket_path).st_gid)
 
+    @staticmethod
+    def _provision_codex_auth(settings: Settings, job_dir: Path) -> None:
+        """Place the codex CLI auth into the per-job CODEX_HOME so the
+        non-root agent (uid 1001) can read it.
+
+        Mounting the host auth file directly fails on the uid/permission
+        boundary (the host file is mode 600 owned by another user), so we
+        copy it in agent-readable. ``job_dir`` is the runner-local path to
+        the job directory (the same path ``setup.py`` writes into), not the
+        host-translated bind-mount path, so the copy works whether the web
+        server runs on the host or in a container. No-op unless
+        ``codex_auth_host_path`` is set (the API-key path needs no file).
+        """
+        src = settings.provider.codex_auth_host_path
+        if not src:
+            return
+        src_path = Path(src).expanduser()
+        if not src_path.exists():
+            logger.warning("codex_auth_host_path %s does not exist, skipping", src_path)
+            return
+        codex_home = job_dir / ".codex"
+        codex_home.mkdir(parents=True, exist_ok=True)
+        # World-writable so the agent can also write config.toml into CODEX_HOME.
+        codex_home.chmod(0o777)
+        dest = codex_home / "auth.json"
+        shutil.copy2(src_path, dest)
+        dest.chmod(0o644)
+        logger.info("Provisioned codex auth into %s", dest)
+
     def launch(self, job_id: str, job_dir: Path) -> Any:
         """
         Launch an agent container for the given job.
@@ -179,7 +209,9 @@ class JobContainerRunner:
         # "/app/jobs/uuid" inside the web container), then translate to the host
         # path.  Docker requires absolute paths for bind mounts; relative paths
         # are misinterpreted as named volumes.
-        job_dir_host = to_host_path(job_dir.resolve(), cs)
+        job_dir_resolved = job_dir.resolve()
+        self._provision_codex_auth(settings, job_dir_resolved)
+        job_dir_host = to_host_path(job_dir_resolved, cs)
         env, volumes, agent_network, agent_memory, agent_cpu, agent_platform = (
             self._build_launch_configuration(
                 settings,

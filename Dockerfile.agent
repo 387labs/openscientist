@@ -31,9 +31,14 @@ WORKDIR /app
 COPY pyproject.toml README.md uv.lock* ./
 COPY src/ ./src/
 
-# Install dependencies including claude-agent-sdk
-# (claude-agent-sdk is listed in pyproject.toml dependencies)
+# Install dependencies including claude-agent-sdk and openai-codex-sdk
+# (both are listed in pyproject.toml dependencies)
 RUN uv pip install --system -e .
+
+# Install the Codex CLI binary for the Codex agent backend. The SDK ships
+# only a Linux musl asset (static, runs on this glibc base). It lands in the
+# SDK vendor dir where find_codex_path() resolves it.
+RUN python -c "from openai_codex_sdk import Codex; Codex.install(version='rust-v0.135.0', filename='codex-x86_64-unknown-linux-musl.tar.gz')"
 
 # Copy agent entrypoint
 COPY docker/agent-entrypoint.py /agent-entrypoint.py

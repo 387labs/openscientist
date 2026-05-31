@@ -1210,6 +1210,8 @@ def render_stat_badges(
         "Papers Reviewed": "article",
         "Skills": "school",
         "Model": "psychology",
+        "Agent": "smart_toy",
+        "Provider": "cloud",
     }
     icons = {**default_icons, **(icon_map or {})}
 

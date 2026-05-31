@@ -58,6 +58,15 @@ def test_valid_with_codex_auth_json(tmp_path: Path) -> None:
         assert OpenAIDirectProvider().validate_required_config() == []
 
 
+def test_valid_with_codex_auth_host_path(tmp_path: Path) -> None:
+    # In the agent container there is no ~/.codex and no key, but the runner
+    # provisions auth into the per-job CODEX_HOME and signals it via this path.
+    with patch("openscientist.providers.openai.Path.home", return_value=tmp_path):
+        with patch("openscientist.providers.openai.get_settings") as mock_settings:
+            mock_settings.return_value.provider.codex_auth_host_path = "/host/auth.json"
+            assert OpenAIDirectProvider().validate_required_config() == []
+
+
 def test_invalid_without_any_auth(tmp_path: Path) -> None:
     # No API key, no ~/.codex/auth.json -> Provider.__init__ validates and raises.
     with patch("openscientist.providers.openai.Path.home", return_value=tmp_path):

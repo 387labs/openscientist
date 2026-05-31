@@ -455,6 +455,10 @@ class TestStatsBadgesHypotheses:
     def _get_badge(self, badges: list, label: str) -> tuple | None:
         return next((b for b in badges if b[0] == label), None)
 
+    def _badge_value(self, badges: list, label: str) -> Any:
+        badge = self._get_badge(badges, label)
+        return badge[1] if badge is not None else None
+
     def _make_job(
         self,
         status: str = "completed",
@@ -502,6 +506,35 @@ class TestStatsBadgesHypotheses:
         labels = self._get_labels(badges)
         assert "Hypotheses" not in labels
 
+    def test_codex_job_shows_agent_and_provider_not_model(self) -> None:
+        from openscientist.webapp_components.pages.job_detail import _stats_badges
+
+        # Codex stores no model id, so the badge must read the agent + provider,
+        # not the misleading "Model: Openai".
+        badges = _stats_badges(self._make_job(llm_provider="openai"), lit_count=0)
+        assert self._badge_value(badges, "Agent") == "Codex"
+        assert self._badge_value(badges, "Provider") == "OpenAI"
+        assert self._get_badge(badges, "Model") is None
+
+    def test_claude_job_shows_agent_and_model(self) -> None:
+        from openscientist.webapp_components.pages.job_detail import _stats_badges
+
+        badges = _stats_badges(
+            self._make_job(llm_provider="anthropic", llm_model="claude-sonnet-4-5-20250929"),
+            lit_count=0,
+        )
+        assert self._badge_value(badges, "Agent") == "Claude Code"
+        assert self._badge_value(badges, "Model") == "Claude Sonnet 4.5"
+        assert self._get_badge(badges, "Provider") is None
+
+    def test_no_provider_omits_agent_badge(self) -> None:
+        from openscientist.webapp_components.pages.job_detail import _stats_badges
+
+        badges = _stats_badges(self._make_job(), lit_count=0)
+        labels = self._get_labels(badges)
+        assert "Agent" not in labels
+        assert "Provider" not in labels
+
     def test_model_badge_uses_human_readable_label(self) -> None:
         from openscientist.webapp_components.pages.job_detail import _stats_badges
 
@@ -517,7 +550,7 @@ class TestStatsBadgesHypotheses:
         assert badge[1] == "Claude Sonnet 4.5"
         assert badge[2] == "cyan"
 
-    def test_model_badge_falls_back_to_provider_name(self) -> None:
+    def test_missing_model_shows_provider_badge_not_model(self) -> None:
         from openscientist.webapp_components.pages.job_detail import _stats_badges
 
         badges = _stats_badges(
@@ -527,9 +560,8 @@ class TestStatsBadgesHypotheses:
             ),
             lit_count=1,
         )
-        badge = self._get_badge(badges, "Model")
-        assert badge is not None
-        assert badge[1] == "Anthropic"
+        assert self._get_badge(badges, "Model") is None
+        assert self._badge_value(badges, "Provider") == "Anthropic"
 
 
 # ---------------------------------------------------------------------------

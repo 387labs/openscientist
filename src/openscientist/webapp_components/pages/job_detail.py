@@ -27,6 +27,7 @@ from openscientist.job_manager import _db_get_job, _db_get_share_permission
 from openscientist.knowledge_state import KnowledgeState
 from openscientist.orchestrator.iteration import update_job_status
 from openscientist.pdf_generator import markdown_to_pdf
+from openscientist.providers import agent_backend_for_provider
 from openscientist.webapp_components.error_handler import get_user_friendly_error
 from openscientist.webapp_components.ui_components import (
     STATUS_COLORS,
@@ -851,10 +852,26 @@ def _render_job_status_notices(context: _JobDetailContext) -> None:
         _render_ks_loading_notice(context.ks_load_error)
 
 
-def _format_model_display(llm_model: str | None, llm_provider: str | None) -> str | None:
-    """Map raw model IDs to human-readable names."""
+_AGENT_DISPLAY = {"codex": "Codex", "claude_code": "Claude Code"}
+
+_PROVIDER_DISPLAY = {
+    "anthropic": "Anthropic",
+    "cborg": "CBORG",
+    "vertex": "Vertex AI",
+    "bedrock": "AWS Bedrock",
+    "foundry": "Azure AI Foundry",
+    "openai": "OpenAI",
+}
+
+
+def _format_model_name(llm_model: str | None) -> str | None:
+    """Map a raw model id to a human-readable name, or None when unset.
+
+    Codex runs use the account/config default and store no model id, so the
+    page shows a provider badge instead of a model badge in that case.
+    """
     if not llm_model:
-        return llm_provider.title() if llm_provider else None
+        return None
 
     model_lower = llm_model.lower()
     if "opus-4" in model_lower:
@@ -885,12 +902,19 @@ def _stats_badges(latest_job: Any, lit_count: int, hyp_count: int = 0) -> list[A
     )
     if hyp_count:
         badges.append(("Hypotheses", hyp_count, "orange"))
-    model_display = _format_model_display(
-        getattr(latest_job, "llm_model", None),
-        getattr(latest_job, "llm_provider", None),
-    )
-    if model_display:
-        badges.append(("Model", model_display, "cyan"))
+    provider_id = getattr(latest_job, "llm_provider", None)
+    if provider_id:
+        backend = agent_backend_for_provider(provider_id)
+        badges.append(("Agent", _AGENT_DISPLAY.get(backend, backend), "indigo"))
+    # Show the model when known. Otherwise (e.g. codex on the account default)
+    # fall back to a provider badge instead of mislabeling the provider as a model.
+    model_name = _format_model_name(getattr(latest_job, "llm_model", None))
+    if model_name:
+        badges.append(("Model", model_name, "cyan"))
+    elif provider_id:
+        badges.append(
+            ("Provider", _PROVIDER_DISPLAY.get(provider_id.lower(), provider_id.title()), "teal")
+        )
     return badges
 
 
