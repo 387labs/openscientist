@@ -11,6 +11,45 @@ from openscientist.providers.base import CostInfo, Provider
 from openscientist.settings import get_settings
 
 
+def _provider_class(provider_name: str) -> type[Provider]:
+    """Resolve a provider id to its class without instantiating it.
+
+    Instantiation validates auth (``Provider.__init__``), which a caller that
+    only needs to inspect the class (e.g. to derive the agent backend for a
+    past job) may not have configured. Deferred imports keep provider SDK
+    dependencies optional.
+    """
+    name = provider_name.lower()
+    if name == "anthropic":
+        from openscientist.providers.anthropic import AnthropicProvider
+
+        return AnthropicProvider
+    if name == "cborg":
+        from openscientist.providers.cborg import CborgProvider
+
+        return CborgProvider
+    if name == "vertex":
+        from openscientist.providers.vertex import VertexProvider
+
+        return VertexProvider
+    if name == "bedrock":
+        from openscientist.providers.bedrock import BedrockProvider
+
+        return BedrockProvider
+    if name == "foundry":
+        from openscientist.providers.foundry import FoundryProvider
+
+        return FoundryProvider
+    if name == "openai":
+        from openscientist.providers.openai import OpenAIDirectProvider
+
+        return OpenAIDirectProvider
+    raise ValueError(
+        f"Unknown provider '{name}'. Valid options: anthropic, cborg, "
+        "vertex, bedrock, foundry, openai"
+    )
+
+
 def get_provider() -> Provider:
     """
     Get the configured provider based on environment.
@@ -27,37 +66,22 @@ def get_provider() -> Provider:
                                "bedrock", "foundry", "openai"). Defaults to
                                "anthropic" if not set.
     """
-    settings = get_settings()
-    provider_name = settings.provider.provider_id.lower()
+    return _provider_class(get_settings().provider.provider_id)()
 
-    if provider_name == "anthropic":
-        from openscientist.providers.anthropic import AnthropicProvider
 
-        return AnthropicProvider()
-    if provider_name == "cborg":
-        from openscientist.providers.cborg import CborgProvider
+def agent_backend_for_provider(provider_name: str) -> str:
+    """Return the agent backend ("codex" or "claude_code") a provider drives.
 
-        return CborgProvider()
-    if provider_name == "vertex":
-        from openscientist.providers.vertex import VertexProvider
+    Mirrors ``discovery._backend_for`` but keyed by provider id so the UI can
+    label a past job without instantiating its (maybe unconfigured) provider.
+    """
+    from openscientist.providers.base import CodexCompatible
 
-        return VertexProvider()
-    if provider_name == "bedrock":
-        from openscientist.providers.bedrock import BedrockProvider
-
-        return BedrockProvider()
-    if provider_name == "foundry":
-        from openscientist.providers.foundry import FoundryProvider
-
-        return FoundryProvider()
-    if provider_name == "openai":
-        from openscientist.providers.openai import OpenAIDirectProvider
-
-        return OpenAIDirectProvider()
-    raise ValueError(
-        f"Unknown provider '{provider_name}'. Valid options: anthropic, cborg, "
-        "vertex, bedrock, foundry, openai"
-    )
+    try:
+        cls = _provider_class(provider_name)
+    except ValueError:
+        return "claude_code"
+    return "codex" if issubclass(cls, CodexCompatible) else "claude_code"
 
 
 def check_provider_config() -> tuple[bool, str, list[str]]:
@@ -106,4 +130,9 @@ def check_provider_config() -> tuple[bool, str, list[str]]:
         return (False, provider_name, errors)
 
 
-__all__ = ["ClaudeCompatible", "CostInfo", "check_provider_config", "get_provider"]
+__all__ = [
+    "CostInfo",
+    "agent_backend_for_provider",
+    "check_provider_config",
+    "get_provider",
+]

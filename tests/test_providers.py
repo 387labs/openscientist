@@ -130,6 +130,33 @@ class TestGetProvider:
             get_provider()
 
 
+class TestAgentBackendForProvider:
+    """`agent_backend_for_provider` maps a provider id to its agent backend
+    without instantiating the provider (which would validate auth)."""
+
+    def test_codex_compatible_provider_maps_to_codex(self):
+        from openscientist.providers import agent_backend_for_provider
+
+        assert agent_backend_for_provider("openai") == "codex"
+
+    def test_claude_compatible_providers_map_to_claude_code(self):
+        from openscientist.providers import agent_backend_for_provider
+
+        for pid in ("anthropic", "cborg", "vertex", "bedrock", "foundry"):
+            assert agent_backend_for_provider(pid) == "claude_code"
+
+    def test_unknown_provider_defaults_to_claude_code(self):
+        from openscientist.providers import agent_backend_for_provider
+
+        assert agent_backend_for_provider("does-not-exist") == "claude_code"
+
+    def test_does_not_instantiate_provider(self):
+        # No auth env is set, yet this must not raise (instantiation would).
+        from openscientist.providers import agent_backend_for_provider
+
+        assert agent_backend_for_provider("openai") == "codex"
+
+
 class TestProviderInit:
     """Tests for Provider initialisation and validation."""
 
