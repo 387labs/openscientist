@@ -51,6 +51,7 @@ def test_registry_maps_known_ids() -> None:
         "bedrock",
         "foundry",
         "openai",
+        "azure-openai",
     }
 
 

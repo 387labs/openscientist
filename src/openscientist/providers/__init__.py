@@ -44,9 +44,13 @@ def _provider_class(provider_name: str) -> type[Provider]:
         from openscientist.providers.openai import OpenAIDirectProvider
 
         return OpenAIDirectProvider
+    if name == "azure-openai":
+        from openscientist.providers.azure_openai import AzureOpenAIProvider
+
+        return AzureOpenAIProvider
     raise ValueError(
         f"Unknown provider '{name}'. Valid options: anthropic, cborg, "
-        "vertex, bedrock, foundry, openai"
+        "vertex, bedrock, foundry, openai, azure-openai"
     )
 
 
@@ -112,7 +116,15 @@ def check_provider_config() -> tuple[bool, str, list[str]]:
 
     provider_name = settings.provider.provider_id.lower()
 
-    valid_providers = ("anthropic", "cborg", "vertex", "bedrock", "foundry", "openai")
+    valid_providers = (
+        "anthropic",
+        "cborg",
+        "vertex",
+        "bedrock",
+        "foundry",
+        "openai",
+        "azure-openai",
+    )
     if provider_name not in valid_providers:
         return (
             False,

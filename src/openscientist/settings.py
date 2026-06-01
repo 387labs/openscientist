@@ -45,7 +45,7 @@ class ProviderSettings(BaseSettings):
     provider_id: str = Field(
         default="anthropic",
         alias="OPENSCIENTIST_PROVIDER",
-        description="Provider id (anthropic, cborg, vertex, bedrock, foundry).",
+        description="Provider id (anthropic, cborg, vertex, bedrock, foundry, openai, azure-openai).",
     )
 
     # GitHub token for skill syncing
@@ -61,6 +61,21 @@ class ProviderSettings(BaseSettings):
 
     # OpenAI (Codex agent backend)
     openai_api_key: str | None = Field(default=None, alias="OPENAI_API_KEY")
+
+    # Azure OpenAI Service (Codex agent backend, OpenAI models via Azure).
+    # Azure routes by deployment name in the URL, so the deployment is carried
+    # separately from the model. Distinct from the foundry provider, which
+    # serves Anthropic models via Azure AI Foundry.
+    azure_openai_api_key: str | None = Field(default=None, alias="AZURE_OPENAI_API_KEY")
+    azure_openai_resource: str | None = Field(default=None, alias="AZURE_OPENAI_RESOURCE")
+    azure_openai_deployment: str | None = Field(default=None, alias="AZURE_OPENAI_DEPLOYMENT")
+    azure_openai_api_version: str | None = Field(default=None, alias="AZURE_OPENAI_API_VERSION")
+    # How many times codex reconnects through Azure's intermittent streaming
+    # disconnects before failing the turn (openai/codex#9936). Raise it for
+    # lower-capacity Azure deployments that disconnect more often.
+    azure_openai_stream_max_retries: int = Field(
+        default=10, alias="AZURE_OPENAI_STREAM_MAX_RETRIES"
+    )
 
     # Model settings
     model: str | None = Field(default=None, alias="OPENSCIENTIST_MODEL")
@@ -208,7 +223,7 @@ class ProviderSettings(BaseSettings):
     def _unknown_provider_warnings(provider: str) -> list[str]:
         return [
             f"Unknown provider '{provider}'. "
-            "Valid options: anthropic, cborg, vertex, bedrock, foundry, openai"
+            "Valid options: anthropic, cborg, vertex, bedrock, foundry, openai, azure-openai"
         ]
 
     _LEGACY_ENV_VAR_RENAMES = (
@@ -294,6 +309,7 @@ class ProviderSettings(BaseSettings):
             "bedrock": self._bedrock_warnings,
             "foundry": lambda: [],
             "openai": lambda: [],
+            "azure-openai": lambda: [],
         }
         warnings = warning_builders.get(
             provider, lambda: self._unknown_provider_warnings(provider)
@@ -340,6 +356,17 @@ class ProviderSettings(BaseSettings):
         # not read the host path itself, only its presence, so the provider's
         # config validation passes.
         self._set_env_if_present(env_vars, "CODEX_AUTH_HOST_PATH", self.codex_auth_host_path)
+
+    def _apply_azure_openai_env_vars(self, env_vars: dict[str, str]) -> None:
+        self._set_env_if_present(env_vars, "AZURE_OPENAI_API_KEY", self.azure_openai_api_key)
+        self._set_env_if_present(env_vars, "AZURE_OPENAI_RESOURCE", self.azure_openai_resource)
+        self._set_env_if_present(env_vars, "AZURE_OPENAI_DEPLOYMENT", self.azure_openai_deployment)
+        self._set_env_if_present(
+            env_vars, "AZURE_OPENAI_API_VERSION", self.azure_openai_api_version
+        )
+        self._set_env_if_present(
+            env_vars, "AZURE_OPENAI_STREAM_MAX_RETRIES", str(self.azure_openai_stream_max_retries)
+        )
 
     def _apply_vertex_env_vars(
         self,
@@ -408,6 +435,7 @@ class ProviderSettings(BaseSettings):
         self._apply_model_env_vars(env_vars)
         self._apply_auth_env_vars(env_vars)
         self._apply_openai_env_vars(env_vars)
+        self._apply_azure_openai_env_vars(env_vars)
         self._apply_vertex_env_vars(env_vars, gcp_credentials_container_path)
         self._apply_bedrock_env_vars(env_vars)
         self._apply_foundry_env_vars(env_vars)

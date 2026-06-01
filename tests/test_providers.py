@@ -138,6 +138,7 @@ class TestAgentBackendForProvider:
         from openscientist.providers import agent_backend_for_provider
 
         assert agent_backend_for_provider("openai") == "codex"
+        assert agent_backend_for_provider("azure-openai") == "codex"
 
     def test_claude_compatible_providers_map_to_claude_code(self):
         from openscientist.providers import agent_backend_for_provider

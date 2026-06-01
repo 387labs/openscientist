@@ -368,6 +368,29 @@ class TestProviderContainerEnvVars:
         settings = ProviderSettings(OPENSCIENTIST_PROVIDER="openai")
         assert "OPENAI_API_KEY" not in settings.get_container_env_vars()
 
+    def test_azure_openai_vars_passed_for_codex_provider(self):
+        settings = ProviderSettings(
+            OPENSCIENTIST_PROVIDER="azure-openai",
+            AZURE_OPENAI_API_KEY="az-key",
+            AZURE_OPENAI_RESOURCE="myres",
+            AZURE_OPENAI_DEPLOYMENT="mydep",
+            AZURE_OPENAI_API_VERSION="2025-04-01-preview",
+        )
+
+        env = settings.get_container_env_vars()
+
+        assert env["OPENSCIENTIST_PROVIDER"] == "azure-openai"
+        assert env["AZURE_OPENAI_API_KEY"] == "az-key"
+        assert env["AZURE_OPENAI_RESOURCE"] == "myres"
+        assert env["AZURE_OPENAI_DEPLOYMENT"] == "mydep"
+        assert env["AZURE_OPENAI_API_VERSION"] == "2025-04-01-preview"
+
+    def test_azure_openai_vars_omitted_when_unset(self):
+        settings = ProviderSettings(OPENSCIENTIST_PROVIDER="azure-openai")
+        env = settings.get_container_env_vars()
+        assert "AZURE_OPENAI_API_KEY" not in env
+        assert "AZURE_OPENAI_RESOURCE" not in env
+
     def test_optional_model_and_token_env_vars_are_included(self):
         settings = ProviderSettings(
             OPENSCIENTIST_PROVIDER="anthropic",

@@ -13,6 +13,7 @@ import logging
 from openscientist.agent.base import AbstractAgent, AgentConfig
 from openscientist.agent.claude_code_agent import ClaudeCodeAgent
 from openscientist.providers.anthropic import AnthropicProvider
+from openscientist.providers.azure_openai import AzureOpenAIProvider
 from openscientist.providers.base import ClaudeCompatible, CodexCompatible, Provider
 from openscientist.providers.bedrock import BedrockProvider
 from openscientist.providers.cborg import CborgProvider
@@ -30,6 +31,7 @@ _PROVIDER_REGISTRY: dict[str, type[Provider]] = {
     "bedrock": BedrockProvider,
     "foundry": FoundryProvider,
     "openai": OpenAIDirectProvider,
+    "azure-openai": AzureOpenAIProvider,
 }
 
 
