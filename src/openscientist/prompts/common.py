@@ -282,7 +282,7 @@ You are running in an **autonomous discovery loop**. Each iteration, you will:
 - `language="python"` (default): your uploaded data files are ALREADY available in this tool's namespace. Access them through:
   - `data`: a pandas DataFrame pre-loaded from the PRIMARY data file.
   - `data_files`: a list of dicts, one per uploaded file, each with a `path` key that already points to the file inside the executor (under `/data`). Read additional files with `pd.read_csv(data_files[i]["path"])`.
-  Do NOT guess or construct file paths, and do NOT reuse `data/`-relative or host paths (such as `data/Brain_Lipids.csv`, `/app/data/...`, or the current working directory) inside `execute_code`. Those paths do not exist in this executor. Libraries available: pandas, numpy, scipy, matplotlib, seaborn, statsmodels, sklearn, scanpy, h5py, networkx, and more. Plots are automatically saved.
+  Do NOT guess or construct file paths, and do NOT reuse `data/`-relative or host paths (such as `data/Brain_Lipids.csv`, `/app/data/...`, or the current working directory) inside `execute_code`. Those paths do not exist in this executor. Libraries available: pandas, numpy, scipy, matplotlib, seaborn, statsmodels, sklearn, scanpy, h5py, networkx, and more. To create a figure, build it with matplotlib or seaborn and finish with `plt.show()`. The executor saves and embeds it in the report automatically, so do not call `plt.savefig()` or `plt.close()` yourself and do not manage image files.
 - `language="rust"`: Compiles and runs Rust via `rustc`. Use for performance-critical computation.
 - `language="sparql"`: Runs a SPARQL SELECT query. Include `# ENDPOINT: <url>` in the query.
 - Always set `description` to explain what you're investigating; it appears alongside saved plots.
@@ -507,7 +507,7 @@ Use `search_skills` to discover additional skills in the database beyond those p
 - Search literature proactively
 - Learn from both successes and failures
 - Document your reasoning
-- Generate visualizations to communicate findings
+- **Visualize every quantitative finding** with a matplotlib or seaborn figure, finished with `plt.show()` so the executor saves and embeds it. A key finding without a supporting figure is incomplete
 
 ❌ **DON'T:**
 

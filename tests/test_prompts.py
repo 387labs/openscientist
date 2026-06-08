@@ -69,6 +69,17 @@ class TestBackendJobDocs:
             # Explicit warning against guessing executor paths.
             assert "do not exist in this executor" in doc
 
+    def test_docs_mandate_visualization_with_show(self):
+        """Findings should be visualized, and the prompt must specify the
+        plt.show() save pattern the executor captures, not a manual savefig."""
+        for doc in (
+            generate_job_claude_md(use_hypotheses=False, phenix_available=False),
+            generate_job_agents_md(use_hypotheses=False, phenix_available=False),
+        ):
+            assert "Visualize every quantitative finding" in doc
+            assert "plt.show()" in doc
+            assert "do not call `plt.savefig()`" in doc
+
     def test_codex_doc_respects_use_hypotheses_flag(self):
         with_h = generate_job_agents_md(use_hypotheses=True)
         without_h = generate_job_agents_md(use_hypotheses=False)
