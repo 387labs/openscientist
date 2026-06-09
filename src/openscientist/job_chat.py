@@ -236,6 +236,21 @@ async def send_chat_message(
     return assistant_message
 
 
+# Prior assistant turns can be full report dumps. Replaying them verbatim
+# few-shots the model into dumping again, so cap each history message. Recent
+# intent matters more than verbatim length, and the agent can re-read job files.
+_HISTORY_MAX_CHARS = 800
+
+
+def _truncate_history(content: str) -> str:
+    """Cap a prior chat message so a long assistant report dump does not prime
+    the model to repeat it."""
+    content = content.strip()
+    if len(content) <= _HISTORY_MAX_CHARS:
+        return content
+    return content[:_HISTORY_MAX_CHARS].rstrip() + " [...truncated]"
+
+
 async def _send_message_via_executor(
     session: AsyncSession,
     job_id: UUID,
@@ -276,21 +291,40 @@ Important: You are discussing published research and scientific literature. You 
 
 Be concise, accurate, and cite specific papers or findings when relevant. Focus on what the research literature indicates."""
 
-    # Build prompt with job context and chat history
+    # Build the prompt. Structure matters more than wording here: the findings
+    # corpus is framed as background reference (not the thing to recite), long
+    # prior assistant turns are truncated so a past report dump does not few-shot
+    # the model into repeating it, and the live user message is labelled and
+    # framed LAST so the model answers it instead of continuing the findings
+    # document.
     prompt_parts = []
 
     job_context = await load_job_context(str(job_id))
     if job_context.strip():
+        prompt_parts.append(
+            "## Background reference for this job\n"
+            "Context from the completed job, for you to draw on when answering. "
+            "Do NOT recite or summarize it unless the user asks. Read "
+            "`final_report.md` if you need full detail."
+        )
         prompt_parts.append(job_context)
         prompt_parts.append("---")
 
     if history:
-        prompt_parts.append("Previous conversation:")
+        prompt_parts.append("## Conversation so far")
         for msg in history:
             role_label = "User" if msg.role == "user" else "Assistant"
-            prompt_parts.append(f"{role_label}: {msg.content}")
+            prompt_parts.append(f"{role_label}: {_truncate_history(msg.content)}")
         prompt_parts.append("---")
-    prompt_parts.append(message)
+
+    prompt_parts.append("## The user's new message (answer THIS, nothing else)")
+    prompt_parts.append(
+        "Respond directly to the message below. If it is not a clear question or "
+        "request, reply briefly and ask what they would like to know. Do not "
+        "summarize the job's findings unless the user explicitly asks for a "
+        "summary."
+    )
+    prompt_parts.append(f"User: {message}")
 
     prompt = "\n".join(prompt_parts)
 
