@@ -225,9 +225,9 @@ and iteration summaries.
    - Quantify findings (e.g., "3 of 5 studies found...")
    - Acknowledge limitations and uncertainty clearly
 
-4. **Embedding figures:**
-   - To include a plot in the report, use this syntax: `{{{{figure:filename.png|caption=Your caption here}}}}`
-   - Select the most informative plots — aim for ~1 figure per major finding
+4. **Embedding figures (required):**
+   - You MUST embed every available figure that supports a finding, using this syntax: `{{{{figure:filename.png|caption=Your caption here}}}}`
+   - Include a figure for each major finding that has one. A report that omits available figures is incomplete
    - Place figures near the text that discusses them
    - Only reference figures listed in the "Available Figures" section above
 
