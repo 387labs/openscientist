@@ -122,19 +122,13 @@ class ClaudeCodeAgent(AbstractAgent[ClaudeCompatible]):
     kept alive for conversation continuity across iterations.  Pass
     ``reset_session=True`` to disconnect and start a fresh session.
 
-    ``model_override`` lets callers route a single run to a different model
-    than the provider's default (used by in-page chat).
+    ``AgentConfig.model_override`` lets callers route a single run to a
+    different model than the provider's default (used by in-page chat).
     """
 
-    def __init__(
-        self,
-        config: AgentConfig,
-        provider: ClaudeCompatible,
-        *,
-        model_override: str | None = None,
-    ) -> None:
+    def __init__(self, config: AgentConfig, provider: ClaudeCompatible) -> None:
         super().__init__(config, provider)
-        self._model_override = model_override
+        self._model_override = config.model_override
         self._client: ClaudeSDKClient | None = None
         self._stderr_lines: list[str] = []
 

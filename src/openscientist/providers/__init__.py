@@ -7,55 +7,49 @@ Providers handle:
 - Provider-specific authentication and setup
 """
 
+import importlib
+from typing import cast
+
 from openscientist.providers.base import CostInfo, Provider
 from openscientist.settings import get_settings
 
+# The single provider registry: id -> (module, class name). Dotted paths keep
+# provider SDK dependencies optional (imported on demand) and avoid importing
+# the agent layer here; the agent factory derives from this, so there is no
+# second registry to keep in sync.
+_PROVIDER_CLASS_PATHS: dict[str, tuple[str, str]] = {
+    "anthropic": ("openscientist.providers.anthropic", "AnthropicProvider"),
+    "cborg": ("openscientist.providers.cborg", "CborgProvider"),
+    "vertex": ("openscientist.providers.vertex", "VertexProvider"),
+    "bedrock": ("openscientist.providers.bedrock", "BedrockProvider"),
+    "foundry": ("openscientist.providers.foundry", "FoundryProvider"),
+    "openai": ("openscientist.providers.openai", "OpenAIDirectProvider"),
+    "azure-openai": ("openscientist.providers.azure_openai", "AzureOpenAIProvider"),
+    "ollama": ("openscientist.providers.ollama", "OllamaProvider"),
+}
 
-def _provider_class(provider_name: str) -> type[Provider]:
+
+def provider_ids() -> tuple[str, ...]:
+    """The registered provider ids (the single source of truth)."""
+    return tuple(_PROVIDER_CLASS_PATHS)
+
+
+def provider_class(provider_name: str) -> type[Provider]:
     """Resolve a provider id to its class without instantiating it.
 
     Instantiation validates auth (``Provider.__init__``), which a caller that
     only needs to inspect the class (e.g. to derive the agent backend for a
-    past job) may not have configured. Deferred imports keep provider SDK
-    dependencies optional.
+    past job) may not have configured. The class is imported on demand so
+    provider SDK dependencies stay optional.
     """
-    name = provider_name.lower()
-    if name == "anthropic":
-        from openscientist.providers.anthropic import AnthropicProvider
-
-        return AnthropicProvider
-    if name == "cborg":
-        from openscientist.providers.cborg import CborgProvider
-
-        return CborgProvider
-    if name == "vertex":
-        from openscientist.providers.vertex import VertexProvider
-
-        return VertexProvider
-    if name == "bedrock":
-        from openscientist.providers.bedrock import BedrockProvider
-
-        return BedrockProvider
-    if name == "foundry":
-        from openscientist.providers.foundry import FoundryProvider
-
-        return FoundryProvider
-    if name == "openai":
-        from openscientist.providers.openai import OpenAIDirectProvider
-
-        return OpenAIDirectProvider
-    if name == "azure-openai":
-        from openscientist.providers.azure_openai import AzureOpenAIProvider
-
-        return AzureOpenAIProvider
-    if name == "ollama":
-        from openscientist.providers.ollama import OllamaProvider
-
-        return OllamaProvider
-    raise ValueError(
-        f"Unknown provider '{name}'. Valid options: anthropic, cborg, "
-        "vertex, bedrock, foundry, openai, azure-openai, ollama"
-    )
+    try:
+        module_path, class_name = _PROVIDER_CLASS_PATHS[provider_name.lower()]
+    except KeyError:
+        raise ValueError(
+            f"Unknown provider {provider_name!r}. Valid options: {', '.join(provider_ids())}"
+        ) from None
+    module = importlib.import_module(module_path)
+    return cast("type[Provider]", getattr(module, class_name))
 
 
 def get_provider() -> Provider:
@@ -74,7 +68,7 @@ def get_provider() -> Provider:
                                "bedrock", "foundry", "openai"). Defaults to
                                "anthropic" if not set.
     """
-    return _provider_class(get_settings().provider.provider_id)()
+    return provider_class(get_settings().provider.provider_id)()
 
 
 def check_provider_config() -> tuple[bool, str, list[str]]:
@@ -105,21 +99,11 @@ def check_provider_config() -> tuple[bool, str, list[str]]:
 
     provider_name = settings.provider.provider_id.lower()
 
-    valid_providers = (
-        "anthropic",
-        "cborg",
-        "vertex",
-        "bedrock",
-        "foundry",
-        "openai",
-        "azure-openai",
-        "ollama",
-    )
-    if provider_name not in valid_providers:
+    if provider_name not in _PROVIDER_CLASS_PATHS:
         return (
             False,
             provider_name,
-            [f"Unknown provider '{provider_name}'. Valid options: {', '.join(valid_providers)}"],
+            [f"Unknown provider '{provider_name}'. Valid options: {', '.join(provider_ids())}"],
         )
 
     try:
@@ -136,4 +120,6 @@ __all__ = [
     "CostInfo",
     "check_provider_config",
     "get_provider",
+    "provider_class",
+    "provider_ids",
 ]

@@ -21,11 +21,11 @@ from openscientist.agent.base import AbstractAgent, AgentBackend, IterationResul
 from openscientist.agent.claude_code_agent import ClaudeCodeAgent  # noqa: F401
 from openscientist.agent.codex_agent import CodexAgent
 from openscientist.agent.factory import (
-    _PROVIDER_REGISTRY,
     agent_class_for_provider_id,
     backend_for_provider_id,
 )
 from openscientist.prompts.common import BackendFragments
+from openscientist.providers import provider_ids
 from openscientist.providers.base import Provider
 
 
@@ -59,11 +59,18 @@ def test_every_backend_has_exactly_one_agent() -> None:
 
 def test_every_provider_resolves_to_a_concrete_agent() -> None:
     concrete = _concrete_agent_classes()
-    for provider_id in _PROVIDER_REGISTRY:
+    for provider_id in provider_ids():
         agent_cls = agent_class_for_provider_id(provider_id)
         assert agent_cls in concrete, provider_id
         # The id-keyed backend resolver agrees with the resolved agent class.
         assert backend_for_provider_id(provider_id) is agent_cls.backend, provider_id
+
+
+def test_every_backend_has_a_display_name() -> None:
+    # display_name is a dict lookup; a new AgentBackend member without an entry
+    # would KeyError only at UI render time, so assert it eagerly here.
+    for backend in AgentBackend:
+        assert isinstance(backend.display_name, str) and backend.display_name
 
 
 def test_prompts_are_fully_substituted() -> None:
