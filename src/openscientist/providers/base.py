@@ -183,6 +183,15 @@ class Provider(abc.ABC):
 
         return {"can_proceed": len(errors) == 0, "warnings": warnings, "errors": errors}
 
+    def effective_model_name(self) -> str | None:
+        """The model id this provider will actually drive, or None when it
+        defers to an account/config default.
+
+        Used for the job's model badge. Each compatibility family overrides
+        this; the base returns None for a provider that has no family.
+        """
+        return None
+
 
 class ClaudeCompatible(Provider, abc.ABC):
     """Provider that speaks the Anthropic Messages API and can be driven
@@ -202,6 +211,9 @@ class ClaudeCompatible(Provider, abc.ABC):
     @abc.abstractmethod
     def claude_model_name(self) -> str:
         """Model name to pass to ClaudeAgentOptions.model."""
+
+    def effective_model_name(self) -> str | None:
+        return self.claude_model_name()
 
 
 class CodexCompatible(Provider, abc.ABC):
@@ -234,3 +246,6 @@ class CodexCompatible(Provider, abc.ABC):
         named by this provider's ``model_providers.<id>.env_key``. The
         codex analog of ``claude_sdk_env()``; merged into the codex child
         environment."""
+
+    def effective_model_name(self) -> str | None:
+        return self.codex_model_name()

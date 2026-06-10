@@ -347,9 +347,10 @@ class TestPhenixMount:
 
 
 class TestCodexAuthProvisioning:
-    """`_provision_codex_auth` copies the codex CLI auth into the per-job
-    CODEX_HOME (agent-readable), instead of mounting the host file, which the
-    non-root agent could not read across the uid/permission boundary."""
+    """`CodexAgent.provision_host_prelaunch` copies the codex CLI auth into the
+    per-job CODEX_HOME (agent-readable), instead of mounting the host file,
+    which the non-root agent could not read across the uid/permission
+    boundary. It is the backend's host-side, pre-launch hook."""
 
     def _settings(self, codex_auth_host_path: str | None) -> MagicMock:
         settings = MagicMock()
@@ -357,12 +358,14 @@ class TestCodexAuthProvisioning:
         return settings
 
     def test_copies_auth_into_codex_home_agent_readable(self, tmp_path: Path) -> None:
+        from openscientist.agent.codex_agent import CodexAgent
+
         src = tmp_path / "host-auth.json"
         src.write_text('{"tokens": {}}')
         job_dir = tmp_path / "job"
         job_dir.mkdir()
 
-        JobContainerRunner._provision_codex_auth(self._settings(str(src)), job_dir)
+        CodexAgent.provision_host_prelaunch(self._settings(str(src)), job_dir)
 
         dest = job_dir / ".codex" / "auth.json"
         assert dest.read_text() == '{"tokens": {}}'
@@ -370,15 +373,17 @@ class TestCodexAuthProvisioning:
         assert (dest.parent.stat().st_mode & 0o777) == 0o777  # agent can write config.toml
 
     def test_noop_when_unset(self, tmp_path: Path) -> None:
+        from openscientist.agent.codex_agent import CodexAgent
+
         job_dir = tmp_path / "job"
         job_dir.mkdir()
-        JobContainerRunner._provision_codex_auth(self._settings(None), job_dir)
+        CodexAgent.provision_host_prelaunch(self._settings(None), job_dir)
         assert not (job_dir / ".codex").exists()
 
     def test_noop_when_source_missing(self, tmp_path: Path) -> None:
+        from openscientist.agent.codex_agent import CodexAgent
+
         job_dir = tmp_path / "job"
         job_dir.mkdir()
-        JobContainerRunner._provision_codex_auth(
-            self._settings(str(tmp_path / "nope.json")), job_dir
-        )
+        CodexAgent.provision_host_prelaunch(self._settings(str(tmp_path / "nope.json")), job_dir)
         assert not (job_dir / ".codex" / "auth.json").exists()

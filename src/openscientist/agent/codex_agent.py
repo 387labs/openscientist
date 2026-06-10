@@ -47,6 +47,7 @@ from openscientist.transcript import CODEX
 
 if TYPE_CHECKING:
     from openscientist.prompts.common import BackendFragments
+    from openscientist.settings import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -130,6 +131,35 @@ class CodexAgent(AbstractAgent[CodexCompatible]):
     # use the AbstractAgent defaults: codex configures its child via config.toml
     # (no process-env routing), folds chat guidance into the system prompt, and
     # has no chat model override.
+
+    @classmethod
+    def provision_host_prelaunch(cls, settings: Settings, job_dir: Path) -> None:
+        """Place the codex CLI auth into the per-job CODEX_HOME so the non-root
+        agent (uid 1001) can read it.
+
+        Mounting the host auth file directly fails on the uid/permission
+        boundary (the host file is mode 600 owned by another user), so we copy
+        it in agent-readable. ``job_dir`` is the runner-local path to the job
+        directory (the same path ``setup.py`` writes into), not the
+        host-translated bind-mount path, so the copy works whether the web
+        server runs on the host or in a container. No-op unless
+        ``codex_auth_host_path`` is set (the API-key path needs no file).
+        """
+        src = settings.provider.codex_auth_host_path
+        if not src:
+            return
+        src_path = Path(src).expanduser()
+        if not src_path.exists():
+            logger.warning("codex_auth_host_path %s does not exist, skipping", src_path)
+            return
+        codex_home = job_dir / ".codex"
+        codex_home.mkdir(parents=True, exist_ok=True)
+        # World-writable so the agent can also write config.toml into CODEX_HOME.
+        codex_home.chmod(0o777)
+        dest = codex_home / "auth.json"
+        shutil.copy2(src_path, dest)
+        dest.chmod(0o644)
+        logger.info("Provisioned codex auth into %s", dest)
 
     def _job_dir(self) -> Path:
         # Absolute: codex resolves a relative CODEX_HOME/cwd against its own

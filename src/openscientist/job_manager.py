@@ -50,13 +50,7 @@ def _effective_model(settings: Any) -> str | None:
     if model:
         return str(model)
     try:
-        from openscientist.providers.base import ClaudeCompatible, CodexCompatible
-
-        provider = get_provider()
-        if isinstance(provider, CodexCompatible):
-            return provider.codex_model_name()
-        if isinstance(provider, ClaudeCompatible):
-            return provider.claude_model_name()
+        return get_provider().effective_model_name()
     except Exception as exc:  # provider misconfigured, unavailable, etc.
         logger.debug("Could not resolve provider model for job: %s", exc)
     return None

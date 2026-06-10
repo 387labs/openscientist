@@ -9,6 +9,7 @@ get a `ClaudeCodeAgent`, `CodexCompatible` providers a `CodexAgent`.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from openscientist.agent.base import AbstractAgent, AgentBackend, AgentConfig
 from openscientist.agent.claude_code_agent import ClaudeCodeAgent
@@ -66,6 +67,22 @@ def backend_for_provider_id(provider_id: str) -> AgentBackend:
     if cls is not None and issubclass(cls, CodexCompatible):
         return AgentBackend.CODEX
     return AgentBackend.CLAUDE_CODE
+
+
+def agent_class_for_provider_id(provider_id: str) -> type[AbstractAgent[Any]]:
+    """Return the agent class for a provider id without instantiating anything.
+
+    Lets the web/orchestrator process (where no agent instance exists) reach a
+    backend's classmethods, e.g. ``provision_host_prelaunch`` before the agent
+    container is launched. Unknown ids fall back to the Claude agent.
+    """
+    cls = _PROVIDER_REGISTRY.get(provider_id.lower())
+    if cls is not None and issubclass(cls, CodexCompatible):
+        # Deferred import: the codex SDK is only needed on the codex path.
+        from openscientist.agent.codex_agent import CodexAgent
+
+        return CodexAgent
+    return ClaudeCodeAgent
 
 
 def get_agent(config: AgentConfig) -> AbstractAgent[Provider]:

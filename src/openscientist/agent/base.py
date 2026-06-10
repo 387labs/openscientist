@@ -22,6 +22,7 @@ from openscientist.transcript import TranscriptEntry
 
 if TYPE_CHECKING:
     from openscientist.prompts.common import BackendFragments
+    from openscientist.settings import Settings
 
 __all__ = [
     "AbstractAgent",
@@ -256,4 +257,15 @@ class AbstractAgent[P: Provider](abc.ABC):
 
     def chat_model_override(self) -> str | None:
         """Per-run model override for in-page chat. Default: no override."""
+        return None
+
+    @classmethod
+    def provision_host_prelaunch(cls, settings: Settings, job_dir: Path) -> None:
+        """Host-side, pre-container setup for this backend.
+
+        Runs in the web/orchestrator process (where no agent instance exists)
+        before the agent container is launched, so it is a classmethod keyed
+        by the agent class. Default no-op; a backend that needs file-based
+        auth provisioning overrides it.
+        """
         return None
