@@ -956,13 +956,14 @@ class TestEndToEndHypothesesFlow:
     async def test_build_agent_executor_codex_uses_agents_doc(self, tmp_path: Path) -> None:
         """For the Codex backend the system prompt is the full AGENTS.md doc
         (no .claude/ vocabulary), not the concise Claude system prompt."""
+        from openscientist.agent.base import AgentBackend
         from openscientist.orchestrator.discovery import _build_agent_executor
 
         with patch("openscientist.orchestrator.discovery.get_agent") as mock_get_agent:
             _build_agent_executor(
                 job_dir=tmp_path,
                 data_file=None,
-                agent_backend="codex",
+                agent_backend=AgentBackend.CODEX,
                 use_hypotheses=True,
             )
             config = mock_get_agent.call_args[0][0]

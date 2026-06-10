@@ -117,32 +117,36 @@ class TestGetProvider:
 
 
 class TestAgentBackendForProvider:
-    """`agent_backend_for_provider` maps a provider id to its agent backend
+    """`backend_for_provider_id` maps a provider id to its agent backend
     without instantiating the provider (which would validate auth)."""
 
     def test_codex_compatible_provider_maps_to_codex(self):
-        from openscientist.providers import agent_backend_for_provider
+        from openscientist.agent.base import AgentBackend
+        from openscientist.agent.factory import backend_for_provider_id
 
-        assert agent_backend_for_provider("openai") == "codex"
-        assert agent_backend_for_provider("azure-openai") == "codex"
-        assert agent_backend_for_provider("ollama") == "codex"
+        assert backend_for_provider_id("openai") is AgentBackend.CODEX
+        assert backend_for_provider_id("azure-openai") is AgentBackend.CODEX
+        assert backend_for_provider_id("ollama") is AgentBackend.CODEX
 
     def test_claude_compatible_providers_map_to_claude_code(self):
-        from openscientist.providers import agent_backend_for_provider
+        from openscientist.agent.base import AgentBackend
+        from openscientist.agent.factory import backend_for_provider_id
 
         for pid in ("anthropic", "cborg", "vertex", "bedrock", "foundry"):
-            assert agent_backend_for_provider(pid) == "claude_code"
+            assert backend_for_provider_id(pid) is AgentBackend.CLAUDE_CODE
 
     def test_unknown_provider_defaults_to_claude_code(self):
-        from openscientist.providers import agent_backend_for_provider
+        from openscientist.agent.base import AgentBackend
+        from openscientist.agent.factory import backend_for_provider_id
 
-        assert agent_backend_for_provider("does-not-exist") == "claude_code"
+        assert backend_for_provider_id("does-not-exist") is AgentBackend.CLAUDE_CODE
 
     def test_does_not_instantiate_provider(self):
         # No auth env is set, yet this must not raise (instantiation would).
-        from openscientist.providers import agent_backend_for_provider
+        from openscientist.agent.base import AgentBackend
+        from openscientist.agent.factory import backend_for_provider_id
 
-        assert agent_backend_for_provider("openai") == "codex"
+        assert backend_for_provider_id("openai") is AgentBackend.CODEX
 
 
 class TestProviderInit:

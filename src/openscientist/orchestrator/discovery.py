@@ -16,8 +16,14 @@ from uuid import UUID
 
 from sqlalchemy import select
 
-from openscientist.agent.base import AbstractAgent, AgentConfig, IterationResult, TokenUsage
-from openscientist.agent.factory import get_agent
+from openscientist.agent.base import (
+    AbstractAgent,
+    AgentBackend,
+    AgentConfig,
+    IterationResult,
+    TokenUsage,
+)
+from openscientist.agent.factory import backend_for_provider, get_agent
 from openscientist.database.models import JobDataFile, Skill
 from openscientist.database.models.job import Job as JobModel
 from openscientist.database.session import AsyncSessionLocal
@@ -37,7 +43,6 @@ from openscientist.orchestrator.iteration import (
     wait_for_feedback_or_timeout,
 )
 from openscientist.prompts import (
-    AgentBackend,
     generate_job_agents_md,
     generate_job_claude_md,
     get_enabled_skills,
@@ -74,16 +79,11 @@ def _resolve_primary_data_file(data_files: list[str]) -> Path | None:
     return data_file
 
 
-def _backend_for(provider: Provider) -> AgentBackend:
-    """Map a provider to its agent backend name (for prompt selection)."""
-    return "claude_code" if isinstance(provider, ClaudeCompatible) else "codex"
-
-
 def _build_agent_executor(
     job_dir: Path,
     data_file: Path | None,
     *,
-    agent_backend: AgentBackend = "claude_code",
+    agent_backend: AgentBackend = AgentBackend.CLAUDE_CODE,
     use_hypotheses: bool = False,
     data_files: list[Path] | None = None,
 ) -> AbstractAgent[Provider]:
@@ -93,14 +93,14 @@ def _build_agent_executor(
     separately into ``.claude/``). Codex reads a single ``AGENTS.md``, so
     its system prompt is the full per-job doc, written there by the agent.
     """
-    if agent_backend == "codex":
+    if agent_backend is AgentBackend.CODEX:
         system_prompt = generate_job_agents_md(
             use_hypotheses=use_hypotheses,
             phenix_available=get_settings().phenix.is_available,
         )
     else:
         system_prompt = get_system_prompt(agent_backend="claude_code")
-    logger.info("Built %s system prompt (%d chars)", agent_backend, len(system_prompt))
+    logger.info("Built %s system prompt (%d chars)", agent_backend.value, len(system_prompt))
     config = AgentConfig(
         job_dir=job_dir,
         data_file=data_file,
@@ -709,7 +709,7 @@ async def run_discovery_async(job_dir: Path) -> dict[str, Any]:
     # Codex providers configure the child via the agent's config.toml.
     if isinstance(provider, ClaudeCompatible):
         provider.setup_environment()
-    backend = _backend_for(provider)
+    backend = backend_for_provider(provider)
     await update_job_status(job_dir, "running")
 
     use_hypotheses = runtime["use_hypotheses"]
@@ -717,7 +717,7 @@ async def run_discovery_async(job_dir: Path) -> dict[str, Any]:
     # The .claude/ skills + CLAUDE.md are Claude-only. The Codex agent gets the
     # same enabled skills as native codex SKILL.md files under .agents/skills/,
     # which codex auto-discovers and injects.
-    if backend == "claude_code":
+    if backend is AgentBackend.CLAUDE_CODE:
         await _write_skills_to_claude_dir(job_dir, use_hypotheses=use_hypotheses)
     else:
         await _write_skills_to_codex_dir(job_dir)

@@ -10,6 +10,7 @@ check-time. Nothing inherits this yet.
 from __future__ import annotations
 
 import abc
+import enum
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,11 +20,33 @@ from openscientist.transcript import TranscriptEntry
 
 __all__ = [
     "AbstractAgent",
+    "AgentBackend",
     "AgentConfig",
     "IterationResult",
     "TokenUsage",
     "TranscriptEntry",
 ]
+
+
+class AgentBackend(enum.Enum):
+    """The agent runtime that drives a provider family.
+
+    The single source of truth for backend identity. Each concrete
+    ``AbstractAgent`` owns one of these; the string values are stable and
+    match the historical labels persisted and derived elsewhere, so existing
+    data and any string comparisons keep working.
+    """
+
+    CLAUDE_CODE = "claude_code"
+    CODEX = "codex"
+
+    @property
+    def display_name(self) -> str:
+        """Human-facing label for the UI."""
+        return {
+            AgentBackend.CLAUDE_CODE: "Claude Code",
+            AgentBackend.CODEX: "Codex",
+        }[self]
 
 
 @dataclass

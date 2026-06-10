@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 
-from openscientist.agent.base import AbstractAgent, AgentConfig
+from openscientist.agent.base import AbstractAgent, AgentBackend, AgentConfig
 from openscientist.agent.claude_code_agent import ClaudeCodeAgent
 from openscientist.providers.anthropic import AnthropicProvider
 from openscientist.providers.azure_openai import AzureOpenAIProvider
@@ -44,6 +44,28 @@ def _instantiate_provider(provider_id: str) -> Provider:
         valid = ", ".join(sorted(_PROVIDER_REGISTRY))
         raise ValueError(f"Unknown provider {provider_id!r}. Valid options: {valid}")
     return cls()
+
+
+def backend_for_provider(provider: Provider) -> AgentBackend:
+    """Return the agent backend that drives a provider instance.
+
+    The single source of truth for the provider -> backend mapping; callers
+    that only have a provider id (e.g. the UI) use ``backend_for_provider_id``.
+    """
+    return AgentBackend.CODEX if isinstance(provider, CodexCompatible) else AgentBackend.CLAUDE_CODE
+
+
+def backend_for_provider_id(provider_id: str) -> AgentBackend:
+    """Return the agent backend for a provider id without instantiating it.
+
+    Lets the UI label a past job from its stored provider id without
+    constructing the (maybe unconfigured) provider. Unknown ids fall back to
+    the Claude backend.
+    """
+    cls = _PROVIDER_REGISTRY.get(provider_id.lower())
+    if cls is not None and issubclass(cls, CodexCompatible):
+        return AgentBackend.CODEX
+    return AgentBackend.CLAUDE_CODE
 
 
 def get_agent(config: AgentConfig) -> AbstractAgent[Provider]:

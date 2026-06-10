@@ -15,10 +15,8 @@ from openscientist.prompts.common import (
     get_enabled_skills,
 )
 
-AgentBackend = Literal["claude_code", "codex"]
 
-
-def get_system_prompt(*, agent_backend: AgentBackend = "claude_code") -> str:
+def get_system_prompt(*, agent_backend: Literal["claude_code", "codex"] = "claude_code") -> str:
     """Return the system prompt for the given agent backend."""
     if agent_backend == "codex":
         return get_codex_system_prompt()
@@ -26,7 +24,6 @@ def get_system_prompt(*, agent_backend: AgentBackend = "claude_code") -> str:
 
 
 __all__ = [
-    "AgentBackend",
     "build_discovery_prompt",
     "format_skills_list",
     "generate_job_agents_md",

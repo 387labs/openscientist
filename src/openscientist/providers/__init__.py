@@ -77,21 +77,6 @@ def get_provider() -> Provider:
     return _provider_class(get_settings().provider.provider_id)()
 
 
-def agent_backend_for_provider(provider_name: str) -> str:
-    """Return the agent backend ("codex" or "claude_code") a provider drives.
-
-    Mirrors ``discovery._backend_for`` but keyed by provider id so the UI can
-    label a past job without instantiating its (maybe unconfigured) provider.
-    """
-    from openscientist.providers.base import CodexCompatible
-
-    try:
-        cls = _provider_class(provider_name)
-    except ValueError:
-        return "claude_code"
-    return "codex" if issubclass(cls, CodexCompatible) else "claude_code"
-
-
 def check_provider_config() -> tuple[bool, str, list[str]]:
     """
     Check if the provider is properly configured without raising exceptions.
@@ -149,7 +134,6 @@ def check_provider_config() -> tuple[bool, str, list[str]]:
 
 __all__ = [
     "CostInfo",
-    "agent_backend_for_provider",
     "check_provider_config",
     "get_provider",
 ]

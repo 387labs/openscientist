@@ -16,6 +16,7 @@ from uuid import UUID
 
 from nicegui import ui
 
+from openscientist.agent.factory import backend_for_provider_id
 from openscientist.artifact_packager import create_artifacts_zip
 from openscientist.async_tasks import run_sync
 from openscientist.auth import get_current_user_id, require_auth
@@ -27,7 +28,6 @@ from openscientist.job_manager import _db_get_job, _db_get_share_permission
 from openscientist.knowledge_state import KnowledgeState
 from openscientist.orchestrator.iteration import update_job_status
 from openscientist.pdf_generator import markdown_to_pdf
-from openscientist.providers import agent_backend_for_provider
 from openscientist.webapp_components.error_handler import get_user_friendly_error
 from openscientist.webapp_components.ui_components import (
     STATUS_COLORS,
@@ -852,8 +852,6 @@ def _render_job_status_notices(context: _JobDetailContext) -> None:
         _render_ks_loading_notice(context.ks_load_error)
 
 
-_AGENT_DISPLAY = {"codex": "Codex", "claude_code": "Claude Code"}
-
 _PROVIDER_DISPLAY = {
     "anthropic": "Anthropic",
     "cborg": "CBORG",
@@ -906,8 +904,8 @@ def _stats_badges(latest_job: Any, lit_count: int, hyp_count: int = 0) -> list[A
         badges.append(("Hypotheses", hyp_count, "orange"))
     provider_id = getattr(latest_job, "llm_provider", None)
     if provider_id:
-        backend = agent_backend_for_provider(provider_id)
-        badges.append(("Agent", _AGENT_DISPLAY.get(backend, backend), "indigo"))
+        backend = backend_for_provider_id(provider_id)
+        badges.append(("Agent", backend.display_name, "indigo"))
         badges.append(
             ("Provider", _PROVIDER_DISPLAY.get(provider_id.lower(), provider_id.title()), "teal")
         )
