@@ -25,7 +25,7 @@ from openscientist.agent.factory import (
     backend_for_provider_id,
 )
 from openscientist.prompts.common import BackendFragments
-from openscientist.providers import provider_ids
+from openscientist.providers import provider_class, provider_ids
 from openscientist.providers.base import Provider
 
 
@@ -40,6 +40,29 @@ def _concrete_agent_classes() -> set[type[AbstractAgent[Provider]]]:
                 found.add(sub)
 
     walk(AbstractAgent)  # type: ignore[type-abstract]
+    return found
+
+
+def _concrete_provider_classes() -> set[type[Provider]]:
+    """All production (non-test) concrete Provider subclasses.
+
+    Imports every registered provider module first so the subclass tree is
+    complete regardless of import order.
+    """
+    for provider_id in provider_ids():
+        provider_class(provider_id)  # forces the on-demand import
+
+    found: set[type[Provider]] = set()
+
+    def walk(cls: type[Provider]) -> None:
+        for sub in cls.__subclasses__():
+            walk(sub)
+            if not inspect.isabstract(sub) and sub.__module__.startswith(
+                "openscientist.providers."
+            ):
+                found.add(sub)
+
+    walk(Provider)  # type: ignore[type-abstract]
     return found
 
 
@@ -64,6 +87,15 @@ def test_every_provider_resolves_to_a_concrete_agent() -> None:
         assert agent_cls in concrete, provider_id
         # The id-keyed backend resolver agrees with the resolved agent class.
         assert backend_for_provider_id(provider_id) is agent_cls.backend, provider_id
+
+
+def test_every_provider_class_is_registered() -> None:
+    # A Provider defined but missing from the single registry is "half-wired":
+    # it fails loudly at use-time, but nothing flags the omission. Catch it here
+    # so adding a backend means adding its registry entry too.
+    registered = {provider_class(pid) for pid in provider_ids()}
+    for cls in _concrete_provider_classes():
+        assert cls in registered, f"{cls.__name__} is not in providers._PROVIDER_CLASS_PATHS"
 
 
 def test_every_backend_has_a_display_name() -> None:
