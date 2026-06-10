@@ -18,13 +18,12 @@ from sqlalchemy import select
 
 from openscientist.agent.base import (
     AbstractAgent,
-    AgentBackend,
     AgentConfig,
     IterationResult,
     TokenUsage,
 )
-from openscientist.agent.factory import backend_for_provider, get_agent
-from openscientist.database.models import JobDataFile, Skill
+from openscientist.agent.factory import agent_class_for_provider_id, get_agent
+from openscientist.database.models import JobDataFile
 from openscientist.database.models.job import Job as JobModel
 from openscientist.database.session import AsyncSessionLocal
 from openscientist.exceptions import OpenScientistError
@@ -42,14 +41,8 @@ from openscientist.orchestrator.iteration import (
     update_job_status,
     wait_for_feedback_or_timeout,
 )
-from openscientist.prompts import (
-    generate_job_agents_md,
-    generate_job_claude_md,
-    get_enabled_skills,
-    get_system_prompt,
-)
 from openscientist.providers import get_provider
-from openscientist.providers.base import ClaudeCompatible, Provider
+from openscientist.providers.base import Provider
 from openscientist.settings import get_settings
 from openscientist.transcript import TranscriptEntry, save_transcript
 from openscientist.version import get_version_string
@@ -83,24 +76,22 @@ def _build_agent_executor(
     job_dir: Path,
     data_file: Path | None,
     *,
-    agent_backend: AgentBackend = AgentBackend.CLAUDE_CODE,
     use_hypotheses: bool = False,
     data_files: list[Path] | None = None,
 ) -> AbstractAgent[Provider]:
     """Create a configured agent for discovery/report phases.
 
-    Claude gets a concise system prompt (its rich ``CLAUDE.md`` is written
-    separately into ``.claude/``). Codex reads a single ``AGENTS.md``, so
-    its system prompt is the full per-job doc, written there by the agent.
+    The backend that drives the configured provider chooses its own discovery
+    system prompt: Claude returns a concise prompt (its rich ``CLAUDE.md`` is
+    written separately into ``.claude/`` by ``prepare_job_workspace``), codex
+    returns the full per-job doc delivered via ``AGENTS.md``.
     """
-    if agent_backend is AgentBackend.CODEX:
-        system_prompt = generate_job_agents_md(
-            use_hypotheses=use_hypotheses,
-            phenix_available=get_settings().phenix.is_available,
-        )
-    else:
-        system_prompt = get_system_prompt(agent_backend="claude_code")
-    logger.info("Built %s system prompt (%d chars)", agent_backend.value, len(system_prompt))
+    agent_cls = agent_class_for_provider_id(get_settings().provider.provider_id)
+    system_prompt = agent_cls.discovery_system_prompt(
+        use_hypotheses=use_hypotheses,
+        phenix_available=get_settings().phenix.is_available,
+    )
+    logger.info("Built %s system prompt (%d chars)", agent_cls.backend.value, len(system_prompt))
     config = AgentConfig(
         job_dir=job_dir,
         data_file=data_file,
@@ -508,82 +499,6 @@ async def _load_runtime_context(job_dir: Path) -> dict[str, Any]:
     }
 
 
-async def _write_skills_to_claude_dir(job_dir: Path, *, use_hypotheses: bool = False) -> None:
-    """Write CLAUDE.md and enabled skill files into job_dir/.claude/."""
-    claude_dir = job_dir / ".claude"
-    claude_dir.mkdir(parents=True, exist_ok=True)
-
-    # Write the discovery-agent JOB_CLAUDE.md (hypothesis sections conditional)
-    _write_job_claude_md(claude_dir, use_hypotheses=use_hypotheses)
-
-    try:
-        async with AsyncSessionLocal(thread_safe=True) as session:
-            skills = await get_enabled_skills(session)
-        if not skills:
-            logger.info("No enabled skills to write")
-            return
-        skills_dir = claude_dir / "skills"
-        skills_dir.mkdir(parents=True, exist_ok=True)
-        for skill in skills:
-            filename = f"{skill.category}--{skill.slug}.md"
-            path = skills_dir / filename
-            header = f"# {skill.name}\n*Category: {skill.category}*\n"
-            if skill.description:
-                header += f"\n{skill.description}\n"
-            path.write_text(header + "\n" + skill.content, encoding="utf-8")
-        logger.info("Wrote %d skill files to %s", len(skills), skills_dir)
-    except Exception as e:
-        logger.warning("Failed to write skills to .claude dir: %s", e)
-
-
-def _yaml_quote(value: str) -> str:
-    """Render a YAML double-quoted scalar so colons and other special
-    characters cannot break SKILL.md frontmatter parsing."""
-    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
-
-
-def _codex_skill_markdown(skill: Skill) -> str:
-    """Render one enabled skill as a codex ``SKILL.md`` (frontmatter + body).
-
-    Codex caps the frontmatter ``name`` at 64 chars and DROPS any skill whose
-    ``description`` is empty, so the name is truncated and the description is
-    collapsed to a single line, bounded to 1024 chars, with a non-empty
-    fallback.
-    """
-    name = f"{skill.category}--{skill.slug}"[:64]
-    description = " ".join((skill.description or "").split())[:1024]
-    if not description:
-        description = f"{skill.category} skill: {skill.name}"
-    frontmatter = f"---\nname: {_yaml_quote(name)}\ndescription: {_yaml_quote(description)}\n---\n"
-    return frontmatter + skill.content
-
-
-async def _write_skills_to_codex_dir(job_dir: Path) -> None:
-    """Write enabled skills as codex ``SKILL.md`` files into
-    ``job_dir/.agents/skills/``.
-
-    The codex agent runs with the job dir as its cwd (a git repo), so codex
-    treats ``.agents/skills/`` as a project skill root: it discovers each
-    ``SKILL.md`` and auto-injects a ``## Skills`` summary into the system
-    prompt with its own trigger rules. This is how the codex/Ollama agent
-    receives skills; the ``.claude/`` path does not apply to it.
-    """
-    try:
-        async with AsyncSessionLocal(thread_safe=True) as session:
-            skills = await get_enabled_skills(session)
-        if not skills:
-            logger.info("No enabled skills to write")
-            return
-        skills_root = job_dir / ".agents" / "skills"
-        for skill in skills:
-            skill_dir = skills_root / f"{skill.category}--{skill.slug}"
-            skill_dir.mkdir(parents=True, exist_ok=True)
-            (skill_dir / "SKILL.md").write_text(_codex_skill_markdown(skill), encoding="utf-8")
-        logger.info("Wrote %d codex skill files to %s", len(skills), skills_root)
-    except Exception as e:
-        logger.warning("Failed to write skills to .agents dir: %s", e)
-
-
 def _write_chat_claude_md(claude_dir: Path) -> None:
     """Write CHAT_CLAUDE.md content to claude_dir/CLAUDE.md (chat agent entry point)."""
     try:
@@ -601,24 +516,6 @@ def _read_chat_claude_md_template() -> str:
         .joinpath("CHAT_CLAUDE.md")
         .read_text(encoding="utf-8")
     )
-
-
-def _write_job_claude_md(claude_dir: Path, *, use_hypotheses: bool = False) -> None:
-    """Write generated JOB_CLAUDE.md content to claude_dir/CLAUDE.md."""
-    from openscientist.settings import get_settings
-
-    try:
-        phenix_available = get_settings().phenix.is_available
-        dest = claude_dir / "CLAUDE.md"
-        dest.write_text(
-            generate_job_claude_md(
-                use_hypotheses=use_hypotheses, phenix_available=phenix_available
-            ),
-            encoding="utf-8",
-        )
-        logger.debug("Wrote job CLAUDE.md to %s (use_hypotheses=%s)", dest, use_hypotheses)
-    except Exception as e:
-        logger.warning("Failed to write job CLAUDE.md: %s", e)
 
 
 def get_version_metadata() -> dict[str, str]:
@@ -705,29 +602,20 @@ async def run_discovery_async(job_dir: Path) -> dict[str, Any]:
     logger.info("Starting discovery for job %s (mode=%s)", job_id, runtime["investigation_mode"])
 
     provider = get_provider()
-    # setup_environment() is a Claude-family concern (env/routing flags).
-    # Codex providers configure the child via the agent's config.toml.
-    if isinstance(provider, ClaudeCompatible):
-        provider.setup_environment()
-    backend = backend_for_provider(provider)
-    await update_job_status(job_dir, "running")
-
     use_hypotheses = runtime["use_hypotheses"]
     all_data_files = [Path(p) for p in runtime["data_files"]]
-    # The .claude/ skills + CLAUDE.md are Claude-only. The Codex agent gets the
-    # same enabled skills as native codex SKILL.md files under .agents/skills/,
-    # which codex auto-discovers and injects.
-    if backend is AgentBackend.CLAUDE_CODE:
-        await _write_skills_to_claude_dir(job_dir, use_hypotheses=use_hypotheses)
-    else:
-        await _write_skills_to_codex_dir(job_dir)
     executor = _build_agent_executor(
         job_dir=job_dir,
         data_file=_resolve_primary_data_file(runtime["data_files"]),
-        agent_backend=backend,
         use_hypotheses=use_hypotheses,
         data_files=all_data_files,
     )
+    # Backend-specific setup is the agent's own concern: apply any runtime env
+    # (Claude auth/routing flags; no-op for codex) and materialise the per-job
+    # workspace (enabled skills in the backend's on-disk layout).
+    executor.apply_runtime_environment()
+    await update_job_status(job_dir, "running")
+    await executor.prepare_job_workspace(use_hypotheses=use_hypotheses)
     logger.info("Created agent executor for job %s", job_id)
 
     provenance_dir = job_dir / "provenance"

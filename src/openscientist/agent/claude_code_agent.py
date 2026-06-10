@@ -155,11 +155,9 @@ class ClaudeCodeAgent(AbstractAgent[ClaudeCompatible]):
         return cls.system_prompt()
 
     async def prepare_job_workspace(self, *, use_hypotheses: bool = False) -> None:
-        # The skill-writer body relocates here in Step 6; for now delegate to
-        # the existing discovery helper (deferred import avoids a load cycle).
-        from openscientist.orchestrator.discovery import _write_skills_to_claude_dir
+        from openscientist.agent.skills import write_skills_to_claude_dir
 
-        await _write_skills_to_claude_dir(self._config.job_dir, use_hypotheses=use_hypotheses)
+        await write_skills_to_claude_dir(self._config.job_dir, use_hypotheses=use_hypotheses)
 
     def apply_runtime_environment(self) -> None:
         # Auth/routing flags for the Claude CLI and the tools subprocess.

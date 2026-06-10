@@ -121,11 +121,9 @@ class CodexAgent(AbstractAgent[CodexCompatible]):
         return cls.job_doc(use_hypotheses=use_hypotheses, phenix_available=phenix_available)
 
     async def prepare_job_workspace(self, *, use_hypotheses: bool = False) -> None:
-        # The skill-writer body relocates here in Step 6; for now delegate to
-        # the existing discovery helper (deferred import avoids a load cycle).
-        from openscientist.orchestrator.discovery import _write_skills_to_codex_dir
+        from openscientist.agent.skills import write_skills_to_codex_dir
 
-        await _write_skills_to_codex_dir(self._config.job_dir)
+        await write_skills_to_codex_dir(self._config.job_dir)
 
     # apply_runtime_environment, prepare_chat_workspace, and chat_model_override
     # use the AbstractAgent defaults: codex configures its child via config.toml

@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import yaml  # type: ignore[import-untyped]
 
+from openscientist.agent.skills import codex_skill_markdown
 from openscientist.database.models import Skill
-from openscientist.orchestrator.discovery import _codex_skill_markdown
 
 
 def _parse_frontmatter(skill_md: str) -> tuple[dict[str, object], str]:
@@ -24,7 +24,7 @@ def test_codex_skill_markdown_basic() -> None:
         content="# Pathway Enrichment\n\nStep 1: ...\n",
         is_enabled=True,
     )
-    md = _codex_skill_markdown(skill)
+    md = codex_skill_markdown(skill)
     fm, body = _parse_frontmatter(md)
     assert fm["name"] == "metabolomics--pathway-enrichment"
     assert fm["description"] == "Run pathway enrichment analysis on differential metabolites."
@@ -43,7 +43,7 @@ def test_codex_skill_markdown_null_description_gets_fallback() -> None:
         content="body",
         is_enabled=True,
     )
-    fm, _ = _parse_frontmatter(_codex_skill_markdown(skill))
+    fm, _ = _parse_frontmatter(codex_skill_markdown(skill))
     assert fm["description"]  # non-empty
     assert "genomics" in str(fm["description"])
 
@@ -57,7 +57,7 @@ def test_codex_skill_markdown_truncates_name_and_description() -> None:
         content="x",
         is_enabled=True,
     )
-    fm, _ = _parse_frontmatter(_codex_skill_markdown(skill))
+    fm, _ = _parse_frontmatter(codex_skill_markdown(skill))
     assert len(str(fm["name"])) <= 64
     assert len(str(fm["description"])) <= 1024
     # Description is single-line (collapsed whitespace).
@@ -74,5 +74,5 @@ def test_codex_skill_markdown_handles_yaml_special_chars() -> None:
         content="body",
         is_enabled=True,
     )
-    fm, _ = _parse_frontmatter(_codex_skill_markdown(skill))
+    fm, _ = _parse_frontmatter(codex_skill_markdown(skill))
     assert fm["description"] == 'Analysis: uses "quotes" and: colons'

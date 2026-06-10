@@ -267,8 +267,6 @@ async def _send_message_via_executor(
     """
     from openscientist.agent.base import AgentConfig
     from openscientist.agent.factory import get_agent
-    from openscientist.providers import get_provider
-    from openscientist.providers.base import ClaudeCompatible
 
     # Get chat history for continuity
     history = await get_chat_history(session, job_id, limit=10)
@@ -334,41 +332,22 @@ Be concise, accurate, and cite specific papers or findings when relevant. Focus 
         len(system_prompt),
     )
 
-    # Build the agent the same way discovery does: select the backend by
-    # provider family via the factory and drive it through the shared
-    # AbstractAgent contract. The only backend-specific work is prompt/context
-    # prep below, mirroring discovery's provider-neutral setup.
-    provider = get_provider()
-
-    model_override: str | None = None
-    if isinstance(provider, ClaudeCompatible):
-        # setup_environment() and the .claude/CLAUDE.md chat context are
-        # Claude-family concerns (the method does not exist on CodexCompatible).
-        provider.setup_environment()
-
-        from openscientist.orchestrator.discovery import _write_chat_claude_md
-
-        claude_dir = job_dir / ".claude"
-        claude_dir.mkdir(parents=True, exist_ok=True)
-        _write_chat_claude_md(claude_dir)
-
-        # Allow operators to route chat to a different model than discovery via
-        # the ANTHROPIC_CHAT_MODEL env var. This is the escape hatch when the
-        # discovery model rejects chat-style prompts under Usage Policy
-        # enforcement (e.g. Claude Opus 4.6 on Foundry refuses every chat call).
-        # When unset, chat uses the same model as discovery.
-        from openscientist.settings import get_settings
-
-        provider_settings = get_settings().provider
-        model_override = provider_settings.anthropic_chat_model or provider_settings.model
-    else:
-        # Codex-family providers (e.g. Ollama) read guidance from AGENTS.md,
-        # which CodexAgent writes from the system prompt. Fold the chat-specific
-        # guidance into the system prompt, with codex fragments substituted so
-        # it is not told to use Claude's Read tool or a .claude/skills/ path.
-        from openscientist.prompts.codex import get_codex_chat_context
-
-        system_prompt = f"{system_prompt}\n\n{get_codex_chat_context()}"
+    # Build the agent the way discovery does: the factory selects the backend
+    # by provider family, and all backend-specific chat prep flows through the
+    # shared AbstractAgent contract (no isinstance here).
+    #
+    # A provisional executor runs the backend's chat prep, then it is rebuilt
+    # with the prepared prompt and model override for the actual run:
+    #  - apply_runtime_environment: Claude auth/routing flags; no-op for codex.
+    #  - prepare_chat_workspace: Claude writes .claude/CLAUDE.md and returns the
+    #    prompt unchanged; codex folds the fragment-substituted chat guidance
+    #    into the system prompt so it is not told to use Claude's Read tool.
+    #  - chat_model_override: Claude's ANTHROPIC_CHAT_MODEL escape hatch (route
+    #    chat to a different model than discovery); None for codex.
+    executor = get_agent(AgentConfig(job_dir=job_dir, system_prompt=system_prompt))
+    executor.apply_runtime_environment()
+    system_prompt = executor.prepare_chat_workspace(system_prompt)
+    model_override = executor.chat_model_override()
 
     config = AgentConfig(
         job_dir=job_dir,
