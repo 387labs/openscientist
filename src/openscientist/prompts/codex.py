@@ -3,7 +3,7 @@
 The Codex agent reads its instructions from ``AGENTS.md`` and has no
 ``.claude/`` directory, so the fragments drop Claude-specific paths and
 the ``Read`` tool name. Skills are delivered as native codex ``SKILL.md``
-files under ``.agents/skills/`` (see ``discovery._write_skills_to_codex_dir``),
+files under ``.agents/skills/`` (see ``agent.skills.write_skills_to_codex_dir``),
 which codex auto-injects as a ``## Skills`` section, so the prompt points at
 that section and drops the nonexistent ``search_skills`` tool.
 """
@@ -11,7 +11,6 @@ that section and drops the nonexistent ``search_skills`` tool.
 from openscientist.prompts.common import (
     BackendFragments,
     build_job_doc,
-    build_system_prompt,
     render_chat_context,
 )
 
@@ -25,11 +24,6 @@ CODEX_FRAGMENTS = BackendFragments(
     search_skills_doc="",
     skills_discovery_note="",
 )
-
-
-def get_codex_system_prompt() -> str:
-    """System prompt for the Codex agent."""
-    return build_system_prompt(CODEX_FRAGMENTS)
 
 
 def generate_job_agents_md(*, use_hypotheses: bool = False, phenix_available: bool = False) -> str:

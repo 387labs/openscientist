@@ -1,36 +1,37 @@
 """Tests for prompts module."""
 
+from openscientist.agent.claude_code_agent import ClaudeCodeAgent
+from openscientist.agent.codex_agent import CodexAgent
 from openscientist.prompts import (
     build_discovery_prompt,
     format_skills_list,
     generate_job_agents_md,
     generate_job_claude_md,
-    get_system_prompt,
 )
 
 
-class TestGetSystemPrompt:
-    """Tests for system prompt generation."""
+class TestSystemPrompt:
+    """Tests for each backend's system prompt (AbstractAgent.system_prompt)."""
 
     def test_mentions_claude_skills_dir(self):
-        prompt = get_system_prompt()
+        prompt = ClaudeCodeAgent.system_prompt()
         assert ".claude/skills/" in prompt
 
     def test_mentions_execute_code(self):
-        prompt = get_system_prompt()
+        prompt = ClaudeCodeAgent.system_prompt()
         assert "execute_code" in prompt
         assert "search_pubmed" in prompt
 
     def test_mentions_principles(self):
-        prompt = get_system_prompt()
+        prompt = ClaudeCodeAgent.system_prompt()
         assert "effect sizes" in prompt
         assert "Negative results" in prompt
 
-    def test_claude_backend_explicit_matches_default(self):
-        assert get_system_prompt(agent_backend="claude_code") == get_system_prompt()
+    def test_backends_produce_distinct_prompts(self):
+        assert ClaudeCodeAgent.system_prompt() != CodexAgent.system_prompt()
 
     def test_codex_backend_drops_claude_paths(self):
-        prompt = get_system_prompt(agent_backend="codex")
+        prompt = CodexAgent.system_prompt()
         assert ".claude/" not in prompt
         # the shared, backend-agnostic body is still present
         assert "execute_code" in prompt
@@ -86,7 +87,7 @@ class TestBackendJobDocs:
         The Claude path keeps search_skills (it has the .claude/skills files)."""
         for txt in (
             generate_job_agents_md(use_hypotheses=True, phenix_available=True),
-            get_system_prompt(agent_backend="codex"),
+            CodexAgent.system_prompt(),
         ):
             assert "search_skills" not in txt
             assert "skills/` directory provided to you" not in txt

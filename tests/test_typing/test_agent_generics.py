@@ -82,6 +82,34 @@ def test_rejects_subclass_missing_abstract_method(tmp_path: Path) -> None:
     assert "abstract" in out.lower()
 
 
+def test_rejects_subclass_missing_backend_divergent_member(tmp_path: Path) -> None:
+    """A subclass that implements run_iteration/shutdown but omits a newer
+    backend-divergent abstract member (e.g. discovery_system_prompt) is still
+    rejected at construction, so a new backend cannot silently skip it."""
+    code = """
+        from openscientist.agent.base import AbstractAgent, AgentConfig, IterationResult
+        from openscientist.providers.base import ClaudeCompatible
+
+
+        class Incomplete(AbstractAgent[ClaudeCompatible]):
+            async def run_iteration(
+                self, prompt: str, *, reset_session: bool = False
+            ) -> IterationResult:
+                return IterationResult(success=True, output="", tool_calls=0, transcript=[])
+
+            async def shutdown(self) -> None:
+                return None
+            # prompt_fragments / discovery_system_prompt / prepare_job_workspace omitted
+
+
+        def _make(config: AgentConfig, provider: ClaudeCompatible) -> None:
+            Incomplete(config, provider)
+    """
+    rc, out = _run_mypy(code, tmp_path)
+    assert rc != 0
+    assert "abstract" in out.lower()
+
+
 def test_codex_agent_rejects_claude_provider(tmp_path: Path) -> None:
     """`CodexAgent` is bound to `CodexCompatible`; a Claude-only provider
     must be rejected at construction time."""
