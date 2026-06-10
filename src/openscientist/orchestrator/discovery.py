@@ -18,7 +18,7 @@ from sqlalchemy import select
 
 from openscientist.agent.base import AbstractAgent, AgentConfig, IterationResult, TokenUsage
 from openscientist.agent.factory import get_agent
-from openscientist.database.models import JobDataFile
+from openscientist.database.models import JobDataFile, Skill
 from openscientist.database.models.job import Job as JobModel
 from openscientist.database.session import AsyncSessionLocal
 from openscientist.exceptions import OpenScientistError
@@ -536,6 +536,54 @@ async def _write_skills_to_claude_dir(job_dir: Path, *, use_hypotheses: bool = F
         logger.warning("Failed to write skills to .claude dir: %s", e)
 
 
+def _yaml_quote(value: str) -> str:
+    """Render a YAML double-quoted scalar so colons and other special
+    characters cannot break SKILL.md frontmatter parsing."""
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _codex_skill_markdown(skill: Skill) -> str:
+    """Render one enabled skill as a codex ``SKILL.md`` (frontmatter + body).
+
+    Codex caps the frontmatter ``name`` at 64 chars and DROPS any skill whose
+    ``description`` is empty, so the name is truncated and the description is
+    collapsed to a single line, bounded to 1024 chars, with a non-empty
+    fallback.
+    """
+    name = f"{skill.category}--{skill.slug}"[:64]
+    description = " ".join((skill.description or "").split())[:1024]
+    if not description:
+        description = f"{skill.category} skill: {skill.name}"
+    frontmatter = f"---\nname: {_yaml_quote(name)}\ndescription: {_yaml_quote(description)}\n---\n"
+    return frontmatter + skill.content
+
+
+async def _write_skills_to_codex_dir(job_dir: Path) -> None:
+    """Write enabled skills as codex ``SKILL.md`` files into
+    ``job_dir/.agents/skills/``.
+
+    The codex agent runs with the job dir as its cwd (a git repo), so codex
+    treats ``.agents/skills/`` as a project skill root: it discovers each
+    ``SKILL.md`` and auto-injects a ``## Skills`` summary into the system
+    prompt with its own trigger rules. This is how the codex/Ollama agent
+    receives skills; the ``.claude/`` path does not apply to it.
+    """
+    try:
+        async with AsyncSessionLocal(thread_safe=True) as session:
+            skills = await get_enabled_skills(session)
+        if not skills:
+            logger.info("No enabled skills to write")
+            return
+        skills_root = job_dir / ".agents" / "skills"
+        for skill in skills:
+            skill_dir = skills_root / f"{skill.category}--{skill.slug}"
+            skill_dir.mkdir(parents=True, exist_ok=True)
+            (skill_dir / "SKILL.md").write_text(_codex_skill_markdown(skill), encoding="utf-8")
+        logger.info("Wrote %d codex skill files to %s", len(skills), skills_root)
+    except Exception as e:
+        logger.warning("Failed to write skills to .agents dir: %s", e)
+
+
 def _write_chat_claude_md(claude_dir: Path) -> None:
     """Write CHAT_CLAUDE.md content to claude_dir/CLAUDE.md (chat agent entry point)."""
     try:
@@ -666,10 +714,13 @@ async def run_discovery_async(job_dir: Path) -> dict[str, Any]:
 
     use_hypotheses = runtime["use_hypotheses"]
     all_data_files = [Path(p) for p in runtime["data_files"]]
-    # The .claude/ skills + CLAUDE.md are Claude-only. The Codex agent reads
-    # its instructions from the AGENTS.md it writes from the system prompt.
+    # The .claude/ skills + CLAUDE.md are Claude-only. The Codex agent gets the
+    # same enabled skills as native codex SKILL.md files under .agents/skills/,
+    # which codex auto-discovers and injects.
     if backend == "claude_code":
         await _write_skills_to_claude_dir(job_dir, use_hypotheses=use_hypotheses)
+    else:
+        await _write_skills_to_codex_dir(job_dir)
     executor = _build_agent_executor(
         job_dir=job_dir,
         data_file=_resolve_primary_data_file(runtime["data_files"]),

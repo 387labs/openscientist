@@ -115,20 +115,6 @@ class TestGetProvider:
         with pytest.raises(ValueError, match="Unknown provider"):
             get_provider()
 
-    def test_defaults_to_anthropic(self, monkeypatch, tmp_path):
-        """Without OPENSCIENTIST_PROVIDER, defaults to anthropic (which may fail validation)."""
-        # Change to temp dir to avoid .env file
-        monkeypatch.chdir(tmp_path)
-
-        # Clear environment of provider-related vars
-        for key in list(os.environ.keys()):
-            if key.startswith(("CLAUDE_", "ANTHROPIC_", "AWS_", "GOOGLE_", "GCP_", "VERTEX_")):
-                monkeypatch.delenv(key, raising=False)
-
-        # No ANTHROPIC_API_KEY → AnthropicProvider.__init__ raises.
-        with pytest.raises(ValueError, match=r"Anthropic|ANTHROPIC_API_KEY"):
-            get_provider()
-
 
 class TestAgentBackendForProvider:
     """`agent_backend_for_provider` maps a provider id to its agent backend

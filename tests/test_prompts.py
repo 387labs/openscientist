@@ -80,6 +80,18 @@ class TestBackendJobDocs:
             assert "plt.show()" in doc
             assert "do not call `plt.savefig()`" in doc
 
+    def test_codex_doc_has_no_phantom_skills_refs(self):
+        """Codex gets skills via its own ## Skills injection, so the codex prompt
+        must not name the nonexistent search_skills tool or a phantom skills dir.
+        The Claude path keeps search_skills (it has the .claude/skills files)."""
+        for txt in (
+            generate_job_agents_md(use_hypotheses=True, phenix_available=True),
+            get_system_prompt(agent_backend="codex"),
+        ):
+            assert "search_skills" not in txt
+            assert "skills/` directory provided to you" not in txt
+        assert "search_skills" in generate_job_claude_md(use_hypotheses=True, phenix_available=True)
+
     def test_codex_doc_respects_use_hypotheses_flag(self):
         with_h = generate_job_agents_md(use_hypotheses=True)
         without_h = generate_job_agents_md(use_hypotheses=False)
