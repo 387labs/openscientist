@@ -11,12 +11,17 @@ from __future__ import annotations
 
 import abc
 import enum
+import inspect
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from openscientist.agent.mcp_specs import McpServerSpec
 from openscientist.providers.base import Provider
 from openscientist.transcript import TranscriptEntry
+
+if TYPE_CHECKING:
+    from openscientist.prompts.common import BackendFragments
 
 __all__ = [
     "AbstractAgent",
@@ -125,7 +130,30 @@ class AgentConfig:
 
 
 class AbstractAgent[P: Provider](abc.ABC):
-    """Agent runtime parameterised over the provider family it accepts."""
+    """Agent runtime parameterised over the provider family it accepts.
+
+    Backend-divergent behavior is expressed as members here so that adding a
+    new backend is "subclass and implement the interface": the abstract
+    members below cannot be skipped (a subclass that omits one is not
+    instantiable, and mypy flags it), and ``backend`` is enforced in
+    ``__init_subclass__``.
+    """
+
+    #: The backend identity this agent implements. Concrete subclasses MUST set
+    #: it; abc cannot enforce a plain ClassVar, so ``__init_subclass__`` does.
+    backend: ClassVar[AgentBackend]
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        # Only concrete (instantiable) subclasses must declare a backend; an
+        # intermediate abstract subclass may legitimately leave it unset.
+        if not inspect.isabstract(cls) and not isinstance(
+            getattr(cls, "backend", None), AgentBackend
+        ):
+            raise TypeError(
+                f"{cls.__name__} must set `backend: ClassVar[AgentBackend]` "
+                "to an AgentBackend member."
+            )
 
     def __init__(self, config: AgentConfig, provider: P) -> None:
         self._config = config
@@ -151,3 +179,81 @@ class AbstractAgent[P: Provider](abc.ABC):
 
     @abc.abstractmethod
     async def shutdown(self) -> None: ...
+
+    # ----- prompt vocabulary (single substitution path) -----
+
+    @classmethod
+    @abc.abstractmethod
+    def prompt_fragments(cls) -> BackendFragments:
+        """The backend-divergent prompt fragments this agent uses.
+
+        Every prompt this backend produces flows through these fragments, so
+        the system prompt, job doc, and chat context cannot diverge.
+        """
+
+    @classmethod
+    def system_prompt(cls) -> str:
+        """The concise system prompt for this backend."""
+        from openscientist.prompts.common import build_system_prompt
+
+        return build_system_prompt(cls.prompt_fragments())
+
+    @classmethod
+    def job_doc(cls, *, use_hypotheses: bool = False, phenix_available: bool = False) -> str:
+        """The full per-job instruction doc for this backend."""
+        from openscientist.prompts.common import build_job_doc
+
+        return build_job_doc(
+            use_hypotheses=use_hypotheses,
+            phenix_available=phenix_available,
+            frags=cls.prompt_fragments(),
+        )
+
+    @classmethod
+    def chat_doc(cls) -> str:
+        """The in-page-chat guidance for this backend (fragments substituted)."""
+        from openscientist.prompts.common import render_chat_context
+
+        return render_chat_context(cls.prompt_fragments())
+
+    @classmethod
+    @abc.abstractmethod
+    def discovery_system_prompt(
+        cls, *, use_hypotheses: bool = False, phenix_available: bool = False
+    ) -> str:
+        """The system prompt this backend uses for a discovery run.
+
+        Claude returns the concise ``system_prompt`` (its rich doc is written
+        into ``.claude/``); codex returns the full ``job_doc`` (delivered via
+        ``AGENTS.md``).
+        """
+
+    # ----- per-job side effects (run where the agent instance lives) -----
+
+    @abc.abstractmethod
+    async def prepare_job_workspace(self, *, use_hypotheses: bool = False) -> None:
+        """Materialise per-job files in the backend's layout (e.g. skills).
+
+        Runs in the agent process for the configured ``job_dir``.
+        """
+
+    def apply_runtime_environment(self) -> None:
+        """Apply any process environment this backend needs before running.
+
+        Default no-op; the Claude backend overrides to set auth/routing flags.
+        """
+        return None
+
+    def prepare_chat_workspace(self, base_system_prompt: str) -> str:
+        """Set up the in-page-chat context and return its system prompt.
+
+        Default folds the fragment-substituted ``chat_doc`` into the prompt,
+        which is correct for backends (e.g. codex) that read everything from
+        the system prompt. Claude overrides to write ``.claude/CLAUDE.md`` and
+        leave the base prompt unchanged.
+        """
+        return f"{base_system_prompt}\n\n{type(self).chat_doc()}"
+
+    def chat_model_override(self) -> str | None:
+        """Per-run model override for in-page chat. Default: no override."""
+        return None

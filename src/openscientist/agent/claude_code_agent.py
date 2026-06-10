@@ -16,7 +16,7 @@ import logging
 import os
 import sys
 from dataclasses import dataclass, field
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from claude_agent_sdk import (
     ClaudeAgentOptions,
@@ -31,10 +31,19 @@ from claude_agent_sdk.types import (
     ToolUseBlock,
 )
 
-from openscientist.agent.base import AbstractAgent, AgentConfig, IterationResult, TokenUsage
+from openscientist.agent.base import (
+    AbstractAgent,
+    AgentBackend,
+    AgentConfig,
+    IterationResult,
+    TokenUsage,
+)
 from openscientist.agent.mcp_specs import StdioMcpServerSpec
 from openscientist.providers.base import ClaudeCompatible
 from openscientist.transcript import CLAUDE
+
+if TYPE_CHECKING:
+    from openscientist.prompts.common import BackendFragments
 
 logger = logging.getLogger(__name__)
 
@@ -128,6 +137,53 @@ class ClaudeCodeAgent(AbstractAgent[ClaudeCompatible]):
         self._model_override = model_override
         self._client: ClaudeSDKClient | None = None
         self._stderr_lines: list[str] = []
+
+    backend = AgentBackend.CLAUDE_CODE
+
+    @classmethod
+    def prompt_fragments(cls) -> BackendFragments:
+        from openscientist.prompts.claude import CLAUDE_FRAGMENTS
+
+        return CLAUDE_FRAGMENTS
+
+    @classmethod
+    def discovery_system_prompt(
+        cls, *, use_hypotheses: bool = False, phenix_available: bool = False
+    ) -> str:
+        # Claude gets the concise system prompt; its rich CLAUDE.md is written
+        # separately into .claude/ by prepare_job_workspace.
+        return cls.system_prompt()
+
+    async def prepare_job_workspace(self, *, use_hypotheses: bool = False) -> None:
+        # The skill-writer body relocates here in Step 6; for now delegate to
+        # the existing discovery helper (deferred import avoids a load cycle).
+        from openscientist.orchestrator.discovery import _write_skills_to_claude_dir
+
+        await _write_skills_to_claude_dir(self._config.job_dir, use_hypotheses=use_hypotheses)
+
+    def apply_runtime_environment(self) -> None:
+        # Auth/routing flags for the Claude CLI and the tools subprocess.
+        self._provider.setup_environment()
+
+    def prepare_chat_workspace(self, base_system_prompt: str) -> str:
+        # Claude reads chat guidance from .claude/CLAUDE.md, not the system
+        # prompt; identity substitution keeps the file's content unchanged.
+        from openscientist.prompts.common import render_chat_context
+
+        claude_dir = self._config.job_dir / ".claude"
+        claude_dir.mkdir(parents=True, exist_ok=True)
+        (claude_dir / "CLAUDE.md").write_text(
+            render_chat_context(self.prompt_fragments()), encoding="utf-8"
+        )
+        return base_system_prompt
+
+    def chat_model_override(self) -> str | None:
+        # ANTHROPIC_CHAT_MODEL escape hatch: route chat to a different model
+        # than discovery (e.g. when the discovery model rejects chat prompts).
+        from openscientist.settings import get_settings
+
+        provider_settings = get_settings().provider
+        return provider_settings.anthropic_chat_model or provider_settings.model
 
     @staticmethod
     async def _allow_all_tools(

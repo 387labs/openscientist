@@ -30,12 +30,13 @@ import os
 import shutil
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from openai_codex import ApprovalMode, AsyncCodex, AsyncThread, CodexConfig, Sandbox
 
 from openscientist.agent.base import (
     AbstractAgent,
+    AgentBackend,
     AgentConfig,
     IterationResult,
     TokenUsage,
@@ -43,6 +44,9 @@ from openscientist.agent.base import (
 )
 from openscientist.providers.base import CodexCompatible
 from openscientist.transcript import CODEX
+
+if TYPE_CHECKING:
+    from openscientist.prompts.common import BackendFragments
 
 logger = logging.getLogger(__name__)
 
@@ -98,6 +102,34 @@ class CodexAgent(AbstractAgent[CodexCompatible]):
         super().__init__(config, provider)
         self._codex: AsyncCodex | None = None
         self._thread: AsyncThread | None = None
+
+    backend = AgentBackend.CODEX
+
+    @classmethod
+    def prompt_fragments(cls) -> BackendFragments:
+        from openscientist.prompts.codex import CODEX_FRAGMENTS
+
+        return CODEX_FRAGMENTS
+
+    @classmethod
+    def discovery_system_prompt(
+        cls, *, use_hypotheses: bool = False, phenix_available: bool = False
+    ) -> str:
+        # Codex reads a single AGENTS.md, so its discovery system prompt is the
+        # full per-job doc (CodexAgent writes it to AGENTS.md from this prompt).
+        return cls.job_doc(use_hypotheses=use_hypotheses, phenix_available=phenix_available)
+
+    async def prepare_job_workspace(self, *, use_hypotheses: bool = False) -> None:
+        # The skill-writer body relocates here in Step 6; for now delegate to
+        # the existing discovery helper (deferred import avoids a load cycle).
+        from openscientist.orchestrator.discovery import _write_skills_to_codex_dir
+
+        await _write_skills_to_codex_dir(self._config.job_dir)
+
+    # apply_runtime_environment, prepare_chat_workspace, and chat_model_override
+    # use the AbstractAgent defaults: codex configures its child via config.toml
+    # (no process-env routing), folds chat guidance into the system prompt, and
+    # has no chat model override.
 
     def _job_dir(self) -> Path:
         # Absolute: codex resolves a relative CODEX_HOME/cwd against its own

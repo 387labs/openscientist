@@ -9,20 +9,45 @@ import pytest
 
 from openscientist.agent.base import (
     AbstractAgent,
+    AgentBackend,
     AgentConfig,
     IterationResult,
     TokenUsage,
 )
 from openscientist.agent.mcp_specs import StdioMcpServerSpec
+from openscientist.prompts.common import BackendFragments
 from openscientist.providers.base import ClaudeCompatible
 from tests.helpers import StubClaudeProvider as _StubProvider
 
+_STUB_FRAGMENTS = BackendFragments(
+    skills_location="the skills dir",
+    builtin_read_tool="the read tool",
+    builtin_read_tool_short="the read tool",
+    search_skills_doc="",
+    skills_discovery_note="",
+)
+
 
 class _StubAgent(AbstractAgent[ClaudeCompatible]):
+    backend = AgentBackend.CLAUDE_CODE
+
     async def run_iteration(self, prompt: str, *, reset_session: bool = False) -> IterationResult:
         return IterationResult(success=True, output=prompt, tool_calls=0, transcript=[])
 
     async def shutdown(self) -> None:
+        return None
+
+    @classmethod
+    def prompt_fragments(cls) -> BackendFragments:
+        return _STUB_FRAGMENTS
+
+    @classmethod
+    def discovery_system_prompt(
+        cls, *, use_hypotheses: bool = False, phenix_available: bool = False
+    ) -> str:
+        return "stub discovery prompt"
+
+    async def prepare_job_workspace(self, *, use_hypotheses: bool = False) -> None:
         return None
 
 
