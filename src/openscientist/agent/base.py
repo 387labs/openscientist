@@ -245,17 +245,28 @@ class AbstractAgent[P: Provider](abc.ABC):
         """
         return None
 
-    def prepare_chat_workspace(self, base_system_prompt: str) -> str:
-        """Set up the in-page-chat context and return its system prompt.
+    @classmethod
+    def chat_system_prompt(cls, base_system_prompt: str) -> str:
+        """The in-page-chat system prompt for this backend.
 
         Default folds the fragment-substituted ``chat_doc`` into the prompt,
         which is correct for backends (e.g. codex) that read everything from
-        the system prompt. Claude overrides to write ``.claude/CLAUDE.md`` and
-        leave the base prompt unchanged.
+        the system prompt. Claude overrides to return the base prompt unchanged
+        and deliver the chat guidance via ``.claude/CLAUDE.md`` (written by
+        ``write_chat_context``). Pure: the side effects live in
+        ``write_chat_context`` so the chat executor can be built once.
         """
-        return f"{base_system_prompt}\n\n{type(self).chat_doc()}"
+        return f"{base_system_prompt}\n\n{cls.chat_doc()}"
 
-    def chat_model_override(self) -> str | None:
+    def write_chat_context(self) -> None:
+        """Materialise any on-disk in-page-chat context for this backend.
+
+        Default no-op; the Claude backend overrides to write ``.claude/CLAUDE.md``.
+        """
+        return None
+
+    @classmethod
+    def chat_model_override(cls) -> str | None:
         """Per-run model override for in-page chat. Default: no override."""
         return None
 

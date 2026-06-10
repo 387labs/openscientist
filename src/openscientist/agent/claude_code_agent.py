@@ -163,9 +163,14 @@ class ClaudeCodeAgent(AbstractAgent[ClaudeCompatible]):
         # Auth/routing flags for the Claude CLI and the tools subprocess.
         self._provider.setup_environment()
 
-    def prepare_chat_workspace(self, base_system_prompt: str) -> str:
-        # Claude reads chat guidance from .claude/CLAUDE.md, not the system
-        # prompt; identity substitution keeps the file's content unchanged.
+    @classmethod
+    def chat_system_prompt(cls, base_system_prompt: str) -> str:
+        # Claude reads chat guidance from .claude/CLAUDE.md (written by
+        # write_chat_context), so the system prompt is the base unchanged.
+        return base_system_prompt
+
+    def write_chat_context(self) -> None:
+        # Identity substitution keeps the file content the packaged template.
         from openscientist.prompts.common import render_chat_context
 
         claude_dir = self._config.job_dir / ".claude"
@@ -173,9 +178,9 @@ class ClaudeCodeAgent(AbstractAgent[ClaudeCompatible]):
         (claude_dir / "CLAUDE.md").write_text(
             render_chat_context(self.prompt_fragments()), encoding="utf-8"
         )
-        return base_system_prompt
 
-    def chat_model_override(self) -> str | None:
+    @classmethod
+    def chat_model_override(cls) -> str | None:
         # ANTHROPIC_CHAT_MODEL escape hatch: route chat to a different model
         # than discovery (e.g. when the discovery model rejects chat prompts).
         from openscientist.settings import get_settings

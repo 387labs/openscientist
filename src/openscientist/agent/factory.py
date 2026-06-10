@@ -56,6 +56,20 @@ def backend_for_provider(provider: Provider) -> AgentBackend:
     return AgentBackend.CODEX if isinstance(provider, CodexCompatible) else AgentBackend.CLAUDE_CODE
 
 
+def agent_class_for_provider(provider: Provider) -> type[AbstractAgent[Any]]:
+    """Return the agent class that drives a provider instance.
+
+    Lets a caller reach the backend's classmethods (e.g. ``chat_system_prompt``)
+    before constructing the agent. ``ClaudeCompatible`` is checked first, the
+    same precedence ``build_agent`` uses.
+    """
+    if isinstance(provider, CodexCompatible) and not isinstance(provider, ClaudeCompatible):
+        from openscientist.agent.codex_agent import CodexAgent
+
+        return CodexAgent
+    return ClaudeCodeAgent
+
+
 def backend_for_provider_id(provider_id: str) -> AgentBackend:
     """Return the agent backend for a provider id without instantiating it.
 
@@ -85,15 +99,14 @@ def agent_class_for_provider_id(provider_id: str) -> type[AbstractAgent[Any]]:
     return ClaudeCodeAgent
 
 
-def get_agent(config: AgentConfig) -> AbstractAgent[Provider]:
-    """Return the agent for the configured provider.
+def build_agent(config: AgentConfig, provider: Provider) -> AbstractAgent[Provider]:
+    """Construct the agent that drives an explicit provider instance.
 
-    The active provider is selected by `settings.provider.provider_id`. The
-    agent class is chosen by the provider's compatibility family.
+    Shared by `get_agent` (which resolves the provider from settings) and the
+    chat path (which already holds a provider and needs a single build).
+    ClaudeCompatible is checked first: a hypothetical multi-family provider
+    prefers the mature Claude path until a real hybrid case appears.
     """
-    provider = _instantiate_provider(get_settings().provider.provider_id)
-    # ClaudeCompatible is checked first: a hypothetical multi-family provider
-    # prefers the mature Claude path until a real hybrid case appears.
     if isinstance(provider, ClaudeCompatible):
         logger.info("Using ClaudeCodeAgent with provider %s", provider.id)
         return ClaudeCodeAgent(config, provider, model_override=config.model_override)
@@ -109,3 +122,12 @@ def get_agent(config: AgentConfig) -> AbstractAgent[Provider]:
         f"Provider {type(provider).__name__} does not implement a known agent "
         "compatibility family (ClaudeCompatible or CodexCompatible)."
     )
+
+
+def get_agent(config: AgentConfig) -> AbstractAgent[Provider]:
+    """Return the agent for the configured provider.
+
+    The active provider is selected by `settings.provider.provider_id`. The
+    agent class is chosen by the provider's compatibility family.
+    """
+    return build_agent(config, _instantiate_provider(get_settings().provider.provider_id))

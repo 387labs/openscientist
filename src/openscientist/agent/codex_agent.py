@@ -125,10 +125,10 @@ class CodexAgent(AbstractAgent[CodexCompatible]):
 
         await write_skills_to_codex_dir(self._config.job_dir)
 
-    # apply_runtime_environment, prepare_chat_workspace, and chat_model_override
-    # use the AbstractAgent defaults: codex configures its child via config.toml
-    # (no process-env routing), folds chat guidance into the system prompt, and
-    # has no chat model override.
+    # apply_runtime_environment, chat_system_prompt, write_chat_context, and
+    # chat_model_override use the AbstractAgent defaults: codex configures its
+    # child via config.toml (no process-env routing), folds the chat guidance
+    # into the system prompt, writes no chat file, and has no model override.
 
     @classmethod
     def provision_host_prelaunch(cls, settings: Settings, job_dir: Path) -> None:

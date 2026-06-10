@@ -266,7 +266,8 @@ async def _send_message_via_executor(
     agent to re-analyze data or search literature when answering follow-ups.
     """
     from openscientist.agent.base import AgentConfig
-    from openscientist.agent.factory import get_agent
+    from openscientist.agent.factory import agent_class_for_provider, build_agent
+    from openscientist.providers import get_provider
 
     # Get chat history for continuity
     history = await get_chat_history(session, job_id, limit=10)
@@ -332,29 +333,27 @@ Be concise, accurate, and cite specific papers or findings when relevant. Focus 
         len(system_prompt),
     )
 
-    # Build the agent the way discovery does: the factory selects the backend
-    # by provider family, and all backend-specific chat prep flows through the
-    # shared AbstractAgent contract (no isinstance here).
-    #
-    # A provisional executor runs the backend's chat prep, then it is rebuilt
-    # with the prepared prompt and model override for the actual run:
-    #  - apply_runtime_environment: Claude auth/routing flags; no-op for codex.
-    #  - prepare_chat_workspace: Claude writes .claude/CLAUDE.md and returns the
-    #    prompt unchanged; codex folds the fragment-substituted chat guidance
-    #    into the system prompt so it is not told to use Claude's Read tool.
+    # All backend-specific chat prep flows through the shared AbstractAgent
+    # contract (no isinstance here). The backend is the provider's family, so
+    # the prompt + model override are computed from the agent class up front
+    # and the executor is built once:
+    #  - chat_system_prompt: codex folds the fragment-substituted chat guidance
+    #    into the system prompt (so it is not told to use Claude's Read tool);
+    #    Claude returns the base prompt and delivers guidance via .claude/CLAUDE.md.
     #  - chat_model_override: Claude's ANTHROPIC_CHAT_MODEL escape hatch (route
     #    chat to a different model than discovery); None for codex.
-    executor = get_agent(AgentConfig(job_dir=job_dir, system_prompt=system_prompt))
-    executor.apply_runtime_environment()
-    system_prompt = executor.prepare_chat_workspace(system_prompt)
-    model_override = executor.chat_model_override()
-
+    #  - apply_runtime_environment: Claude auth/routing flags; no-op for codex.
+    #  - write_chat_context: Claude writes .claude/CLAUDE.md; no-op for codex.
+    provider = get_provider()
+    agent_cls = agent_class_for_provider(provider)
     config = AgentConfig(
         job_dir=job_dir,
-        system_prompt=system_prompt,
-        model_override=model_override,
+        system_prompt=agent_cls.chat_system_prompt(system_prompt),
+        model_override=agent_cls.chat_model_override(),
     )
-    executor = get_agent(config)
+    executor = build_agent(config, provider)
+    executor.apply_runtime_environment()
+    executor.write_chat_context()
 
     try:
         result = await executor.run_iteration(prompt, reset_session=True)
