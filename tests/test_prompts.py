@@ -99,6 +99,29 @@ class TestBackendJobDocs:
         assert "add_hypothesis" not in without_h
 
 
+class TestRenderChatContext:
+    """The job-chat context must honor backend fragments, sharing the discovery
+    substitution path so the chat agent is never told about tools/paths its
+    backend lacks."""
+
+    def test_claude_chat_context_is_identity(self):
+        from openscientist.prompts.claude import CLAUDE_FRAGMENTS
+        from openscientist.prompts.common import read_chat_template, render_chat_context
+
+        # Claude fragments are identity substitutions: the rendered context is
+        # the packaged template verbatim.
+        assert render_chat_context(CLAUDE_FRAGMENTS) == read_chat_template()
+
+    def test_codex_chat_context_drops_claude_vocabulary(self):
+        from openscientist.prompts.codex import get_codex_chat_context
+
+        ctx = get_codex_chat_context()
+        assert "Claude's" not in ctx
+        assert "`.claude/skills/`" not in ctx
+        # The guidance itself is preserved.
+        assert "execute_code" in ctx
+
+
 class TestBuildDiscoveryPrompt:
     """Tests for discovery prompt construction."""
 

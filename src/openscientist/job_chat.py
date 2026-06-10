@@ -364,11 +364,11 @@ Be concise, accurate, and cite specific papers or findings when relevant. Focus 
     else:
         # Codex-family providers (e.g. Ollama) read guidance from AGENTS.md,
         # which CodexAgent writes from the system prompt. Fold the chat-specific
-        # guidance (the same content Claude gets via .claude/CLAUDE.md) into the
-        # system prompt so codex chat behaves identically.
-        from openscientist.orchestrator.discovery import _read_chat_claude_md_template
+        # guidance into the system prompt, with codex fragments substituted so
+        # it is not told to use Claude's Read tool or a .claude/skills/ path.
+        from openscientist.prompts.codex import get_codex_chat_context
 
-        system_prompt = f"{system_prompt}\n\n{_read_chat_claude_md_template()}"
+        system_prompt = f"{system_prompt}\n\n{get_codex_chat_context()}"
 
     config = AgentConfig(
         job_dir=job_dir,

@@ -9,6 +9,7 @@ Claude and Codex variants share one body. See `prompts.claude` /
 """
 
 from dataclasses import dataclass
+from importlib import resources
 from typing import Any
 
 from sqlalchemy import select
@@ -557,16 +558,50 @@ Then call `set_consensus_answer` with a 1–3 sentence direct answer.
 **Remember:** You are autonomous. Make bold scientific decisions. Pursue interesting leads. Be creative but rigorous.""")
 
     doc = "\n".join(parts)
-    # Swap the backend-divergent phrases. For the Claude fragments these are
-    # identity substitutions, so the Claude doc is unchanged. Skill-discovery
-    # sentinels are filled first so the codex case drops the .claude/skills/
-    # reference inside the search_skills block entirely.
+    return substitute_fragments(doc, frags)
+
+
+def substitute_fragments(doc: str, frags: BackendFragments) -> str:
+    """Swap the backend-divergent phrases in a Claude-authored doc.
+
+    For the Claude fragments these are identity substitutions, so a
+    Claude-authored body is unchanged; for codex they drop the ``search_skills``
+    tool, the ``.claude/skills/`` path, and the ``Read`` tool name. Skill-
+    discovery sentinels are filled first so the codex case drops the
+    ``.claude/skills/`` reference inside the ``search_skills`` block entirely.
+    Shared by the discovery job doc and the chat context so they cannot
+    diverge.
+    """
     doc = doc.replace("{{SEARCH_SKILLS_DOC}}", frags.search_skills_doc)
     doc = doc.replace("{{SKILLS_DISCOVERY_NOTE}}", frags.skills_discovery_note)
     doc = doc.replace("`.claude/skills/`", frags.skills_location)
     doc = doc.replace("Claude's built-in `Read` tool", frags.builtin_read_tool)
     doc = doc.replace("Claude's `Read` tool", frags.builtin_read_tool_short)
     return doc
+
+
+def read_chat_template() -> str:
+    """Read the packaged ``CHAT_CLAUDE.md`` job-chat guidance template.
+
+    The template is authored in Claude vocabulary; ``render_chat_context``
+    applies the backend fragments to it.
+    """
+    return (
+        resources.files("openscientist.templates")
+        .joinpath("CHAT_CLAUDE.md")
+        .read_text(encoding="utf-8")
+    )
+
+
+def render_chat_context(frags: BackendFragments) -> str:
+    """The job-chat guidance with backend fragments substituted.
+
+    Routes the chat context through the same substitution as the discovery
+    job doc, so the chat agent is never told about tools or paths its backend
+    lacks. Identity for Claude; for codex it drops the ``Read`` tool name and
+    the ``.claude/skills/`` reference the raw template uses.
+    """
+    return substitute_fragments(read_chat_template(), frags)
 
 
 async def get_enabled_skills(

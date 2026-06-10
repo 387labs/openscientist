@@ -8,7 +8,12 @@ which codex auto-injects as a ``## Skills`` section, so the prompt points at
 that section and drops the nonexistent ``search_skills`` tool.
 """
 
-from openscientist.prompts.common import BackendFragments, build_job_doc, build_system_prompt
+from openscientist.prompts.common import (
+    BackendFragments,
+    build_job_doc,
+    build_system_prompt,
+    render_chat_context,
+)
 
 CODEX_FRAGMENTS = BackendFragments(
     skills_location=(
@@ -34,3 +39,13 @@ def generate_job_agents_md(*, use_hypotheses: bool = False, phenix_available: bo
         phenix_available=phenix_available,
         frags=CODEX_FRAGMENTS,
     )
+
+
+def get_codex_chat_context() -> str:
+    """Job-chat guidance for the Codex agent, with codex fragments applied.
+
+    The raw ``CHAT_CLAUDE.md`` template names ``Claude's Read tool`` and
+    ``.claude/skills/``; codex has neither, so substitute its vocabulary
+    before folding the guidance into the chat system prompt.
+    """
+    return render_chat_context(CODEX_FRAGMENTS)
