@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from importlib import resources
 from pathlib import Path
 from typing import Any
 from uuid import UUID
@@ -497,25 +496,6 @@ async def _load_runtime_context(job_dir: Path) -> dict[str, Any]:
         "investigation_mode": job.investigation_mode,
         "data_files": resolved_files,
     }
-
-
-def _write_chat_claude_md(claude_dir: Path) -> None:
-    """Write CHAT_CLAUDE.md content to claude_dir/CLAUDE.md (chat agent entry point)."""
-    try:
-        dest = claude_dir / "CLAUDE.md"
-        dest.write_text(_read_chat_claude_md_template(), encoding="utf-8")
-        logger.debug("Wrote chat CLAUDE.md to %s", dest)
-    except Exception as e:
-        logger.warning("Failed to write chat CLAUDE.md: %s", e)
-
-
-def _read_chat_claude_md_template() -> str:
-    """Read the packaged CHAT_CLAUDE.md template used by job chat."""
-    return (
-        resources.files("openscientist.templates")
-        .joinpath("CHAT_CLAUDE.md")
-        .read_text(encoding="utf-8")
-    )
 
 
 def get_version_metadata() -> dict[str, str]:

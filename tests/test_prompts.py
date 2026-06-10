@@ -5,7 +5,6 @@ from openscientist.agent.codex_agent import CodexAgent
 from openscientist.prompts import (
     build_discovery_prompt,
     format_skills_list,
-    generate_job_agents_md,
     generate_job_claude_md,
 )
 
@@ -47,7 +46,7 @@ class TestBackendJobDocs:
         assert "Claude's built-in `Read` tool" in doc
 
     def test_codex_doc_drops_claude_vocabulary(self):
-        doc = generate_job_agents_md(use_hypotheses=True, phenix_available=True)
+        doc = CodexAgent.job_doc(use_hypotheses=True, phenix_available=True)
         assert ".claude/" not in doc
         assert "Claude's" not in doc
         # shared body intact (a hypothesis tool, a core tool)
@@ -60,7 +59,7 @@ class TestBackendJobDocs:
         guessing host-style paths inside the executor."""
         for doc in (
             generate_job_claude_md(use_hypotheses=False, phenix_available=False),
-            generate_job_agents_md(use_hypotheses=False, phenix_available=False),
+            CodexAgent.job_doc(use_hypotheses=False, phenix_available=False),
         ):
             # The execute_code data-access contract is spelled out.
             assert 'pd.read_csv(data_files[i]["path"])' in doc
@@ -75,7 +74,7 @@ class TestBackendJobDocs:
         plt.show() save pattern the executor captures, not a manual savefig."""
         for doc in (
             generate_job_claude_md(use_hypotheses=False, phenix_available=False),
-            generate_job_agents_md(use_hypotheses=False, phenix_available=False),
+            CodexAgent.job_doc(use_hypotheses=False, phenix_available=False),
         ):
             assert "Visualize every quantitative finding" in doc
             assert "plt.show()" in doc
@@ -86,7 +85,7 @@ class TestBackendJobDocs:
         must not name the nonexistent search_skills tool or a phantom skills dir.
         The Claude path keeps search_skills (it has the .claude/skills files)."""
         for txt in (
-            generate_job_agents_md(use_hypotheses=True, phenix_available=True),
+            CodexAgent.job_doc(use_hypotheses=True, phenix_available=True),
             CodexAgent.system_prompt(),
         ):
             assert "search_skills" not in txt
@@ -94,8 +93,8 @@ class TestBackendJobDocs:
         assert "search_skills" in generate_job_claude_md(use_hypotheses=True, phenix_available=True)
 
     def test_codex_doc_respects_use_hypotheses_flag(self):
-        with_h = generate_job_agents_md(use_hypotheses=True)
-        without_h = generate_job_agents_md(use_hypotheses=False)
+        with_h = CodexAgent.job_doc(use_hypotheses=True)
+        without_h = CodexAgent.job_doc(use_hypotheses=False)
         assert "add_hypothesis" in with_h
         assert "add_hypothesis" not in without_h
 
@@ -114,9 +113,7 @@ class TestRenderChatContext:
         assert render_chat_context(CLAUDE_FRAGMENTS) == read_chat_template()
 
     def test_codex_chat_context_drops_claude_vocabulary(self):
-        from openscientist.prompts.codex import get_codex_chat_context
-
-        ctx = get_codex_chat_context()
+        ctx = CodexAgent.chat_doc()
         assert "Claude's" not in ctx
         assert "`.claude/skills/`" not in ctx
         # The guidance itself is preserved.

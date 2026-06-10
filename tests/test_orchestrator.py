@@ -864,51 +864,21 @@ class TestAppendLog:
         assert "Iteration 2" in content
 
 
-# ─── _write_chat_claude_md ────────────────────────────────────────────
+# ─── packaged chat template ───────────────────────────────────────────
 
 
-class TestWriteChatClaudeMd:
-    """Tests for _write_chat_claude_md()."""
+class TestChatTemplate:
+    """The packaged CHAT_CLAUDE.md must match the repo copy so the in-image
+    template stays in sync with the source of truth. (Writing the chat context
+    is the agent's job, exercised in tests/test_job_chat.py.)"""
 
     def test_packaged_template_matches_repo_copy(self):
-        from openscientist.orchestrator.discovery import _read_chat_claude_md_template
+        from openscientist.prompts.common import read_chat_template
 
         repo_copy = (Path(__file__).resolve().parents[1] / "CHAT_CLAUDE.md").read_text(
             encoding="utf-8"
         )
-        assert _read_chat_claude_md_template() == repo_copy
-
-    def test_writes_chat_claude_md(self, tmp_path):
-        from openscientist.orchestrator.discovery import _write_chat_claude_md
-
-        claude_dir = tmp_path / ".claude"
-        claude_dir.mkdir()
-
-        with patch(
-            "openscientist.orchestrator.discovery._read_chat_claude_md_template",
-            return_value="# Chat Claude\nInstructions here",
-        ):
-            _write_chat_claude_md(claude_dir)
-
-        dest = claude_dir / "CLAUDE.md"
-        assert dest.exists()
-        content = dest.read_text(encoding="utf-8")
-        assert "Chat Claude" in content
-
-    def test_missing_source_no_crash(self, tmp_path, caplog):
-        from openscientist.orchestrator.discovery import _write_chat_claude_md
-
-        claude_dir = tmp_path / ".claude"
-        claude_dir.mkdir()
-
-        with patch(
-            "openscientist.orchestrator.discovery._read_chat_claude_md_template",
-            side_effect=FileNotFoundError("missing packaged template"),
-        ):
-            _write_chat_claude_md(claude_dir)
-
-        assert not (claude_dir / "CLAUDE.md").exists()
-        assert "Failed to write chat CLAUDE.md" in caplog.text
+        assert read_chat_template() == repo_copy
 
 
 # ─── build_initial_prompt ──────────────────────────────────────────────
