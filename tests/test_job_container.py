@@ -193,6 +193,50 @@ class TestJobContainerRunner:
         assert "OPENSCIENTIST_HOST_PROJECT_DIR" not in environment
         assert "OPENSCIENTIST_CONTAINER_APP_DIR" not in environment
 
+    def _launch_and_get_env(self, *, run_mode: str | None) -> dict[str, str]:
+        """Run launch() (optionally with run_mode) and return the container env."""
+        mock_client = MagicMock()
+        mock_container = MagicMock()
+        mock_container.short_id = "abc123"
+        mock_client.containers.run.return_value = mock_container
+        settings = self._make_settings(host_project_dir=None)
+
+        original_exists = Path.exists
+
+        def fake_exists(path: Path) -> bool:
+            if path == Path("/var/run/docker.sock"):
+                return False
+            return cast(bool, original_exists(path))
+
+        with (
+            patch("openscientist.job_container.runner.docker.from_env", return_value=mock_client),
+            patch("openscientist.job_container.runner.get_settings", return_value=settings),
+            patch.object(JobContainerRunner, "_get_network", return_value="bridge"),
+            patch(
+                "openscientist.job_container.runner.to_host_path",
+                return_value=Path("/app/jobs/job-123"),
+            ),
+            patch.object(Path, "exists", autospec=True, side_effect=fake_exists),
+        ):
+            runner = JobContainerRunner()
+            if run_mode is None:
+                runner.launch("job-123", Path("/app/jobs/job-123"))
+            else:
+                runner.launch("job-123", Path("/app/jobs/job-123"), run_mode=run_mode)
+
+        return cast(dict[str, str], mock_client.containers.run.call_args.kwargs["environment"])
+
+    def test_launch_sets_run_mode_env_for_report_only(self):
+        """report_only launches carry OPENSCIENTIST_RUN_MODE so the entrypoint
+        runs only the report-generation phase."""
+        env = self._launch_and_get_env(run_mode="report_only")
+        assert env["OPENSCIENTIST_RUN_MODE"] == "report_only"
+
+    def test_launch_omits_run_mode_env_by_default(self):
+        """The default discovery launch keeps a clean env (no run-mode override)."""
+        assert "OPENSCIENTIST_RUN_MODE" not in self._launch_and_get_env(run_mode=None)
+        assert "OPENSCIENTIST_RUN_MODE" not in self._launch_and_get_env(run_mode="discovery")
+
     def test_get_exit_code_looks_up_agent_container_by_labels(self):
         """Exit-code polling filters to the agent container, not job executors."""
         mock_client = MagicMock()

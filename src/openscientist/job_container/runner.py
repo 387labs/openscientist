@@ -55,6 +55,7 @@ class JobContainerRunner:
         *,
         job_id: str,
         job_mount: str,
+        run_mode: str = "discovery",
     ) -> dict[str, str]:
         """Build the environment variables for the agent container."""
         cs = settings.container
@@ -66,6 +67,11 @@ class JobContainerRunner:
             "OPENSCIENTIST_SECRET_KEY": settings.secret_key,
             **provider_env,
         }
+        # Only set the run-mode override when it diverges from the default so
+        # ordinary discovery launches keep a clean env. The entrypoint reads
+        # OPENSCIENTIST_RUN_MODE; "report_only" re-runs just the report phase.
+        if run_mode != "discovery":
+            env["OPENSCIENTIST_RUN_MODE"] = run_mode
         # Forward the per-turn Codex timeout so the agent (CodexAgent reads
         # OPENSCIENTIST_CODEX_TURN_TIMEOUT at import) can be tuned for slow
         # local backends. Without this the agent always uses the 900s default.
@@ -131,6 +137,7 @@ class JobContainerRunner:
         *,
         job_id: str,
         job_dir_host: Path,
+        run_mode: str = "discovery",
     ) -> tuple[
         dict[str, str],
         dict[str, dict[str, str]],
@@ -145,7 +152,7 @@ class JobContainerRunner:
         )
         job_mount = f"{AGENT_APP_DIR}/jobs/{job_id}"
         env = JobContainerRunner._build_container_environment(
-            settings, job_id=job_id, job_mount=job_mount
+            settings, job_id=job_id, job_mount=job_mount, run_mode=run_mode
         )
         volumes = JobContainerRunner._build_container_volumes(
             settings, job_dir_host=job_dir_host, job_mount=job_mount
@@ -160,16 +167,19 @@ class JobContainerRunner:
             return None
         return str(os.stat(socket_path).st_gid)
 
-    def launch(self, job_id: str, job_dir: Path) -> Any:
+    def launch(self, job_id: str, job_dir: Path, *, run_mode: str = "discovery") -> Any:
         """
         Launch an agent container for the given job.
 
         The container runs docker/agent-entrypoint.py which calls
-        run_discovery_async(job_dir).
+        run_discovery_async(job_dir), or regenerate_report_async(job_dir) when
+        run_mode is "report_only".
 
         Args:
             job_id: Job UUID string (used for container name + labels)
             job_dir: Absolute host path to the job directory
+            run_mode: "discovery" (full loop) or "report_only" (report phase
+                only, against the already-persisted findings)
 
         Returns:
             docker.models.containers.Container object
@@ -199,6 +209,7 @@ class JobContainerRunner:
                 settings,
                 job_id=job_id,
                 job_dir_host=job_dir_host,
+                run_mode=run_mode,
             )
         )
         network = self._get_network(agent_network)

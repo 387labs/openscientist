@@ -565,6 +565,112 @@ async def _persist_job_cost_record(
         await session.commit()
 
 
+async def _finalize_executor(executor: AbstractAgent[Provider], job_id: str) -> None:
+    """Log token usage, persist a cost record, and shut the executor down.
+
+    Shared ``finally`` handling for both the full discovery run and the
+    report-only regeneration run so neither leaks the executor or its cost.
+    """
+    tokens = executor.total_tokens
+    logger.info(
+        "Agent executor completed: %d input tokens, %d output tokens",
+        tokens.input_tokens,
+        tokens.output_tokens,
+    )
+    try:
+        settings = get_settings()
+        provider = get_provider()
+        model_name = (
+            settings.provider.model
+            or settings.provider.anthropic_default_sonnet_model
+            or _PROVIDER_DEFAULT_MODELS.get(provider.display_name, "unknown")
+        )
+        await _persist_job_cost_record(job_id, tokens, provider.display_name, model_name)
+    except Exception as cost_err:
+        logger.warning("Failed to persist cost record for job %s: %s", job_id, cost_err)
+    await executor.shutdown()
+
+
+async def _build_and_prepare_executor(
+    job_dir: Path, runtime: dict[str, Any]
+) -> AbstractAgent[Provider]:
+    """Build the agent executor and run backend setup, marking the job running.
+
+    Shared by the full discovery run and the report-only regeneration path:
+    both need a configured executor whose runtime env is applied and whose
+    per-job workspace is materialised before any turn runs. Backend-specific
+    setup is the agent's own concern: apply any runtime env (Claude
+    auth/routing flags; no-op for codex) and materialise the per-job workspace
+    (enabled skills in the backend's on-disk layout).
+    """
+    use_hypotheses = runtime["use_hypotheses"]
+    all_data_files = [Path(p) for p in runtime["data_files"]]
+    executor = _build_agent_executor(
+        job_dir=job_dir,
+        data_file=_resolve_primary_data_file(runtime["data_files"]),
+        use_hypotheses=use_hypotheses,
+        data_files=all_data_files,
+    )
+    executor.apply_runtime_environment()
+    await update_job_status(job_dir, "running")
+    await executor.prepare_job_workspace(use_hypotheses=use_hypotheses)
+    return executor
+
+
+async def regenerate_report_async(job_dir: Path) -> dict[str, Any]:
+    """Re-run only the report-generation phase for an already-finished job.
+
+    Backs the admin "Regenerate report" action. The discovery iterations are
+    NOT re-run: every finding already lives in the persisted ``KnowledgeState``
+    and the report turn starts a fresh agent session, so this needs only the
+    configured executor and the runtime context. It overwrites
+    ``final_report.md`` (and its PDF) and persists the final job status, exactly
+    like the report tail of ``run_discovery_async``.
+    """
+    job_dir = Path(job_dir)
+    runtime = await _load_runtime_context(job_dir)
+    job_id = runtime["job_id"]
+    logger.info("Regenerating report for job %s", job_id)
+
+    executor = await _build_and_prepare_executor(job_dir, runtime)
+    try:
+        report_outcome = await _run_report_generation_phase(
+            executor=executor,
+            job_dir=job_dir,
+            research_question=runtime["research_question"],
+            description=runtime.get("description"),
+        )
+        final_status = await _persist_final_status(job_dir, report_outcome)
+        ks = KnowledgeState.load_from_database_sync(job_id)
+        return {
+            "job_id": job_id,
+            "status": final_status,
+            "iterations": ks.data["iteration"],
+            "findings": len(ks.data["findings"]),
+        }
+    except Exception as e:
+        logger.error("Report regeneration failed [%s]: %s", get_version_string(), e, exc_info=True)
+        try:
+            await update_job_status(job_dir, "failed", error_message=str(e))
+        except Exception as status_error:
+            logger.warning("Failed to persist failure status for job %s: %s", job_id, status_error)
+        try:
+            ks = KnowledgeState.load_from_database_sync(job_id)
+            iterations = ks.data["iteration"]
+            findings = len(ks.data["findings"])
+        except Exception:
+            iterations = 0
+            findings = 0
+        return {
+            "job_id": job_id,
+            "status": "failed",
+            "iterations": iterations,
+            "findings": findings,
+        }
+    finally:
+        await _finalize_executor(executor, job_id)
+
+
 async def run_discovery_async(job_dir: Path) -> dict[str, Any]:
     """
     Run autonomous discovery using the configured agent executor.
@@ -584,21 +690,7 @@ async def run_discovery_async(job_dir: Path) -> dict[str, Any]:
     job_id = runtime["job_id"]
     logger.info("Starting discovery for job %s (mode=%s)", job_id, runtime["investigation_mode"])
 
-    provider = get_provider()
-    use_hypotheses = runtime["use_hypotheses"]
-    all_data_files = [Path(p) for p in runtime["data_files"]]
-    executor = _build_agent_executor(
-        job_dir=job_dir,
-        data_file=_resolve_primary_data_file(runtime["data_files"]),
-        use_hypotheses=use_hypotheses,
-        data_files=all_data_files,
-    )
-    # Backend-specific setup is the agent's own concern: apply any runtime env
-    # (Claude auth/routing flags; no-op for codex) and materialise the per-job
-    # workspace (enabled skills in the backend's on-disk layout).
-    executor.apply_runtime_environment()
-    await update_job_status(job_dir, "running")
-    await executor.prepare_job_workspace(use_hypotheses=use_hypotheses)
+    executor = await _build_and_prepare_executor(job_dir, runtime)
     logger.info("Created agent executor for job %s", job_id)
 
     provenance_dir = job_dir / "provenance"
@@ -660,23 +752,7 @@ async def run_discovery_async(job_dir: Path) -> dict[str, Any]:
         }
 
     finally:
-        tokens = executor.total_tokens
-        logger.info(
-            "Agent executor completed: %d input tokens, %d output tokens",
-            tokens.input_tokens,
-            tokens.output_tokens,
-        )
-        try:
-            settings = get_settings()
-            model_name = (
-                settings.provider.model
-                or settings.provider.anthropic_default_sonnet_model
-                or _PROVIDER_DEFAULT_MODELS.get(provider.display_name, "unknown")
-            )
-            await _persist_job_cost_record(job_id, tokens, provider.display_name, model_name)
-        except Exception as cost_err:
-            logger.warning("Failed to persist cost record for job %s: %s", job_id, cost_err)
-        await executor.shutdown()
+        await _finalize_executor(executor, job_id)
 
 
 def _save_transcript(path: Path, transcript: list[TranscriptEntry]) -> None:

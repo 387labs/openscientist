@@ -1160,3 +1160,85 @@ class TestReportGenerationPhase:
         assert outcome.success is False
         # Report attempted _MAX times; the consensus turn is never reached.
         assert len(calls) == discovery._MAX_REPORT_ATTEMPTS
+
+
+class TestRegenerateReportAsync:
+    """The admin report-only re-run reuses persisted findings and must NOT
+    re-run the discovery iterations."""
+
+    @staticmethod
+    def _runtime() -> dict[str, Any]:
+        return {
+            "job_id": "j",
+            "research_question": "Q?",
+            "description": "ctx",
+            "use_hypotheses": False,
+            "data_files": [],
+            "max_iterations": 3,
+            "investigation_mode": "autonomous",
+        }
+
+    @pytest.mark.asyncio
+    async def test_skips_discovery_loop_and_runs_report(self, tmp_path: Path):
+        from openscientist.knowledge_state import KnowledgeState
+        from openscientist.orchestrator import discovery
+
+        ks = KnowledgeState("j", "Q?", 3)
+        executor = SimpleNamespace()
+        report_phase = AsyncMock(return_value=discovery._ReportOutcome(success=True, error=""))
+
+        with (
+            patch.object(
+                discovery, "_load_runtime_context", new=AsyncMock(return_value=self._runtime())
+            ),
+            patch.object(
+                discovery, "_build_and_prepare_executor", new=AsyncMock(return_value=executor)
+            ),
+            patch.object(discovery, "_run_primary_discovery_loop", new=AsyncMock()) as loop,
+            patch.object(discovery, "_run_report_generation_phase", new=report_phase),
+            patch.object(
+                discovery, "_persist_final_status", new=AsyncMock(return_value="completed")
+            ),
+            patch.object(discovery, "_finalize_executor", new=AsyncMock()) as finalize,
+            patch.object(discovery.KnowledgeState, "load_from_database_sync", return_value=ks),
+        ):
+            result = await discovery.regenerate_report_async(tmp_path)
+
+        # The discovery iterations are never re-run; only the report phase runs.
+        loop.assert_not_awaited()
+        report_phase.assert_awaited_once()
+        # The executor is always finalized (cost record + shutdown).
+        finalize.assert_awaited_once()
+        assert result["status"] == "completed"
+
+    @pytest.mark.asyncio
+    async def test_failure_marks_job_failed_and_finalizes(self, tmp_path: Path):
+        from openscientist.orchestrator import discovery
+
+        executor = SimpleNamespace()
+
+        with (
+            patch.object(
+                discovery, "_load_runtime_context", new=AsyncMock(return_value=self._runtime())
+            ),
+            patch.object(
+                discovery, "_build_and_prepare_executor", new=AsyncMock(return_value=executor)
+            ),
+            patch.object(
+                discovery,
+                "_run_report_generation_phase",
+                new=AsyncMock(side_effect=RuntimeError("boom")),
+            ),
+            patch.object(discovery, "update_job_status", new=AsyncMock()) as update_status,
+            patch.object(discovery, "_finalize_executor", new=AsyncMock()) as finalize,
+            patch.object(
+                discovery.KnowledgeState,
+                "load_from_database_sync",
+                side_effect=Exception("no ks"),
+            ),
+        ):
+            result = await discovery.regenerate_report_async(tmp_path)
+
+        assert result["status"] == "failed"
+        update_status.assert_awaited()  # job marked failed
+        finalize.assert_awaited_once()  # executor still cleaned up

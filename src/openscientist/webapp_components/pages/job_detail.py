@@ -19,7 +19,7 @@ from nicegui import ui
 from openscientist.agent.factory import backend_for_provider_id
 from openscientist.artifact_packager import create_artifacts_zip
 from openscientist.async_tasks import run_sync
-from openscientist.auth import get_current_user_id, require_auth
+from openscientist.auth import get_current_user_id, is_current_user_admin, require_auth
 from openscientist.database.rls import set_current_user
 from openscientist.database.session import get_session_ctx
 from openscientist.job.types import JobInfo, JobStatus
@@ -1147,6 +1147,55 @@ def _download_pdf_report(report_path: Path, pdf_path: Path, job_id: str) -> None
         ui.notify("Failed to generate PDF. Please try again.", type="negative")
 
 
+def _can_regenerate_report(context: _JobDetailContext) -> bool:
+    """Whether the admin "Regenerate report" control should be shown.
+
+    Admin-only, and only for completed jobs (the report phase reuses the
+    persisted findings, which only exist once the job has finished).
+    """
+    return is_current_user_admin() and context.job_info.status == JobStatus.COMPLETED
+
+
+def _regenerate_report(context: _JobDetailContext) -> None:
+    """Admin action: re-run only the report-generation phase for this job.
+
+    Launches the agent container in report-only mode (the discovery iterations
+    are not re-run; the persisted findings are reused). Overwrites the existing
+    final report, so the caller confirms first.
+    """
+    try:
+        context.job_manager.regenerate_report(context.job_id)
+    except ValueError as exc:
+        ui.notify(str(exc), type="negative")
+        return
+    except Exception:
+        logger.exception("Failed to start report regeneration for job %s", context.job_id)
+        ui.notify("Failed to start report regeneration. Please try again.", type="negative")
+        return
+    ui.notify("Regenerating report. This page will update when it finishes.", type="positive")
+    ui.navigate.to(f"/job/{context.job_id}")
+
+
+def _confirm_regenerate_report(context: _JobDetailContext) -> None:
+    """Confirm before overwriting the existing report."""
+    with ui.dialog() as dialog, ui.card():
+        ui.label("Regenerate report?").classes("text-lg font-bold")
+        ui.label(
+            "This re-runs only the report-generation step using the existing "
+            "findings and overwrites the current report. The investigation "
+            "iterations are not re-run."
+        ).classes("text-sm text-gray-600")
+        with ui.row().classes("w-full justify-end gap-2"):
+            ui.button("Cancel", on_click=dialog.close).props("flat color=grey")
+
+            def _confirm() -> None:
+                dialog.close()
+                _regenerate_report(context)
+
+            ui.button("Regenerate", on_click=_confirm).props("color=primary")
+    dialog.open()
+
+
 def _render_report_actions(context: _JobDetailContext, report_path: Path, pdf_path: Path) -> None:
     with ui.row().classes("w-full justify-end mb-4 gap-2"):
         if pdf_path.exists() or report_path.exists():
@@ -1163,6 +1212,16 @@ def _render_report_actions(context: _JobDetailContext, report_path: Path, pdf_pa
             on_click=lambda: _download_artifacts_zip(context.job_dir, context.job_id),
             icon="folder_zip",
         ).props("color=accent outline")
+
+        # Admin-only: re-run just the report phase against the persisted
+        # findings. Visible only to admins and only for completed jobs.
+        if _can_regenerate_report(context):
+            with ui.button(
+                "Regenerate Report",
+                on_click=lambda: _confirm_regenerate_report(context),
+                icon="refresh",
+            ).props("color=warning outline"):
+                ui.tooltip("Admin: re-run the report step using existing findings")
 
 
 def _render_report_html_iframe(job_dir: Path) -> None:
