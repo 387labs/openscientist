@@ -258,18 +258,48 @@ question. Be direct — no citations, no hedging. Calling that tool is the only 
 for this step."""
 
 
-def build_report_retry_prompt(report_path: str) -> str:
-    """Focused re-ask when the report turn ended without creating the file.
+def build_report_retry_prompt(
+    research_question: str,
+    ks: KnowledgeState,
+    *,
+    job_dir: Path | None = None,
+    description: str | None = None,
+) -> str:
+    """Re-ask for the report when the previous turn ended without the file.
 
-    The model must write the file itself. This only reminds it to act.
+    A weak model re-anchors on the *last* instruction it received. A bare
+    "you forgot, write the file" reminder therefore reframes the step as a
+    trivial chore stripped of the findings and the structure, and the model
+    answers it literally: a one-line stub, or a description of a report
+    instead of the report itself. The fix is to restate the *entire* task.
+    This prepends a short, forceful correction and then repeats the full
+    self-contained report spec (findings outline, required structure, exact
+    path, and the "write the content, do not describe it" rules) so the model
+    has everything it needs to author the real document in this turn.
+    Restating in full, rather than stacking another reminder onto the failed
+    turn, is what breaks the loop.
     """
-    return f"""You did NOT create the report file. Do it now: use your file-writing tool
-to write the complete final report to this exact path:
+    if job_dir is not None:
+        report_path = str(job_dir.resolve() / "final_report.md")
+    else:
+        report_path = "./final_report.md"
 
-`{report_path}`
+    correction = f"""Your previous turn did NOT produce the report. Either you never called your
+file-writing tool, or you described/printed the report instead of writing it to disk.
 
-Actually create the file on disk — do not just describe the report or print it in your
-reply. Writing that file is the only action for this step."""
+That output is rejected. For this turn:
+- Do NOT narrate, summarize, or explain what the report will contain.
+- Do NOT print the report body in your reply.
+- The ONLY acceptable action is to call your file-writing tool and write the
+  COMPLETE report content to `{report_path}`.
+
+The full task is restated below so nothing is missing — follow it exactly.
+
+---
+
+"""
+    base = build_report_prompt(research_question, ks, job_dir=job_dir, description=description)
+    return correction + base
 
 
 def build_consensus_retry_prompt(research_question: str) -> str:

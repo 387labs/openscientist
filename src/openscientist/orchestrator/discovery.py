@@ -383,7 +383,10 @@ async def _run_report_turn(
             "Report file missing after attempt %d/%d; re-asking", attempt, _MAX_REPORT_ATTEMPTS
         )
         result = await executor.run_iteration(
-            build_report_retry_prompt(str(report_path)), reset_session=False
+            build_report_retry_prompt(
+                research_question, ks, job_dir=job_dir, description=description
+            ),
+            reset_session=False,
         )
     logger.error("Report file not written after %d attempts", _MAX_REPORT_ATTEMPTS)
     return result, False

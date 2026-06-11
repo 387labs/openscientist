@@ -972,13 +972,38 @@ class TestReportGenerationPhase:
         from openscientist.orchestrator.iteration import (
             build_consensus_prompt,
             build_consensus_retry_prompt,
-            build_report_retry_prompt,
         )
 
         assert "set_consensus_answer" in build_consensus_prompt("Does X cause Y?")
         assert "Does X cause Y?" in build_consensus_prompt("Does X cause Y?")
         assert "set_consensus_answer" in build_consensus_retry_prompt("Does X cause Y?")
-        assert "/jobs/x/final_report.md" in build_report_retry_prompt("/jobs/x/final_report.md")
+
+    def test_report_retry_prompt_is_self_contained(self, tmp_path: Path):
+        """The retry must restate the whole task, not just remind the model to
+        write a file. A weak model re-anchors on the last instruction, so the
+        retry has to carry the findings outline, the required structure, and the
+        exact path -- everything the first attempt had -- plus a correction that
+        rejects describing the report instead of writing it."""
+        from openscientist.knowledge_state import KnowledgeState
+        from openscientist.orchestrator.iteration import (
+            build_report_prompt,
+            build_report_retry_prompt,
+        )
+
+        ks = KnowledgeState("j", "What causes X?", 3)
+        retry = build_report_retry_prompt("What causes X?", ks, job_dir=tmp_path)
+        base = build_report_prompt("What causes X?", ks, job_dir=tmp_path)
+
+        # The exact write path and the research question both survive.
+        report_path = str(tmp_path.resolve() / "final_report.md")
+        assert report_path in retry
+        assert "What causes X?" in retry
+        # The retry embeds the full self-contained spec verbatim ...
+        assert base in retry
+        # ... behind a correction that names the failure mode (described/printed
+        # instead of written) so the model does not repeat it.
+        assert retry.index("file-writing tool") < retry.index(base)
+        assert "described/printed" in retry or "describe" in retry.lower()
 
     @staticmethod
     def _executor(record: list) -> SimpleNamespace:
