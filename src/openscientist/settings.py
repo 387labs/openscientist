@@ -88,6 +88,15 @@ class ProviderSettings(BaseSettings):
 
     # Model settings
     model: str | None = Field(default=None, alias="OPENSCIENTIST_MODEL")
+    model_context_tokens: int | None = Field(
+        default=None,
+        alias="OPENSCIENTIST_MODEL_CONTEXT_TOKENS",
+        description=(
+            "Override the model's usable context window (tokens) used to budget "
+            "prompt size. When unset, the window is probed (Ollama) or looked up "
+            "for known API models, falling back to a conservative default."
+        ),
+    )
     anthropic_chat_model: str | None = Field(
         default=None,
         alias="ANTHROPIC_CHAT_MODEL",

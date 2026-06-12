@@ -26,6 +26,27 @@ logger = logging.getLogger(__name__)
 
 FEEDBACK_TIMEOUT_SECONDS = 15 * 60  # 15 minutes
 
+# Budgeting the report prompt against the model's context window. We reserve
+# tokens for the system prompt, tool definitions, the model's own output, and
+# the non-literature sections of the report prompt, then spend the rest on
+# literature abstracts. CHARS_PER_TOKEN is a conservative chars->tokens factor
+# (dense scientific text), so the char budget under-fills rather than overflows.
+_REPORT_PROMPT_RESERVE_TOKENS = 12000
+_REPORT_PROMPT_CHARS_PER_TOKEN = 3.5
+_REPORT_PROMPT_MIN_ABSTRACT_CHARS = 2000
+
+
+def _report_abstract_budget_chars() -> int:
+    """Char budget for literature abstracts, derived from the model's context."""
+    from openscientist.models import resolve_model_profile
+
+    context_tokens = resolve_model_profile().context_window_tokens
+    spare_tokens = context_tokens - _REPORT_PROMPT_RESERVE_TOKENS
+    return max(
+        _REPORT_PROMPT_MIN_ABSTRACT_CHARS,
+        int(spare_tokens * _REPORT_PROMPT_CHARS_PER_TOKEN),
+    )
+
 
 def _format_job_description_section(description: str | None) -> str:
     """Return optional user-provided job context for prompts."""
@@ -178,7 +199,7 @@ def build_report_prompt(
 
 {_format_job_description_section(description)}
 
-{ks.get_report_outline()}
+{ks.get_report_outline(abstract_budget_chars=_report_abstract_budget_chars())}
 
 {figure_section}
 
