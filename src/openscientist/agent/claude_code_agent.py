@@ -133,6 +133,7 @@ class ClaudeCodeAgent(AbstractAgent[ClaudeCompatible]):
         self._stderr_lines: list[str] = []
 
     backend = AgentBackend.CLAUDE_CODE
+    file_write_tool = "Write"
 
     @classmethod
     def prompt_fragments(cls) -> BackendFragments:

@@ -162,20 +162,24 @@ def build_report_prompt(
     *,
     job_dir: Path | None = None,
     description: str | None = None,
+    file_write_tool: str = "Write",
 ) -> str:
     """Build the prompt for the final report generation iteration.
 
-    The agent starts a fresh session, so all context comes from the summary
-    below and the files on disk.  The prompt must be explicit that the agent
-    should write the FULL report content — not a summary or table of contents.
+    The prompt must be explicit that the agent should write the FULL report
+    content — not a summary or table of contents — and must name the exact
+    file-writing tool so the model invokes it rather than printing the content.
 
     Args:
         research_question: The research question that drives the agent.
         ks: KnowledgeState for the job, providing the report outline.
         job_dir: Absolute path to the job directory.  When provided the prompt
-            tells the agent the exact file path to write (the Write tool
+            tells the agent the exact file path to write (the write tool
             requires an absolute path).
         description: Optional user-provided job context.
+        file_write_tool: The backend's file-writing tool name (e.g.
+            ``apply_patch`` for codex, ``Write`` for Claude). Named verbatim in
+            the prompt so the model calls that tool instead of guessing.
     """
     if job_dir is not None:
         report_path = str(job_dir.resolve() / "final_report.md")
@@ -211,9 +215,9 @@ def build_report_prompt(
 `{report_path}`
 Do NOT write to `/tmp/`, `~/`, or any other location — the system will not find it.
 
-**CRITICAL — action:** Use your file-writing tool to actually CREATE this file on disk.
-Do not just describe the report or print it in your reply — the file must exist at the
-path above when you are done.
+**CRITICAL — action:** Call the `{file_write_tool}` tool to actually CREATE this file on disk.
+Do not just describe the report or print it in your reply, and do not emit the tool call
+as text — invoke `{file_write_tool}` so the file exists at the path above when you are done.
 
 **CRITICAL — content:** The file must contain the COMPLETE, FULL text of every
 section — not a table of contents, not a summary of sections, not a pointer to
@@ -285,6 +289,7 @@ def build_report_retry_prompt(
     *,
     job_dir: Path | None = None,
     description: str | None = None,
+    file_write_tool: str = "Write",
 ) -> str:
     """Re-ask for the report when the previous turn ended without the file.
 
@@ -305,13 +310,14 @@ def build_report_retry_prompt(
     else:
         report_path = "./final_report.md"
 
-    correction = f"""Your previous turn did NOT produce the report. Either you never called your
-file-writing tool, or you described/printed the report instead of writing it to disk.
+    correction = f"""Your previous turn did NOT produce the report. Either you never called the
+`{file_write_tool}` tool, or you emitted the tool call as text / described the report
+instead of writing it to disk.
 
 That output is rejected. For this turn:
 - Do NOT narrate, summarize, or explain what the report will contain.
-- Do NOT print the report body in your reply.
-- The ONLY acceptable action is to call your file-writing tool and write the
+- Do NOT print the report body or the tool call as text in your reply.
+- The ONLY acceptable action is to invoke the `{file_write_tool}` tool and write the
   COMPLETE report content to `{report_path}`.
 
 The full task is restated below so nothing is missing — follow it exactly.
@@ -319,7 +325,13 @@ The full task is restated below so nothing is missing — follow it exactly.
 ---
 
 """
-    base = build_report_prompt(research_question, ks, job_dir=job_dir, description=description)
+    base = build_report_prompt(
+        research_question,
+        ks,
+        job_dir=job_dir,
+        description=description,
+        file_write_tool=file_write_tool,
+    )
     return correction + base
 
 

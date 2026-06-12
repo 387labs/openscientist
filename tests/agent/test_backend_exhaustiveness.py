@@ -71,6 +71,14 @@ def test_every_concrete_agent_declares_a_backend() -> None:
         assert isinstance(cls.backend, AgentBackend), cls
 
 
+def test_every_concrete_agent_declares_a_file_write_tool() -> None:
+    # The report prompt names this tool verbatim so the model invokes it rather
+    # than printing the call as text; a new backend that omits it would silently
+    # ship a vague prompt, so it is enforced in __init_subclass__ and here.
+    for cls in _concrete_agent_classes():
+        assert isinstance(cls.file_write_tool, str) and cls.file_write_tool, cls
+
+
 def test_every_backend_has_exactly_one_agent() -> None:
     by_backend: dict[AgentBackend, list[type[AbstractAgent[Provider]]]] = {}
     for cls in _concrete_agent_classes():

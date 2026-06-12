@@ -105,6 +105,7 @@ class CodexAgent(AbstractAgent[CodexCompatible]):
         self._thread: AsyncThread | None = None
 
     backend = AgentBackend.CODEX
+    file_write_tool = "apply_patch"
 
     @classmethod
     def prompt_fragments(cls) -> BackendFragments:

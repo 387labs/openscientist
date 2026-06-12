@@ -276,27 +276,54 @@ def _save_report_transcript(job_dir: Path, transcript: list[TranscriptEntry]) ->
     _save_transcript(provenance_dir / "report_transcript.json", transcript)
 
 
-def _ensure_report_written(report_path: Path, report_result: IterationResult) -> bool:
-    """Ensure final_report.md exists at the expected location after the report iteration.
+def _ensure_report_written(
+    report_path: Path,
+    report_result: IterationResult,
+    *,
+    baseline_mtime_ns: int | None = None,
+) -> bool:
+    """Return True only if the report was actually (re)written this turn.
 
+    A weak model sometimes ends the turn claiming "report written" without ever
+    calling its file-writing tool. Existence alone is therefore not proof: when
+    a stale report from a previous run is already on disk (most importantly
+    during report regeneration, but also any re-run), the file "exists" yet was
+    never touched, and the turn would be wrongly accepted while the old content
+    is served.
+
+    ``baseline_mtime_ns`` is the report's modification time captured *before*
+    the turn started (None if it did not exist then). The file counts as
+    written only if it now exists and is strictly newer than that baseline.
     If the agent wrote the file to a subdirectory within the job dir, move it
-    to the expected path.  Returns False when the report cannot be found —
-    the caller marks the job as failed.
+    to the expected path. Returns False when no fresh report can be found —
+    the caller re-asks, then marks the job as failed.
     """
-    if report_path.exists():
+
+    def _is_fresh(path: Path) -> bool:
+        if baseline_mtime_ns is None:
+            return True
+        try:
+            return path.stat().st_mtime_ns > baseline_mtime_ns
+        except OSError:
+            return False
+
+    if report_path.exists() and _is_fresh(report_path):
         return True
 
-    # Check if the agent nested the file within the job directory.
+    # Check if the agent nested the file within the job directory. A nested file
+    # is one the agent just produced, so it is fresh by construction.
     job_dir = report_path.parent
     for found in job_dir.rglob("final_report.md"):
-        if found != report_path:
+        if found != report_path and _is_fresh(found):
             logger.warning("Report found at %s — moving to %s", found, report_path)
             found.rename(report_path)
             return True
 
     logger.error(
-        "Report file not found at %s after report iteration (agent output: %.200s)",
+        "Report file not freshly written at %s after report iteration "
+        "(exists=%s, agent output: %.200s)",
         report_path,
+        report_path.exists(),
         report_result.output,
     )
     return False
@@ -363,17 +390,32 @@ async def _run_report_turn(
 ) -> tuple[IterationResult, bool]:
     """Run the report turn, re-asking until the model creates final_report.md.
 
-    The first attempt sends the full report prompt in a fresh session. Later
-    attempts send a short focused reminder in the same session. Returns the last
-    turn result and whether the report file now exists.
+    The report turn continues the agent's existing session rather than resetting
+    it: a weak model that was reliably calling tools mid-investigation tends to
+    drop into chat mode (printing the tool call as text) when handed a large
+    "write this" prompt as the first message of a fresh session. Keeping the
+    session preserves that tool-using momentum. (A regeneration run, which has
+    no prior session, simply starts one here.) Returns the last turn result and
+    whether the report file now exists.
     """
     report_path = job_dir / "final_report.md"
-    prompt = build_report_prompt(research_question, ks, job_dir=job_dir, description=description)
+    # Snapshot the existing report's mtime (if any) so a stale file from a
+    # prior run cannot be mistaken for this turn's output: the model must
+    # produce a file strictly newer than this. None means no report yet.
+    baseline_mtime_ns = report_path.stat().st_mtime_ns if report_path.exists() else None
+    file_write_tool = executor.file_write_tool
+    prompt = build_report_prompt(
+        research_question,
+        ks,
+        job_dir=job_dir,
+        description=description,
+        file_write_tool=file_write_tool,
+    )
     logger.info("Report generation turn (prompt: %d chars)", len(prompt))
 
-    result = await executor.run_iteration(prompt, reset_session=True)
+    result = await executor.run_iteration(prompt, reset_session=False)
     for attempt in range(1, _MAX_REPORT_ATTEMPTS + 1):
-        if _ensure_report_written(report_path, result):
+        if _ensure_report_written(report_path, result, baseline_mtime_ns=baseline_mtime_ns):
             if attempt > 1:
                 logger.info("Report written on attempt %d", attempt)
             return result, True
@@ -384,7 +426,11 @@ async def _run_report_turn(
         )
         result = await executor.run_iteration(
             build_report_retry_prompt(
-                research_question, ks, job_dir=job_dir, description=description
+                research_question,
+                ks,
+                job_dir=job_dir,
+                description=description,
+                file_write_tool=file_write_tool,
             ),
             reset_session=False,
         )

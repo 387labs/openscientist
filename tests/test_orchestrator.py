@@ -773,6 +773,22 @@ class TestBuildReportPrompt:
         prompt = build_report_prompt("What causes X?", ks)
         assert "do not infer paper content from titles alone" in prompt
 
+    def test_report_prompt_names_the_file_write_tool(self):
+        # The model must be told exactly which tool to call, not "your
+        # file-writing tool", so it invokes it instead of printing the call.
+        from openscientist.knowledge_state import KnowledgeState
+        from openscientist.orchestrator.iteration import (
+            build_report_prompt,
+            build_report_retry_prompt,
+        )
+
+        ks = KnowledgeState("j1", "What causes X?", 10)
+        prompt = build_report_prompt("What causes X?", ks, file_write_tool="apply_patch")
+        assert "`apply_patch`" in prompt
+        assert "your file-writing tool" not in prompt
+        retry = build_report_retry_prompt("What causes X?", ks, file_write_tool="apply_patch")
+        assert "`apply_patch`" in retry
+
     def test_report_prompt_has_citation_snippet_instruction(self):
         from openscientist.knowledge_state import KnowledgeState
         from openscientist.orchestrator.iteration import build_report_prompt
@@ -1000,10 +1016,10 @@ class TestReportGenerationPhase:
         assert "What causes X?" in retry
         # The retry embeds the full self-contained spec verbatim ...
         assert base in retry
-        # ... behind a correction that names the failure mode (described/printed
+        # ... behind a correction that names the failure mode (printed/described
         # instead of written) so the model does not repeat it.
-        assert retry.index("file-writing tool") < retry.index(base)
-        assert "described/printed" in retry or "describe" in retry.lower()
+        assert retry.index("That output is rejected") < retry.index(base)
+        assert "describe" in retry.lower()
 
     @staticmethod
     def _executor(record: list) -> SimpleNamespace:
@@ -1013,7 +1029,7 @@ class TestReportGenerationPhase:
             record.append((prompt, reset_session))
             return IterationResult(success=True, output="", tool_calls=0, transcript=[])
 
-        return SimpleNamespace(run_iteration=fake_run)
+        return SimpleNamespace(run_iteration=fake_run, file_write_tool="Write")
 
     @pytest.mark.asyncio
     async def test_report_turn_succeeds_first_attempt(self, tmp_path: Path):
@@ -1034,7 +1050,7 @@ class TestReportGenerationPhase:
                 None,
             )
         assert ok is True
-        assert calls == [("FULL", True)]  # one attempt, fresh session
+        assert calls == [("FULL", False)]  # one attempt, continues the session
 
     @pytest.mark.asyncio
     async def test_report_turn_retries_until_written(self, tmp_path: Path):
@@ -1056,8 +1072,8 @@ class TestReportGenerationPhase:
                 None,
             )
         assert ok is True
-        # First the full prompt (fresh), then a focused retry in the same session.
-        assert calls == [("FULL", True), ("RETRY", False)]
+        # The full prompt, then a focused retry — both continue the same session.
+        assert calls == [("FULL", False), ("RETRY", False)]
 
     @pytest.mark.asyncio
     async def test_report_turn_gives_up_after_max(self, tmp_path: Path):
@@ -1098,7 +1114,7 @@ class TestReportGenerationPhase:
 
         with patch.object(discovery.KnowledgeState, "load_from_database_sync", return_value=ks):
             await discovery._set_consensus_answer(
-                SimpleNamespace(run_iteration=fake_run),  # type: ignore[arg-type]
+                SimpleNamespace(run_iteration=fake_run, file_write_tool="Write"),  # type: ignore[arg-type]
                 tmp_path,
                 "Q?",
             )
@@ -1125,7 +1141,7 @@ class TestReportGenerationPhase:
             patch.object(discovery, "_try_generate_report_pdf", new=AsyncMock()) as pdf,
         ):
             outcome = await discovery._run_report_generation_phase(
-                SimpleNamespace(run_iteration=fake_run),  # type: ignore[arg-type]
+                SimpleNamespace(run_iteration=fake_run, file_write_tool="Write"),  # type: ignore[arg-type]
                 tmp_path,
                 "Q?",
             )
@@ -1153,7 +1169,7 @@ class TestReportGenerationPhase:
             patch.object(discovery, "_ensure_report_written", return_value=False),
         ):
             outcome = await discovery._run_report_generation_phase(
-                SimpleNamespace(run_iteration=fake_run),  # type: ignore[arg-type]
+                SimpleNamespace(run_iteration=fake_run, file_write_tool="Write"),  # type: ignore[arg-type]
                 tmp_path,
                 "Q?",
             )
@@ -1242,3 +1258,55 @@ class TestRegenerateReportAsync:
         assert result["status"] == "failed"
         update_status.assert_awaited()  # job marked failed
         finalize.assert_awaited_once()  # executor still cleaned up
+
+
+class TestEnsureReportWritten:
+    """Freshness check: a stale report from a prior run must not be mistaken
+    for fresh output (the bug that made report regeneration a silent no-op)."""
+
+    @staticmethod
+    def _result():
+        from openscientist.agent.base import IterationResult
+
+        return IterationResult(success=True, output="", tool_calls=0, transcript=[])
+
+    def test_missing_file_is_not_written(self, tmp_path: Path):
+        from openscientist.orchestrator.discovery import _ensure_report_written
+
+        assert _ensure_report_written(tmp_path / "final_report.md", self._result()) is False
+
+    def test_existing_file_no_baseline_is_written(self, tmp_path: Path):
+        from openscientist.orchestrator.discovery import _ensure_report_written
+
+        report = tmp_path / "final_report.md"
+        report.write_text("content")
+        # No baseline (fresh job): existence is sufficient.
+        assert _ensure_report_written(report, self._result()) is True
+
+    def test_stale_file_unchanged_since_baseline_is_not_written(self, tmp_path: Path):
+        from openscientist.orchestrator.discovery import _ensure_report_written
+
+        report = tmp_path / "final_report.md"
+        report.write_text("stale report from a previous run")
+        baseline = report.stat().st_mtime_ns
+        # The model claimed success but never rewrote the file: mtime == baseline.
+        assert _ensure_report_written(report, self._result(), baseline_mtime_ns=baseline) is False
+
+    def test_freshly_rewritten_file_is_written(self, tmp_path: Path):
+        from openscientist.orchestrator.discovery import _ensure_report_written
+
+        report = tmp_path / "final_report.md"
+        report.write_text("stale")
+        baseline = report.stat().st_mtime_ns - 1_000_000  # report is now strictly newer
+        assert _ensure_report_written(report, self._result(), baseline_mtime_ns=baseline) is True
+
+    def test_nested_fresh_report_is_moved_into_place(self, tmp_path: Path):
+        from openscientist.orchestrator.discovery import _ensure_report_written
+
+        report = tmp_path / "final_report.md"
+        nested = tmp_path / "sub" / "final_report.md"
+        nested.parent.mkdir()
+        nested.write_text("agent nested it here")
+        # No stale top-level file and no baseline: the nested file is recovered.
+        assert _ensure_report_written(report, self._result()) is True
+        assert report.exists() and report.read_text() == "agent nested it here"

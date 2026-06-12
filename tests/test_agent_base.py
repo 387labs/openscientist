@@ -30,6 +30,7 @@ _STUB_FRAGMENTS = BackendFragments(
 
 class _StubAgent(AbstractAgent[ClaudeCompatible]):
     backend = AgentBackend.CLAUDE_CODE
+    file_write_tool = "Write"
 
     async def run_iteration(self, prompt: str, *, reset_session: bool = False) -> IterationResult:
         return IterationResult(success=True, output=prompt, tool_calls=0, transcript=[])

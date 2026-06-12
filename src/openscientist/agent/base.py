@@ -144,16 +144,29 @@ class AbstractAgent[P: Provider](abc.ABC):
     #: it; abc cannot enforce a plain ClassVar, so ``__init_subclass__`` does.
     backend: ClassVar[AgentBackend]
 
+    #: The exact name of the tool this backend uses to create/overwrite a file
+    #: (``"apply_patch"`` for codex, ``"Write"`` for Claude). Surfaced verbatim
+    #: in prompts so the model is told precisely which tool to call to write the
+    #: report, rather than a vague "your file-writing tool" it has to guess at.
+    #: Enforced like ``backend`` because a missing name would silently weaken
+    #: those prompts for a new backend.
+    file_write_tool: ClassVar[str]
+
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
-        # Only concrete (instantiable) subclasses must declare a backend; an
-        # intermediate abstract subclass may legitimately leave it unset.
-        if not inspect.isabstract(cls) and not isinstance(
-            getattr(cls, "backend", None), AgentBackend
-        ):
+        # Only concrete (instantiable) subclasses must declare these; an
+        # intermediate abstract subclass may legitimately leave them unset.
+        if inspect.isabstract(cls):
+            return
+        if not isinstance(getattr(cls, "backend", None), AgentBackend):
             raise TypeError(
                 f"{cls.__name__} must set `backend: ClassVar[AgentBackend]` "
                 "to an AgentBackend member."
+            )
+        if not getattr(cls, "file_write_tool", None) or not isinstance(cls.file_write_tool, str):
+            raise TypeError(
+                f"{cls.__name__} must set `file_write_tool: ClassVar[str]` "
+                "to the backend's file-writing tool name."
             )
 
     def __init__(self, config: AgentConfig, provider: P) -> None:
