@@ -136,15 +136,28 @@ def _timeline_border_class(code_count: int, search_count: int, finding_count: in
     return "border-l-4 border-gray-300"
 
 
-def _timeline_header_text(strapline: str, summary_text: str, is_in_progress: bool) -> str:
+def _timeline_header_text(
+    strapline: str,
+    summary_text: str,
+    is_in_progress: bool,
+    has_activity: bool = False,
+) -> str:
     if strapline:
         base_text = strapline
     elif summary_text:
         base_text = summary_text[:80] + "..." if len(summary_text) > 80 else summary_text
     elif is_in_progress:
         return "Investigation in progress..."
+    elif has_activity:
+        # The model did work this iteration (code/searches/findings are shown
+        # below) but never called save_iteration_summary. Make that explicit so
+        # the row is not misread as the iteration having done nothing.
+        return "Activity logged, but no summary recorded"
     else:
-        return "Completed"
+        # No recorded activity and no summary. Say that plainly rather than
+        # "Completed", which misleadingly read as the model declaring the whole
+        # investigation done.
+        return "No activity or summary recorded"
     return f"{base_text} [in progress]" if is_in_progress else base_text
 
 
@@ -499,7 +512,8 @@ def _render_iteration_card(
         if h.get("iteration_proposed") == iteration or h.get("iteration_tested") == iteration
     )
     border_class = _timeline_border_class(code_count, search_count, finding_count)
-    header_text = _timeline_header_text(strapline, summary_text, is_in_progress)
+    has_activity = bool(code_count or search_count or finding_count or hypothesis_count)
+    header_text = _timeline_header_text(strapline, summary_text, is_in_progress, has_activity)
 
     with ui.expansion(icon="science").classes(f"w-full mb-2 {border_class}") as expansion:
         with expansion.add_slot("header"):
@@ -1163,6 +1177,14 @@ def _regenerate_report(context: _JobDetailContext) -> None:
     are not re-run; the persisted findings are reused). Overwrites the existing
     final report, so the caller confirms first.
     """
+    # Server-side authorization: never rely on the button only being rendered
+    # for admins. is_current_user_admin() reads the auth-time is_admin flag in
+    # app.storage.user (set during authentication, not forgeable by the client
+    # over the websocket), so re-checking it here guards the action itself.
+    if not is_current_user_admin():
+        logger.warning("Non-admin attempt to regenerate report for job %s blocked", context.job_id)
+        ui.notify("You are not authorized to regenerate reports.", type="negative")
+        return
     try:
         context.job_manager.regenerate_report(context.job_id)
     except ValueError as exc:
