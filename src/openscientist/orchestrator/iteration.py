@@ -96,22 +96,21 @@ def build_initial_prompt(
 {research_question}
 {description_context}
 
-**You are now on iteration 1 of {max_iterations}.** When writing summaries, always refer to this as "Iteration 1".
+You are on iteration 1 of {max_iterations}.
 
 {data_context}
 
-You have access to MCP tools for analysis, literature search, and recording findings.
-Examples include (there may be others - explore what's available):
-- execute_code: Analyze data, run statistical tests, create visualizations
-- search_pubmed: Search for relevant papers
-- update_knowledge_state: Record confirmed findings with statistical evidence
-- save_iteration_summary: Record a summary of what you investigated and learned
-- set_status: Update your status to let users know what you're working on
+Tools (MCP): `execute_code` (analysis, stats, plots), `search_pubmed` (literature),
+`update_knowledge_state` (record a finding with its evidence), `save_iteration_summary`
+(end-of-iteration recap), `set_status` (optional progress label).
 
-**REQUIRED: Your very first tool call MUST be set_status** (e.g., "Planning investigation strategy").
-After that, call set_status before every significant action so users can follow your progress.
-At the end of each iteration, call save_iteration_summary with a 1-2 sentence
-plain-language summary of what you investigated and what you learned.
+An iteration is not complete until you run analysis and record it:
+1. Plan briefly, then call `execute_code` and/or `search_pubmed` this turn.
+2. Record findings with `update_knowledge_state`.
+3. Finish with `save_iteration_summary` (1-2 sentences).
+
+`set_status` is only a label, not progress. Do not end your turn after only calling it:
+if you announce an action, perform it with a tool before the turn ends.
 
 Start now.
 """
@@ -139,21 +138,20 @@ the scientist's suggestions with your own analysis of what will be most producti
 ---
 """
     return f"""# Iteration {iteration} of {max_iterations}
-
-**You are now on iteration {iteration}.** When writing summaries, always refer to this as "Iteration {iteration}".
 {feedback_section}
 {description_context}
 {ks.get_summary()}
 
 ---
 
-**REQUIRED: Call set_status immediately** before doing anything else in this iteration.
-Then continue your investigation using the available MCP tools.
-Examples: execute_code, search_pubmed, update_knowledge_state, save_iteration_summary, set_status.
-Think step by step about what will provide the most insight, then actively use the tools to execute your investigation.
+An iteration is not complete until you run analysis and record it:
+1. Call `execute_code` and/or `search_pubmed` this turn to make real progress.
+2. Record findings with `update_knowledge_state`.
+3. Finish with `save_iteration_summary` (1-2 sentences).
 
-Call set_status before every significant action so users can follow your progress.
-At the end of this iteration, call save_iteration_summary with a brief summary of what you investigated and learned."""
+`set_status` is only a label, not progress, and a status-only turn wastes the iteration.
+If you announce an action (for example "Performing pathway enrichment"), perform it with a
+tool before the turn ends, not just describe it."""
 
 
 def build_report_prompt(

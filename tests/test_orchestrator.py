@@ -940,6 +940,19 @@ class TestBuildInitialPrompt:
         assert "Additional job context" in prompt
         assert "Prioritize longitudinal cohort evidence." in prompt
 
+    def test_frames_set_status_as_not_progress(self):
+        # The model used to stall after the "REQUIRED first call set_status"
+        # framing; the prompt must now make clear a status is not progress and
+        # the iteration is not complete without real analysis.
+        from openscientist.knowledge_state import KnowledgeState
+        from openscientist.orchestrator.iteration import build_initial_prompt
+
+        ks = KnowledgeState("j1", "Why X?", 10)
+        prompt = build_initial_prompt("Why X?", 10, ["data.csv"], ks)
+        assert "not progress" in prompt
+        assert "not complete until" in prompt
+        assert "your very first tool call must be set_status" not in prompt.lower()
+
 
 # ─── build_iteration_prompt ────────────────────────────────────────────
 
@@ -978,6 +991,36 @@ class TestBuildIterationPrompt:
         )
         assert "Additional job context" in prompt
         assert "Stay focused on the uploaded assay design." in prompt
+
+    def test_forbids_status_only_turns(self):
+        # Directly counters the observed "narrate intent then stall" failure:
+        # a turn that only sets a status must be called out as a wasted iteration.
+        from openscientist.knowledge_state import KnowledgeState
+        from openscientist.orchestrator.iteration import build_iteration_prompt
+
+        ks = KnowledgeState("j1", "Q?", 10)
+        prompt = build_iteration_prompt(3, 10, ks)
+        assert "not progress" in prompt
+        assert "wastes the iteration" in prompt
+        assert "not complete until" in prompt
+
+    def test_does_not_tell_model_to_label_summaries_with_iteration_number(self):
+        # Regression: instructing the model to call its summary "Iteration N"
+        # made gpt-oss:20b prefix every strapline, which the UI then duplicated
+        # as "Iteration N: Iteration N: ...". The number is added by the system.
+        from openscientist.knowledge_state import KnowledgeState
+        from openscientist.orchestrator.iteration import (
+            build_initial_prompt,
+            build_iteration_prompt,
+        )
+
+        ks = KnowledgeState("j1", "Q?", 10)
+        for prompt in (
+            build_iteration_prompt(3, 10, ks),
+            build_initial_prompt("Q?", 10, [], ks),
+        ):
+            assert "in summaries" not in prompt
+            assert "Refer to" not in prompt
 
 
 class TestReportGenerationPhase:
