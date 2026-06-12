@@ -50,6 +50,11 @@ if "DATABASE_URL" not in os.environ:
 # valid OPENSCIENTIST_PROVIDER so Settings construction does not raise.
 if "OPENSCIENTIST_PROVIDER" not in os.environ:
     os.environ["OPENSCIENTIST_PROVIDER"] = "anthropic"
+# Pin the model context window so building report prompts never makes a live
+# Ollama probe during tests (the override path short-circuits resolve_model_profile),
+# keeping the suite hermetic and deterministic.
+if "OPENSCIENTIST_MODEL_CONTEXT_TOKENS" not in os.environ:
+    os.environ["OPENSCIENTIST_MODEL_CONTEXT_TOKENS"] = "131072"
 
 # Clear and reload settings cache after setting up test environment
 _clear_settings_cache()

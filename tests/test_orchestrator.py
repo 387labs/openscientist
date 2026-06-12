@@ -1353,3 +1353,94 @@ class TestEnsureReportWritten:
         # No stale top-level file and no baseline: the nested file is recovered.
         assert _ensure_report_written(report, self._result()) is True
         assert report.exists() and report.read_text() == "agent nested it here"
+
+
+class TestReportAbstractBudget:
+    """The literature budget must scale with the model's context window."""
+
+    def test_budget_scales_with_context_and_has_a_floor(self):
+        from openscientist.models import ModelProfile
+        from openscientist.orchestrator.iteration import (
+            _REPORT_PROMPT_CHARS_PER_TOKEN,
+            _REPORT_PROMPT_MIN_ABSTRACT_CHARS,
+            _REPORT_PROMPT_RESERVE_TOKENS,
+            _report_abstract_budget_chars,
+        )
+
+        def budget_for(ctx: int) -> int:
+            with patch(
+                "openscientist.models.resolve_model_profile",
+                return_value=ModelProfile(id="m", context_window_tokens=ctx),
+            ):
+                return _report_abstract_budget_chars()
+
+        big, small = budget_for(131072), budget_for(16384)
+        assert big > small
+        assert big == int((131072 - _REPORT_PROMPT_RESERVE_TOKENS) * _REPORT_PROMPT_CHARS_PER_TOKEN)
+        # A context smaller than the reserve clamps to the floor, never negative.
+        assert budget_for(1000) == _REPORT_PROMPT_MIN_ABSTRACT_CHARS
+
+
+class TestRunReportTurnIntegration:
+    """Exercise _run_report_turn against a real file on disk: freshness check,
+    retries, and the file_write_tool passthrough, mocking only the LLM turn."""
+
+    @staticmethod
+    def _executor(job_dir: Path, write_on: set[int]) -> SimpleNamespace:
+        from openscientist.agent.base import IterationResult
+
+        calls = {"n": 0}
+
+        async def run(prompt: str, *, reset_session: bool = False) -> IterationResult:
+            calls["n"] += 1
+            if calls["n"] in write_on:
+                (job_dir / "final_report.md").write_text(
+                    "# Final Report\n\n" + "body " * 60, encoding="utf-8"
+                )
+            return IterationResult(
+                success=True, output="printed, not written", tool_calls=1, transcript=[]
+            )
+
+        return SimpleNamespace(run_iteration=run, file_write_tool="Write", calls=calls)
+
+    @pytest.mark.asyncio
+    async def test_succeeds_when_model_writes_on_first_attempt(self, tmp_path: Path):
+        from openscientist.knowledge_state import KnowledgeState
+        from openscientist.orchestrator.discovery import _run_report_turn
+
+        ex = self._executor(tmp_path, {1})
+        _, ok = await _run_report_turn(ex, tmp_path, "Q?", KnowledgeState("j", "Q?", 3), None)  # type: ignore[arg-type]
+        assert ok is True
+        assert ex.calls["n"] == 1
+        assert (tmp_path / "final_report.md").read_text().startswith("# Final Report")
+
+    @pytest.mark.asyncio
+    async def test_recovers_when_model_writes_on_retry(self, tmp_path: Path):
+        from openscientist.knowledge_state import KnowledgeState
+        from openscientist.orchestrator.discovery import _run_report_turn
+
+        ex = self._executor(tmp_path, {2})  # writes only on the second attempt
+        _, ok = await _run_report_turn(ex, tmp_path, "Q?", KnowledgeState("j", "Q?", 3), None)  # type: ignore[arg-type]
+        assert ok is True
+        assert ex.calls["n"] == 2
+
+    @pytest.mark.asyncio
+    async def test_fails_when_file_never_written(self, tmp_path: Path):
+        from openscientist.knowledge_state import KnowledgeState
+        from openscientist.orchestrator.discovery import _MAX_REPORT_ATTEMPTS, _run_report_turn
+
+        ex = self._executor(tmp_path, set())  # never writes
+        _, ok = await _run_report_turn(ex, tmp_path, "Q?", KnowledgeState("j", "Q?", 3), None)  # type: ignore[arg-type]
+        assert ok is False
+        assert ex.calls["n"] == _MAX_REPORT_ATTEMPTS
+
+    @pytest.mark.asyncio
+    async def test_stale_report_is_not_accepted(self, tmp_path: Path):
+        # A leftover report from a prior run must not pass as this turn's output.
+        from openscientist.knowledge_state import KnowledgeState
+        from openscientist.orchestrator.discovery import _run_report_turn
+
+        (tmp_path / "final_report.md").write_text("stale prior report", encoding="utf-8")
+        ex = self._executor(tmp_path, set())  # model never writes a fresh one
+        _, ok = await _run_report_turn(ex, tmp_path, "Q?", KnowledgeState("j", "Q?", 3), None)  # type: ignore[arg-type]
+        assert ok is False

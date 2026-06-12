@@ -124,6 +124,17 @@ def resolve_model_profile(model_id: str | None = None) -> ModelProfile:
         probed = _probe_ollama_context_tokens(provider.ollama_base_url, model_id)
         if probed:
             return ModelProfile(id=model_id, context_window_tokens=probed)
+        # A failed probe is NOT silent: it collapses the prompt budget to the
+        # conservative default, which over-trims the report's literature. Surface
+        # it so an operator can pin the window instead of shipping a thin report.
+        logger.warning(
+            "Could not probe the Ollama context window for %s; falling back to a "
+            "%d-token budget, so the report prompt will be trimmed more than "
+            "necessary. Set OPENSCIENTIST_MODEL_CONTEXT_TOKENS to pin the window.",
+            model_id,
+            _DEFAULT_CONTEXT_TOKENS,
+        )
+        return ModelProfile(id=model_id, context_window_tokens=_DEFAULT_CONTEXT_TOKENS)
 
     known = _known_context_tokens(model_id)
     if known:
