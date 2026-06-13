@@ -460,12 +460,17 @@ async def _run_report_turn(
 async def _set_consensus_answer(
     executor: AbstractAgent[Provider], job_dir: Path, research_question: str
 ) -> None:
-    """Run the consensus turn, re-asking until the model records an answer.
+    """Run the consensus turn, re-asking until the model records a fresh answer.
 
-    The model writes the consensus itself. This only re-prompts. If the attempts
-    are exhausted the report still stands and the job completes without a
-    consensus (logged), rather than fabricating one.
+    The model writes the consensus itself. This only re-prompts. A freshness
+    guard mirrors the report file's: snapshot the prior ``consensus_answer``
+    (None on a fresh run, the previous run's answer on regeneration) and accept
+    only a value the model wrote *this* turn, so a regenerated report cannot
+    ship the stale consensus. If the attempts are exhausted the report still
+    stands and the job completes with the prior consensus (logged), rather than
+    fabricating one.
     """
+    baseline = KnowledgeState.load_from_database_sync(job_dir.name).data.get("consensus_answer")
     for attempt in range(1, _MAX_CONSENSUS_ATTEMPTS + 1):
         prompt = (
             build_consensus_prompt(research_question)
@@ -473,7 +478,8 @@ async def _set_consensus_answer(
             else build_consensus_retry_prompt(research_question)
         )
         await executor.run_iteration(prompt, reset_session=False)
-        if KnowledgeState.load_from_database_sync(job_dir.name).data.get("consensus_answer"):
+        current = KnowledgeState.load_from_database_sync(job_dir.name).data.get("consensus_answer")
+        if current and current != baseline:
             if attempt > 1:
                 logger.info("Consensus recorded on attempt %d", attempt)
             return

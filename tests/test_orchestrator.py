@@ -1189,6 +1189,62 @@ class TestReportGenerationPhase:
         assert len(calls) == 2  # first attempt + one retry
 
     @pytest.mark.asyncio
+    async def test_consensus_rejects_stale_baseline(self, tmp_path: Path):
+        # On regeneration the KS already holds the prior run's consensus. A turn
+        # that does not write a new one must NOT be accepted as fresh, so the
+        # model is re-asked until attempts run out (the stale value is never
+        # mistaken for this turn's output).
+        from openscientist.agent.base import IterationResult
+        from openscientist.knowledge_state import KnowledgeState
+        from openscientist.orchestrator import discovery
+
+        ks = KnowledgeState("j", "Q?", 3)
+        ks.data["consensus_answer"] = "STALE from a prior run"
+        calls: list[str] = []
+
+        async def fake_run(prompt: str, *, reset_session: bool = False) -> IterationResult:
+            calls.append(prompt)  # never writes a new consensus
+            return IterationResult(
+                outcome=TurnOutcome.COMPLETED, output="", tool_calls=0, transcript=[]
+            )
+
+        with patch.object(discovery.KnowledgeState, "load_from_database_sync", return_value=ks):
+            await discovery._set_consensus_answer(
+                SimpleNamespace(run_iteration=fake_run, file_write_tool="Write"),  # type: ignore[arg-type]
+                tmp_path,
+                "Q?",
+            )
+        # Re-asked the full budget; the stale value was never accepted as fresh.
+        assert len(calls) == discovery._MAX_CONSENSUS_ATTEMPTS
+
+    @pytest.mark.asyncio
+    async def test_consensus_accepts_a_freshly_changed_answer_over_baseline(self, tmp_path: Path):
+        from openscientist.agent.base import IterationResult
+        from openscientist.knowledge_state import KnowledgeState
+        from openscientist.orchestrator import discovery
+
+        ks = KnowledgeState("j", "Q?", 3)
+        ks.data["consensus_answer"] = "OLD"
+        calls: list[str] = []
+
+        async def fake_run(prompt: str, *, reset_session: bool = False) -> IterationResult:
+            calls.append(prompt)
+            if len(calls) == 2:  # model writes a NEW consensus on the second attempt
+                ks.data["consensus_answer"] = "NEW"
+            return IterationResult(
+                outcome=TurnOutcome.COMPLETED, output="", tool_calls=0, transcript=[]
+            )
+
+        with patch.object(discovery.KnowledgeState, "load_from_database_sync", return_value=ks):
+            await discovery._set_consensus_answer(
+                SimpleNamespace(run_iteration=fake_run, file_write_tool="Write"),  # type: ignore[arg-type]
+                tmp_path,
+                "Q?",
+            )
+        assert ks.data["consensus_answer"] == "NEW"
+        assert len(calls) == 2
+
+    @pytest.mark.asyncio
     async def test_phase_happy_path(self, tmp_path: Path):
         from openscientist.agent.base import IterationResult
         from openscientist.knowledge_state import KnowledgeState
