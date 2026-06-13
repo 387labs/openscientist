@@ -36,12 +36,13 @@ _REPORT_PROMPT_CHARS_PER_TOKEN = 3.5
 _REPORT_PROMPT_MIN_ABSTRACT_CHARS = 2000
 
 
-def _report_abstract_budget_chars() -> int:
-    """Char budget for literature abstracts, derived from the model's context."""
-    from openscientist.models import resolve_model_profile
+def _report_abstract_budget_chars(context_window_tokens: int) -> int:
+    """Char budget for literature abstracts, derived from the model's context.
 
-    context_tokens = resolve_model_profile().context_window_tokens
-    spare_tokens = context_tokens - _REPORT_PROMPT_RESERVE_TOKENS
+    Pure function of the resolved window: the caller passes the agent's cached
+    ``model_profile.context_window_tokens`` so this builder does no I/O.
+    """
+    spare_tokens = context_window_tokens - _REPORT_PROMPT_RESERVE_TOKENS
     return max(
         _REPORT_PROMPT_MIN_ABSTRACT_CHARS,
         int(spare_tokens * _REPORT_PROMPT_CHARS_PER_TOKEN),
@@ -161,11 +162,12 @@ def build_report_prompt(
     job_dir: Path | None = None,
     description: str | None = None,
     file_write_tool: str = "Write",
+    context_window_tokens: int,
 ) -> str:
     """Build the prompt for the final report generation iteration.
 
     The prompt must be explicit that the agent should write the FULL report
-    content — not a summary or table of contents — and must name the exact
+    content (not a summary or table of contents) and must name the exact
     file-writing tool so the model invokes it rather than printing the content.
 
     Args:
@@ -201,7 +203,7 @@ def build_report_prompt(
 
 {_format_job_description_section(description)}
 
-{ks.get_report_outline(abstract_budget_chars=_report_abstract_budget_chars())}
+{ks.get_report_outline(abstract_budget_chars=_report_abstract_budget_chars(context_window_tokens))}
 
 {figure_section}
 
@@ -209,16 +211,16 @@ def build_report_prompt(
 
 ## Instructions
 
-**CRITICAL — file path:** Write the report to exactly this path:
+**CRITICAL (file path):** Write the report to exactly this path:
 `{report_path}`
-Do NOT write to `/tmp/`, `~/`, or any other location — the system will not find it.
+Do NOT write to `/tmp/`, `~/`, or any other location, or the system will not find it.
 
-**CRITICAL — action:** Call the `{file_write_tool}` tool to actually CREATE this file on disk.
+**CRITICAL (action):** Call the `{file_write_tool}` tool to actually CREATE this file on disk.
 Do not just describe the report or print it in your reply, and do not emit the tool call
-as text — invoke `{file_write_tool}` so the file exists at the path above when you are done.
+as text. Invoke `{file_write_tool}` so the file exists at the path above when you are done.
 
-**CRITICAL — content:** The file must contain the COMPLETE, FULL text of every
-section — not a table of contents, not a summary of sections, not a pointer to
+**CRITICAL (content):** The file must contain the COMPLETE, FULL text of every
+section, not a table of contents, not a summary of sections, not a pointer to
 another file.  If `final_report.md` already exists, overwrite it entirely.
 
 Use the provided knowledge summary below for findings, hypotheses, literature,
@@ -259,7 +261,7 @@ and iteration summaries.
    - Only attribute claims to papers based on the abstracts or citation snippets provided in the knowledge outline above — do not infer paper content from titles alone
 
 **Remember:** The content of `{report_path}` IS the deliverable the user receives.
-It must be a complete, self-contained document — not a summary or index. Writing this
+It must be a complete, self-contained document, not a summary or index. Writing this
 report is the only task for this step. The consensus answer comes as a separate step.
 """
 
@@ -277,7 +279,7 @@ research question:
 {research_question}
 
 Call the `set_consensus_answer` tool with a direct 1-3 sentence answer to the research
-question. Be direct — no citations, no hedging. Calling that tool is the only action
+question. Be direct, no citations, no hedging. Calling that tool is the only action
 for this step."""
 
 
@@ -288,20 +290,17 @@ def build_report_retry_prompt(
     job_dir: Path | None = None,
     description: str | None = None,
     file_write_tool: str = "Write",
+    context_window_tokens: int,
 ) -> str:
     """Re-ask for the report when the previous turn ended without the file.
 
-    A weak model re-anchors on the *last* instruction it received. A bare
-    "you forgot, write the file" reminder therefore reframes the step as a
-    trivial chore stripped of the findings and the structure, and the model
-    answers it literally: a one-line stub, or a description of a report
-    instead of the report itself. The fix is to restate the *entire* task.
-    This prepends a short, forceful correction and then repeats the full
-    self-contained report spec (findings outline, required structure, exact
-    path, and the "write the content, do not describe it" rules) so the model
-    has everything it needs to author the real document in this turn.
-    Restating in full, rather than stacking another reminder onto the failed
-    turn, is what breaks the loop.
+    A weak model re-anchors on the *last* instruction it received, so a bare
+    "you forgot, write the file" reminder reframes the step as a trivial chore
+    and the model answers it literally (a one-line stub, or a description of a
+    report instead of the report). The fix is to restate the *entire* task: a
+    short forceful correction followed by the full self-contained report spec
+    (findings outline, structure, exact path, and the "write it, do not
+    describe it" rules).
     """
     if job_dir is not None:
         report_path = str(job_dir.resolve() / "final_report.md")
@@ -318,7 +317,7 @@ That output is rejected. For this turn:
 - The ONLY acceptable action is to invoke the `{file_write_tool}` tool and write the
   COMPLETE report content to `{report_path}`.
 
-The full task is restated below so nothing is missing — follow it exactly.
+The full task is restated below so nothing is missing. Follow it exactly.
 
 ---
 
@@ -329,6 +328,7 @@ The full task is restated below so nothing is missing — follow it exactly.
         job_dir=job_dir,
         description=description,
         file_write_tool=file_write_tool,
+        context_window_tokens=context_window_tokens,
     )
     return correction + base
 

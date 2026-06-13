@@ -37,6 +37,7 @@ from openscientist.agent.base import (
     AgentConfig,
     IterationResult,
     TokenUsage,
+    TurnOutcome,
 )
 from openscientist.agent.mcp_specs import StdioMcpServerSpec
 from openscientist.providers.base import ClaudeCompatible
@@ -145,7 +146,7 @@ class ClaudeCodeAgent(AbstractAgent[ClaudeCompatible]):
     def discovery_system_prompt(
         cls, *, use_hypotheses: bool = False, phenix_available: bool = False
     ) -> str:
-        # Claude gets the concise system prompt; its rich CLAUDE.md is written
+        # Claude gets the concise system prompt. Its rich CLAUDE.md is written
         # separately into .claude/ by prepare_job_workspace.
         return cls.system_prompt()
 
@@ -379,7 +380,7 @@ class ClaudeCodeAgent(AbstractAgent[ClaudeCompatible]):
         self._stderr_lines.clear()
         self._client = None
         return IterationResult(
-            success=False,
+            outcome=TurnOutcome.FAILED,
             output="",
             tool_calls=state.tool_call_count,
             transcript=CLAUDE.deserialize(state.transcript),
@@ -394,7 +395,7 @@ class ClaudeCodeAgent(AbstractAgent[ClaudeCompatible]):
             return None
         logger.error("CLI returned API error as output: %s", state.final_output[:500])
         return IterationResult(
-            success=False,
+            outcome=TurnOutcome.FAILED,
             output=state.final_output,
             tool_calls=0,
             transcript=CLAUDE.deserialize(state.transcript),
@@ -413,7 +414,7 @@ class ClaudeCodeAgent(AbstractAgent[ClaudeCompatible]):
         logger.error(error_message)
         self._client = None
         return IterationResult(
-            success=False,
+            outcome=TurnOutcome.FAILED,
             output="",
             tool_calls=0,
             transcript=[],
@@ -454,7 +455,7 @@ class ClaudeCodeAgent(AbstractAgent[ClaudeCompatible]):
             return silent_crash
 
         return IterationResult(
-            success=True,
+            outcome=TurnOutcome.COMPLETED,
             output=state.final_output,
             tool_calls=state.tool_call_count,
             transcript=CLAUDE.deserialize(state.transcript),

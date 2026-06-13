@@ -15,7 +15,7 @@ import inspect
 
 import pytest
 
-from openscientist.agent.base import AbstractAgent, AgentBackend, IterationResult
+from openscientist.agent.base import AbstractAgent, AgentBackend, IterationResult, TurnOutcome
 
 # Importing the concrete agents registers them as AbstractAgent subclasses.
 from openscientist.agent.claude_code_agent import ClaudeCodeAgent  # noqa: F401
@@ -73,7 +73,7 @@ def test_every_concrete_agent_declares_a_backend() -> None:
 
 def test_every_concrete_agent_declares_a_file_write_tool() -> None:
     # The report prompt names this tool verbatim so the model invokes it rather
-    # than printing the call as text; a new backend that omits it would silently
+    # than printing the call as text. A new backend that omits it would silently
     # ship a vague prompt, so it is enforced in __init_subclass__ and here.
     for cls in _concrete_agent_classes():
         assert isinstance(cls.file_write_tool, str) and cls.file_write_tool, cls
@@ -107,7 +107,7 @@ def test_every_provider_class_is_registered() -> None:
 
 
 def test_every_backend_has_a_display_name() -> None:
-    # display_name is a dict lookup; a new AgentBackend member without an entry
+    # display_name is a dict lookup. A new AgentBackend member without an entry
     # would KeyError only at UI render time, so assert it eagerly here.
     for backend in AgentBackend:
         assert isinstance(backend.display_name, str) and backend.display_name
@@ -159,7 +159,9 @@ def test_concrete_subclass_without_backend_is_rejected() -> None:
             async def run_iteration(
                 self, prompt: str, *, reset_session: bool = False
             ) -> IterationResult:
-                return IterationResult(success=True, output="", tool_calls=0, transcript=[])
+                return IterationResult(
+                    outcome=TurnOutcome.COMPLETED, output="", tool_calls=0, transcript=[]
+                )
 
             async def shutdown(self) -> None:
                 return None

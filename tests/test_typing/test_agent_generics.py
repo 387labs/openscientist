@@ -16,7 +16,7 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 
 _VALID_SUBCLASS = """
-from openscientist.agent.base import AbstractAgent, IterationResult
+from openscientist.agent.base import AbstractAgent, IterationResult, TurnOutcome
 from openscientist.providers.base import ClaudeCompatible
 
 
@@ -24,7 +24,7 @@ class MyAgent(AbstractAgent[ClaudeCompatible]):
     async def run_iteration(
         self, prompt: str, *, reset_session: bool = False
     ) -> IterationResult:
-        return IterationResult(success=True, output="", tool_calls=0, transcript=[])
+        return IterationResult(outcome=TurnOutcome.COMPLETED, output="", tool_calls=0, transcript=[])
 
     async def shutdown(self) -> None:
         return None
@@ -70,7 +70,7 @@ def test_rejects_subclass_missing_abstract_method(tmp_path: Path) -> None:
             async def run_iteration(
                 self, prompt: str, *, reset_session: bool = False
             ) -> IterationResult:
-                return IterationResult(success=True, output="", tool_calls=0, transcript=[])
+                return IterationResult(outcome=TurnOutcome.COMPLETED, output="", tool_calls=0, transcript=[])
             # shutdown omitted
 
 
@@ -95,7 +95,7 @@ def test_rejects_subclass_missing_backend_divergent_member(tmp_path: Path) -> No
             async def run_iteration(
                 self, prompt: str, *, reset_session: bool = False
             ) -> IterationResult:
-                return IterationResult(success=True, output="", tool_calls=0, transcript=[])
+                return IterationResult(outcome=TurnOutcome.COMPLETED, output="", tool_calls=0, transcript=[])
 
             async def shutdown(self) -> None:
                 return None

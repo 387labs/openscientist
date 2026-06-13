@@ -15,7 +15,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from openscientist.agent.base import AbstractAgent, AgentConfig, IterationResult
+from openscientist.agent.base import AbstractAgent, AgentConfig, IterationResult, TurnOutcome
 from openscientist.database.models import Job, JobChatMessage, User
 from openscientist.database.rls import set_current_user
 from openscientist.job_chat import get_chat_history, load_job_context, send_chat_message
@@ -477,12 +477,15 @@ async def test_send_chat_message_success(
     job_dir = temp_jobs_dir / str(test_job.id)
     job_dir.mkdir()
 
-    # get_provider drives the backend (Claude); build_agent runs for real so
-    # write_chat_context writes the chat .claude/CLAUDE.md; only run_iteration
+    # get_provider drives the backend (Claude), build_agent runs for real so
+    # write_chat_context writes the chat .claude/CLAUDE.md, and only run_iteration
     # is mocked.
     captured: dict[str, AgentConfig] = {}
     result = IterationResult(
-        success=True, output="The main findings indicate...", tool_calls=0, transcript=[]
+        outcome=TurnOutcome.COMPLETED,
+        output="The main findings indicate...",
+        tool_calls=0,
+        transcript=[],
     )
 
     with (
@@ -521,7 +524,7 @@ async def test_send_chat_message_raises_on_executor_failure(
 
     captured: dict[str, AgentConfig] = {}
     result = IterationResult(
-        success=False,
+        outcome=TurnOutcome.FAILED,
         output="",
         tool_calls=0,
         transcript=[],
@@ -553,7 +556,7 @@ async def test_send_chat_message_raises_generic_on_empty_error(
     job_dir.mkdir()
 
     captured: dict[str, AgentConfig] = {}
-    result = IterationResult(success=False, output="", tool_calls=0, transcript=[])
+    result = IterationResult(outcome=TurnOutcome.FAILED, output="", tool_calls=0, transcript=[])
 
     with (
         patch("openscientist.providers.get_provider", return_value=_ChatProvider()),
@@ -582,7 +585,9 @@ async def test_system_prompt_does_not_include_job_context(
     large_ks.data["findings"] = [{"content": "x" * 50000}]
 
     captured: dict[str, AgentConfig] = {}
-    result = IterationResult(success=True, output="Response", tool_calls=0, transcript=[])
+    result = IterationResult(
+        outcome=TurnOutcome.COMPLETED, output="Response", tool_calls=0, transcript=[]
+    )
 
     with (
         patch("openscientist.providers.get_provider", return_value=_ChatProvider()),
@@ -623,11 +628,13 @@ async def test_send_chat_message_codex_provider(
     job_dir = temp_jobs_dir / str(test_job.id)
     job_dir.mkdir()
 
-    # get_provider drives the codex backend; build_agent runs for real, so the
+    # get_provider drives the codex backend, build_agent runs for real, so the
     # default chat_system_prompt folds the guidance in and write_chat_context is
     # a no-op (no .claude/CLAUDE.md). Only run_iteration is mocked.
     captured: dict[str, AgentConfig] = {}
-    result = IterationResult(success=True, output="Codex chat reply", tool_calls=0, transcript=[])
+    result = IterationResult(
+        outcome=TurnOutcome.COMPLETED, output="Codex chat reply", tool_calls=0, transcript=[]
+    )
 
     with (
         patch("openscientist.providers.get_provider", return_value=StubCodexProvider()),
@@ -644,7 +651,7 @@ async def test_send_chat_message_codex_provider(
     config = captured["config"]
     assert config.system_prompt is not None
     assert "OpenScientist Job Chat Assistant" in config.system_prompt
-    # No model override on the codex path — the model comes from the provider.
+    # No model override on the codex path, the model comes from the provider.
     assert config.model_override is None
 
     # Both messages persisted.

@@ -41,6 +41,7 @@ from openscientist.agent.base import (
     IterationResult,
     TokenUsage,
     TranscriptEntry,
+    TurnOutcome,
 )
 from openscientist.providers.base import CodexCompatible
 from openscientist.transcript import CODEX
@@ -53,7 +54,7 @@ logger = logging.getLogger(__name__)
 
 _MCP_SERVER_NAME = "openscientist-tools"
 
-# Item types that are messages or reasoning rather than tool actions; everything
+# Item types that are messages or reasoning rather than tool actions. Everything
 # else (commandExecution, mcpToolCall, fileChange, ...) counts as a tool call.
 _NON_TOOL_ITEM_TYPES = frozenset({"userMessage", "agentMessage", "reasoning"})
 
@@ -68,7 +69,7 @@ _TURN_TIMEOUT_SECONDS = int(os.environ.get("OPENSCIENTIST_CODEX_TURN_TIMEOUT", "
 def _resolve_codex_bin() -> str | None:
     """Locate the codex executable for the SDK to launch.
 
-    An explicit ``OPENSCIENTIST_CODEX_BIN`` wins; otherwise fall back to a
+    An explicit ``OPENSCIENTIST_CODEX_BIN`` wins, otherwise fall back to a
     ``codex`` on ``PATH``. Returns None to let ``CodexConfig`` apply its own
     default (which will raise a clear error if no binary is found), since the
     bundled-binary dependency is intentionally not installed.
@@ -264,7 +265,7 @@ class CodexAgent(AbstractAgent[CodexCompatible]):
     async def _ensure_thread(self, reset_session: bool) -> AsyncThread:
         """Return a started thread, (re)building it when requested.
 
-        The app-server client persists across iterations; a reset starts a new
+        The app-server client persists across iterations. A reset starts a new
         thread (a fresh conversation) on the same client.
         """
         if reset_session:
@@ -283,13 +284,9 @@ class CodexAgent(AbstractAgent[CodexCompatible]):
                 # full filesystem/network access and defers sandboxing to the
                 # container, as recommended for externally sandboxed automation.
                 sandbox=Sandbox.full_access,
-                # Headless: no human to approve actions. deny_all maps to
-                # codex's approval policy "never" (no escalation prompts and no
-                # auto-reviewer), so tools run immediately. ApprovalMode
-                # .auto_review instead runs an approval reviewer that has a
-                # deadline and times out in a headless run, failing every tool
-                # call with "automatic permission approval review did not
-                # finish before its deadline".
+                # Headless: no human to approve, so deny_all (codex policy
+                # "never") runs tools immediately. auto_review instead waits on a
+                # reviewer that times out in a headless run and fails every call.
                 approval_mode=ApprovalMode.deny_all,
                 cwd=str(self._job_dir()),
             )
@@ -322,7 +319,7 @@ class CodexAgent(AbstractAgent[CodexCompatible]):
         """Translate the turn's items into transcript entries by reusing the
         ``CODEX`` deserializer.
 
-        The SDK hands us parsed item objects; ``CODEX.deserialize`` consumes the
+        The SDK hands us parsed item objects, but ``CODEX.deserialize`` consumes the
         raw ``item.completed`` event shape, so each item is dumped back to its
         wire dict and wrapped in an envelope. This delegates every mapping to
         the single tested translator.
@@ -343,18 +340,19 @@ class CodexAgent(AbstractAgent[CodexCompatible]):
             result = await asyncio.wait_for(thread.run(prompt), timeout=_TURN_TIMEOUT_SECONDS)
         except TimeoutError:
             # Runaway turn (e.g. the model looping on an unsupported tool call).
-            # Cut it and let the loop continue: success=True so the orchestrator
-            # advances (the discovery loop raises on a failed turn), since work
-            # done before the cut is already persisted via the MCP tools. The
-            # report turn is gated on the file existing, not on this flag.
+            # Report it honestly as TIMED_OUT (work done before the cut is already
+            # persisted via the MCP tools); the orchestrator decides whether to
+            # advance or fail, rather than this layer claiming success.
             logger.warning("Codex turn exceeded %ds, cutting the turn", _TURN_TIMEOUT_SECONDS)
             await self._close_codex()
-            return IterationResult(success=True, output="", tool_calls=0, transcript=[], error="")
+            return IterationResult(
+                outcome=TurnOutcome.TIMED_OUT, output="", tool_calls=0, transcript=[], error=""
+            )
         except Exception as e:
             logger.error("Codex run failed: %s", e, exc_info=True)
             await self._close_codex()
             return IterationResult(
-                success=False, output="", tool_calls=0, transcript=[], error=str(e)
+                outcome=TurnOutcome.FAILED, output="", tool_calls=0, transcript=[], error=str(e)
             )
 
         if result.usage is not None:
@@ -366,7 +364,7 @@ class CodexAgent(AbstractAgent[CodexCompatible]):
             if item.model_dump(mode="json").get("type") not in _NON_TOOL_ITEM_TYPES
         )
         return IterationResult(
-            success=True,
+            outcome=TurnOutcome.COMPLETED,
             output=result.final_response or "",
             tool_calls=tool_calls,
             transcript=self._to_transcript(result.items),

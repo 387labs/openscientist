@@ -2,14 +2,15 @@
 
 `AbstractAgent[P: Provider]` ties an agent runtime to the provider
 family it can drive: `ClaudeCodeAgent(AbstractAgent[ClaudeCompatible])`
-and `CodexAgent(AbstractAgent[CodexCompatible])` (added later) cannot be
+and `CodexAgent(AbstractAgent[CodexCompatible])` cannot be
 constructed with a mismatched provider, and mypy rejects the mismatch at
-check-time. Nothing inherits this yet.
+check-time. Both concrete agents subclass this.
 """
 
 from __future__ import annotations
 
 import abc
+import asyncio
 import enum
 import inspect
 from dataclasses import dataclass
@@ -17,6 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from openscientist.agent.mcp_specs import McpServerSpec
+from openscientist.models import ModelProfile
 from openscientist.providers.base import Provider
 from openscientist.transcript import TranscriptEntry
 
@@ -38,7 +40,7 @@ class AgentBackend(enum.Enum):
     """The agent runtime that drives a provider family.
 
     The single source of truth for backend identity. Each concrete
-    ``AbstractAgent`` owns one of these; the string values are stable and
+    ``AbstractAgent`` owns one of these. The string values are stable and
     match the historical labels persisted and derived elsewhere, so existing
     data and any string comparisons keep working.
     """
@@ -103,15 +105,36 @@ class TokenUsage:
         return self
 
 
+class TurnOutcome(enum.Enum):
+    """Outcome of one agent turn, for the orchestrator to interpret.
+
+    The agent reports what happened; the loop owns the policy. ``TIMED_OUT`` is a
+    wall-clock cut (any work done before it is already persisted via tools), so
+    the loop may advance rather than fail. Cancellation is not represented here:
+    it propagates as an exception, never as a turn result.
+    """
+
+    COMPLETED = "completed"
+    FAILED = "failed"
+    TIMED_OUT = "timed_out"
+
+
 @dataclass(frozen=True)
 class IterationResult:
     """Result of a single agent iteration."""
 
-    success: bool
+    outcome: TurnOutcome
     output: str
     tool_calls: int
     transcript: list[TranscriptEntry]
     error: str = ""
+
+    @property
+    def success(self) -> bool:
+        """True only for a normally completed turn. Kept so callers that just
+        gate on success keep working; the discovery loop inspects ``outcome``
+        directly to tell a timeout apart from a failure."""
+        return self.outcome is TurnOutcome.COMPLETED
 
 
 @dataclass(frozen=True)
@@ -141,20 +164,17 @@ class AbstractAgent[P: Provider](abc.ABC):
     """
 
     #: The backend identity this agent implements. Concrete subclasses MUST set
-    #: it; abc cannot enforce a plain ClassVar, so ``__init_subclass__`` does.
+    #: it, and abc cannot enforce a plain ClassVar, so ``__init_subclass__`` does.
     backend: ClassVar[AgentBackend]
 
-    #: The exact name of the tool this backend uses to create/overwrite a file
-    #: (``"apply_patch"`` for codex, ``"Write"`` for Claude). Surfaced verbatim
-    #: in prompts so the model is told precisely which tool to call to write the
-    #: report, rather than a vague "your file-writing tool" it has to guess at.
-    #: Enforced like ``backend`` because a missing name would silently weaken
-    #: those prompts for a new backend.
+    #: The tool this backend uses to create or overwrite a file (``"apply_patch"``
+    #: for codex, ``"Write"`` for Claude). Named verbatim in report prompts so the
+    #: model knows which tool to call. Enforced like ``backend``.
     file_write_tool: ClassVar[str]
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
-        # Only concrete (instantiable) subclasses must declare these; an
+        # Only concrete (instantiable) subclasses must declare these. An
         # intermediate abstract subclass may legitimately leave them unset.
         if inspect.isabstract(cls):
             return
@@ -173,6 +193,24 @@ class AbstractAgent[P: Provider](abc.ABC):
         self._config = config
         self._provider = provider
         self._token_usage = TokenUsage()
+        self._model_profile: ModelProfile | None = None
+
+    async def warm_model_profile(self) -> None:
+        """Resolve and cache this run's model profile off the event loop.
+
+        The context window does not change within a job, so resolve it once at
+        setup. The provider's resolution may do blocking I/O (the Ollama probe),
+        so run it in a thread to keep the event loop responsive.
+        """
+        self._model_profile = await asyncio.to_thread(self._provider.model_profile)
+
+    @property
+    def model_profile(self) -> ModelProfile:
+        """This run's model profile, resolved once and cached. Resolves
+        synchronously as a fallback if accessed before ``warm_model_profile``."""
+        if self._model_profile is None:
+            self._model_profile = self._provider.model_profile()
+        return self._model_profile
 
     @property
     def config(self) -> AgentConfig:
@@ -254,7 +292,7 @@ class AbstractAgent[P: Provider](abc.ABC):
     def apply_runtime_environment(self) -> None:
         """Apply any process environment this backend needs before running.
 
-        Default no-op; the Claude backend overrides to set auth/routing flags.
+        Default no-op. The Claude backend overrides to set auth/routing flags.
         """
         return None
 
@@ -274,7 +312,7 @@ class AbstractAgent[P: Provider](abc.ABC):
     def write_chat_context(self) -> None:
         """Materialise any on-disk in-page-chat context for this backend.
 
-        Default no-op; the Claude backend overrides to write ``.claude/CLAUDE.md``.
+        Default no-op. The Claude backend overrides to write ``.claude/CLAUDE.md``.
         """
         return None
 

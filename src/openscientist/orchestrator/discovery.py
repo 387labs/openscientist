@@ -20,6 +20,7 @@ from openscientist.agent.base import (
     AgentConfig,
     IterationResult,
     TokenUsage,
+    TurnOutcome,
 )
 from openscientist.agent.factory import agent_class_for_provider_id, get_agent
 from openscientist.database.models import JobDataFile
@@ -119,7 +120,29 @@ def _append_iteration_artifacts(
         result.output,
         result.tool_calls,
         write=overwrite_log,
+        timed_out=result.outcome is TurnOutcome.TIMED_OUT,
     )
+
+
+def _check_turn_outcome(result: IterationResult, iteration: int) -> None:
+    """Apply the loop's per-turn policy.
+
+    FAILED aborts the run. TIMED_OUT is recorded and the loop advances: the
+    turn was cut by a wall-clock timeout, and any work done before the cut is
+    already persisted via the tools, so a stalled model is surfaced (in the log
+    and the honest outcome) rather than silently passed off as success.
+    """
+    if result.outcome is TurnOutcome.FAILED:
+        logger.error("Iteration %d failed: %s", iteration, result.error)
+        raise RuntimeError(f"Iteration {iteration} failed: {result.error}")
+    if result.outcome is TurnOutcome.TIMED_OUT:
+        logger.warning(
+            "Iteration %d timed out (tool_calls=%d); advancing, work before the cut is persisted",
+            iteration,
+            result.tool_calls,
+        )
+    else:
+        logger.info("Iteration %d completed (tool_calls=%d)", iteration, result.tool_calls)
 
 
 def _sync_version_metadata_if_available(job_id: str) -> None:
@@ -180,10 +203,7 @@ async def _run_primary_discovery_loop(
 
     logger.info("Iteration 1/%d: Starting session", max_iterations)
     result = await executor.run_iteration(initial_prompt, reset_session=True)
-    if not result.success:
-        logger.error("Iteration 1 failed: %s", result.error)
-        raise RuntimeError(f"Agent loop failed: {result.error}")
-    logger.info("Iteration 1 completed (tool_calls=%d)", result.tool_calls)
+    _check_turn_outcome(result, 1)
 
     _sync_version_metadata_if_available(job_id)
     _append_iteration_artifacts(
@@ -236,11 +256,7 @@ async def _run_primary_discovery_loop(
         )
 
         result = await executor.run_iteration(iteration_prompt, reset_session=should_reset)
-        if not result.success:
-            logger.error("Iteration %d failed: %s", iteration, result.error)
-            raise RuntimeError(f"Iteration {iteration} failed: {result.error}")
-
-        logger.info("Iteration %d completed (tool_calls=%d)", iteration, result.tool_calls)
+        _check_turn_outcome(result, iteration)
         _append_iteration_artifacts(
             provenance_dir=provenance_dir,
             log_file=log_file,
@@ -295,7 +311,7 @@ def _ensure_report_written(
     the turn started (None if it did not exist then). The file counts as
     written only if it now exists and is strictly newer than that baseline.
     If the agent wrote the file to a subdirectory within the job dir, move it
-    to the expected path. Returns False when no fresh report can be found —
+    to the expected path. Returns False when no fresh report can be found, so
     the caller re-asks, then marks the job as failed.
     """
 
@@ -315,7 +331,7 @@ def _ensure_report_written(
     job_dir = report_path.parent
     for found in job_dir.rglob("final_report.md"):
         if found != report_path and _is_fresh(found):
-            logger.warning("Report found at %s — moving to %s", found, report_path)
+            logger.warning("Report found at %s, moving to %s", found, report_path)
             found.rename(report_path)
             return True
 
@@ -404,12 +420,14 @@ async def _run_report_turn(
     # produce a file strictly newer than this. None means no report yet.
     baseline_mtime_ns = report_path.stat().st_mtime_ns if report_path.exists() else None
     file_write_tool = executor.file_write_tool
+    context_window_tokens = executor.model_profile.context_window_tokens
     prompt = build_report_prompt(
         research_question,
         ks,
         job_dir=job_dir,
         description=description,
         file_write_tool=file_write_tool,
+        context_window_tokens=context_window_tokens,
     )
     logger.info("Report generation turn (prompt: %d chars)", len(prompt))
 
@@ -431,6 +449,7 @@ async def _run_report_turn(
                 job_dir=job_dir,
                 description=description,
                 file_write_tool=file_write_tool,
+                context_window_tokens=context_window_tokens,
             ),
             reset_session=False,
         )
@@ -660,6 +679,9 @@ async def _build_and_prepare_executor(
     executor.apply_runtime_environment()
     await update_job_status(job_dir, "running")
     await executor.prepare_job_workspace(use_hypotheses=use_hypotheses)
+    # Resolve the model's context window once per job, off the event loop (the
+    # Ollama probe is blocking I/O). Cached on the agent for the report budget.
+    await executor.warm_model_profile()
     return executor
 
 
@@ -814,6 +836,7 @@ def _append_log(
     output: str,
     tool_calls: int,
     write: bool = False,
+    timed_out: bool = False,
 ) -> None:
     """Append iteration summary to the log file."""
     mode = "w" if write else "a"
@@ -822,3 +845,5 @@ def _append_log(
         f.write(f"Prompt: {prompt}\n\n")
         f.write(f"Output: {output}\n\n")
         f.write(f"Tool calls: {tool_calls}\n\n")
+        if timed_out:
+            f.write("Timed out: yes (turn cut by the wall-clock limit)\n\n")

@@ -14,6 +14,7 @@ from uuid import uuid4
 
 import pytest
 
+from openscientist.agent.base import TurnOutcome
 from openscientist.orchestrator import (
     get_version_metadata,
     increment_ks_iteration,
@@ -245,10 +246,11 @@ class TestDiscoveryCancellationAndFailure:
         mock_executor.total_tokens = TokenUsage()
         mock_executor.shutdown = AsyncMock()
         mock_executor.prepare_job_workspace = AsyncMock()
+        mock_executor.warm_model_profile = AsyncMock()
         mock_executor.run_iteration = AsyncMock(
             side_effect=[
                 IterationResult(
-                    success=True,
+                    outcome=TurnOutcome.COMPLETED,
                     output="iteration 1 complete",
                     tool_calls=0,
                     transcript=[],
@@ -326,16 +328,17 @@ class TestDiscoveryCancellationAndFailure:
         mock_executor.total_tokens = TokenUsage()
         mock_executor.shutdown = AsyncMock()
         mock_executor.prepare_job_workspace = AsyncMock()
+        mock_executor.warm_model_profile = AsyncMock()
         mock_executor.run_iteration = AsyncMock(
             side_effect=[
                 IterationResult(
-                    success=True,
+                    outcome=TurnOutcome.COMPLETED,
                     output="iteration 1 complete",
                     tool_calls=0,
                     transcript=[],
                 ),
                 IterationResult(
-                    success=False,
+                    outcome=TurnOutcome.FAILED,
                     output="",
                     tool_calls=0,
                     transcript=[],
@@ -732,7 +735,7 @@ class TestBuildReportPrompt:
         ks.add_iteration_summary(1, "Explored data", strapline="Data exploration")
         ks.add_iteration_summary(2, "Tested hypothesis A", strapline="Hypothesis A test")
 
-        prompt = build_report_prompt("What causes X?", ks)
+        prompt = build_report_prompt("What causes X?", ks, context_window_tokens=131072)
 
         # All 5 finding TITLES should appear (outline omits evidence strings)
         for i in range(5):
@@ -759,7 +762,7 @@ class TestBuildReportPrompt:
         ks.add_literature(
             "12345678", "A Relevant Paper", "This study demonstrates that X causes Y."
         )
-        prompt = build_report_prompt("What causes X?", ks)
+        prompt = build_report_prompt("What causes X?", ks, context_window_tokens=131072)
 
         # Abstract should flow through to the report prompt for citation grounding
         assert "This study demonstrates that X causes Y." in prompt
@@ -770,7 +773,7 @@ class TestBuildReportPrompt:
         from openscientist.orchestrator.iteration import build_report_prompt
 
         ks = KnowledgeState("j1", "What causes X?", 10)
-        prompt = build_report_prompt("What causes X?", ks)
+        prompt = build_report_prompt("What causes X?", ks, context_window_tokens=131072)
         assert "do not infer paper content from titles alone" in prompt
 
     def test_report_prompt_names_the_file_write_tool(self):
@@ -783,10 +786,14 @@ class TestBuildReportPrompt:
         )
 
         ks = KnowledgeState("j1", "What causes X?", 10)
-        prompt = build_report_prompt("What causes X?", ks, file_write_tool="apply_patch")
+        prompt = build_report_prompt(
+            "What causes X?", ks, file_write_tool="apply_patch", context_window_tokens=131072
+        )
         assert "`apply_patch`" in prompt
         assert "your file-writing tool" not in prompt
-        retry = build_report_retry_prompt("What causes X?", ks, file_write_tool="apply_patch")
+        retry = build_report_retry_prompt(
+            "What causes X?", ks, file_write_tool="apply_patch", context_window_tokens=131072
+        )
         assert "`apply_patch`" in retry
 
     def test_report_prompt_has_citation_snippet_instruction(self):
@@ -794,7 +801,7 @@ class TestBuildReportPrompt:
         from openscientist.orchestrator.iteration import build_report_prompt
 
         ks = KnowledgeState("j1", "What causes X?", 10)
-        prompt = build_report_prompt("What causes X?", ks)
+        prompt = build_report_prompt("What causes X?", ks, context_window_tokens=131072)
         assert "use the provided citation snippets" in prompt
 
     def test_report_prompt_includes_finding_citations(self):
@@ -814,7 +821,7 @@ class TestBuildReportPrompt:
                 }
             ],
         )
-        prompt = build_report_prompt("What causes X?", ks)
+        prompt = build_report_prompt("What causes X?", ks, context_window_tokens=131072)
         assert "PMID:99999999" in prompt
         assert "significant correlation was found" in prompt
 
@@ -827,6 +834,7 @@ class TestBuildReportPrompt:
             "What causes X?",
             ks,
             description="Emphasize validated clinical endpoints.",
+            context_window_tokens=131072,
         )
         assert "Additional job context" in prompt
         assert "Emphasize validated clinical endpoints." in prompt
@@ -942,7 +950,7 @@ class TestBuildInitialPrompt:
 
     def test_frames_set_status_as_not_progress(self):
         # The model used to stall after the "REQUIRED first call set_status"
-        # framing; the prompt must now make clear a status is not progress and
+        # framing. The prompt must now make clear a status is not progress and
         # the iteration is not complete without real analysis.
         from openscientist.knowledge_state import KnowledgeState
         from openscientist.orchestrator.iteration import build_initial_prompt
@@ -1025,7 +1033,7 @@ class TestBuildIterationPrompt:
 
 class TestReportGenerationPhase:
     """Report and consensus turns, each with bounded retries (the model writes
-    each deliverable itself; the job fails honestly only if attempts run out)."""
+    each deliverable itself, and the job fails honestly only if attempts run out)."""
 
     def test_prompts_are_focused(self):
         from openscientist.orchestrator.iteration import (
@@ -1050,8 +1058,12 @@ class TestReportGenerationPhase:
         )
 
         ks = KnowledgeState("j", "What causes X?", 3)
-        retry = build_report_retry_prompt("What causes X?", ks, job_dir=tmp_path)
-        base = build_report_prompt("What causes X?", ks, job_dir=tmp_path)
+        retry = build_report_retry_prompt(
+            "What causes X?", ks, job_dir=tmp_path, context_window_tokens=131072
+        )
+        base = build_report_prompt(
+            "What causes X?", ks, job_dir=tmp_path, context_window_tokens=131072
+        )
 
         # The exact write path and the research question both survive.
         report_path = str(tmp_path.resolve() / "final_report.md")
@@ -1070,9 +1082,15 @@ class TestReportGenerationPhase:
 
         async def fake_run(prompt: str, *, reset_session: bool = False) -> IterationResult:
             record.append((prompt, reset_session))
-            return IterationResult(success=True, output="", tool_calls=0, transcript=[])
+            return IterationResult(
+                outcome=TurnOutcome.COMPLETED, output="", tool_calls=0, transcript=[]
+            )
 
-        return SimpleNamespace(run_iteration=fake_run, file_write_tool="Write")
+        return SimpleNamespace(
+            run_iteration=fake_run,
+            file_write_tool="Write",
+            model_profile=SimpleNamespace(context_window_tokens=131072),
+        )
 
     @pytest.mark.asyncio
     async def test_report_turn_succeeds_first_attempt(self, tmp_path: Path):
@@ -1115,7 +1133,7 @@ class TestReportGenerationPhase:
                 None,
             )
         assert ok is True
-        # The full prompt, then a focused retry — both continue the same session.
+        # The full prompt, then a focused retry, both continue the same session.
         assert calls == [("FULL", False), ("RETRY", False)]
 
     @pytest.mark.asyncio
@@ -1153,11 +1171,17 @@ class TestReportGenerationPhase:
             calls.append(prompt)
             if len(calls) == 2:  # model records it on the second attempt
                 ks.data["consensus_answer"] = "A"
-            return IterationResult(success=True, output="", tool_calls=0, transcript=[])
+            return IterationResult(
+                outcome=TurnOutcome.COMPLETED, output="", tool_calls=0, transcript=[]
+            )
 
         with patch.object(discovery.KnowledgeState, "load_from_database_sync", return_value=ks):
             await discovery._set_consensus_answer(
-                SimpleNamespace(run_iteration=fake_run, file_write_tool="Write"),  # type: ignore[arg-type]
+                SimpleNamespace(
+                    run_iteration=fake_run,
+                    file_write_tool="Write",
+                    model_profile=SimpleNamespace(context_window_tokens=131072),
+                ),  # type: ignore[arg-type]
                 tmp_path,
                 "Q?",
             )
@@ -1174,7 +1198,9 @@ class TestReportGenerationPhase:
         ks.data["consensus_answer"] = "A"
 
         async def fake_run(prompt: str, *, reset_session: bool = False) -> IterationResult:
-            return IterationResult(success=True, output="", tool_calls=0, transcript=[])
+            return IterationResult(
+                outcome=TurnOutcome.COMPLETED, output="", tool_calls=0, transcript=[]
+            )
 
         with (
             patch.object(discovery.KnowledgeState, "load_from_database_sync", return_value=ks),
@@ -1184,7 +1210,11 @@ class TestReportGenerationPhase:
             patch.object(discovery, "_try_generate_report_pdf", new=AsyncMock()) as pdf,
         ):
             outcome = await discovery._run_report_generation_phase(
-                SimpleNamespace(run_iteration=fake_run, file_write_tool="Write"),  # type: ignore[arg-type]
+                SimpleNamespace(
+                    run_iteration=fake_run,
+                    file_write_tool="Write",
+                    model_profile=SimpleNamespace(context_window_tokens=131072),
+                ),  # type: ignore[arg-type]
                 tmp_path,
                 "Q?",
             )
@@ -1202,7 +1232,9 @@ class TestReportGenerationPhase:
 
         async def fake_run(prompt: str, *, reset_session: bool = False) -> IterationResult:
             calls.append(prompt)
-            return IterationResult(success=False, output="", tool_calls=0, transcript=[], error="x")
+            return IterationResult(
+                outcome=TurnOutcome.FAILED, output="", tool_calls=0, transcript=[], error="x"
+            )
 
         with (
             patch.object(discovery.KnowledgeState, "load_from_database_sync", return_value=ks),
@@ -1212,12 +1244,16 @@ class TestReportGenerationPhase:
             patch.object(discovery, "_ensure_report_written", return_value=False),
         ):
             outcome = await discovery._run_report_generation_phase(
-                SimpleNamespace(run_iteration=fake_run, file_write_tool="Write"),  # type: ignore[arg-type]
+                SimpleNamespace(
+                    run_iteration=fake_run,
+                    file_write_tool="Write",
+                    model_profile=SimpleNamespace(context_window_tokens=131072),
+                ),  # type: ignore[arg-type]
                 tmp_path,
                 "Q?",
             )
         assert outcome.success is False
-        # Report attempted _MAX times; the consensus turn is never reached.
+        # Report attempted _MAX times, so the consensus turn is never reached.
         assert len(calls) == discovery._MAX_REPORT_ATTEMPTS
 
 
@@ -1263,7 +1299,7 @@ class TestRegenerateReportAsync:
         ):
             result = await discovery.regenerate_report_async(tmp_path)
 
-        # The discovery iterations are never re-run; only the report phase runs.
+        # The discovery iterations are never re-run, only the report phase runs.
         loop.assert_not_awaited()
         report_phase.assert_awaited_once()
         # The executor is always finalized (cost record + shutdown).
@@ -1311,7 +1347,9 @@ class TestEnsureReportWritten:
     def _result():
         from openscientist.agent.base import IterationResult
 
-        return IterationResult(success=True, output="", tool_calls=0, transcript=[])
+        return IterationResult(
+            outcome=TurnOutcome.COMPLETED, output="", tool_calls=0, transcript=[]
+        )
 
     def test_missing_file_is_not_written(self, tmp_path: Path):
         from openscientist.orchestrator.discovery import _ensure_report_written
@@ -1359,7 +1397,6 @@ class TestReportAbstractBudget:
     """The literature budget must scale with the model's context window."""
 
     def test_budget_scales_with_context_and_has_a_floor(self):
-        from openscientist.models import ModelProfile
         from openscientist.orchestrator.iteration import (
             _REPORT_PROMPT_CHARS_PER_TOKEN,
             _REPORT_PROMPT_MIN_ABSTRACT_CHARS,
@@ -1367,18 +1404,12 @@ class TestReportAbstractBudget:
             _report_abstract_budget_chars,
         )
 
-        def budget_for(ctx: int) -> int:
-            with patch(
-                "openscientist.models.resolve_model_profile",
-                return_value=ModelProfile(id="m", context_window_tokens=ctx),
-            ):
-                return _report_abstract_budget_chars()
-
-        big, small = budget_for(131072), budget_for(16384)
+        big = _report_abstract_budget_chars(131072)
+        small = _report_abstract_budget_chars(16384)
         assert big > small
         assert big == int((131072 - _REPORT_PROMPT_RESERVE_TOKENS) * _REPORT_PROMPT_CHARS_PER_TOKEN)
         # A context smaller than the reserve clamps to the floor, never negative.
-        assert budget_for(1000) == _REPORT_PROMPT_MIN_ABSTRACT_CHARS
+        assert _report_abstract_budget_chars(1000) == _REPORT_PROMPT_MIN_ABSTRACT_CHARS
 
 
 class TestRunReportTurnIntegration:
@@ -1398,10 +1429,18 @@ class TestRunReportTurnIntegration:
                     "# Final Report\n\n" + "body " * 60, encoding="utf-8"
                 )
             return IterationResult(
-                success=True, output="printed, not written", tool_calls=1, transcript=[]
+                outcome=TurnOutcome.COMPLETED,
+                output="printed, not written",
+                tool_calls=1,
+                transcript=[],
             )
 
-        return SimpleNamespace(run_iteration=run, file_write_tool="Write", calls=calls)
+        return SimpleNamespace(
+            run_iteration=run,
+            file_write_tool="Write",
+            calls=calls,
+            model_profile=SimpleNamespace(context_window_tokens=131072),
+        )
 
     @pytest.mark.asyncio
     async def test_succeeds_when_model_writes_on_first_attempt(self, tmp_path: Path):
@@ -1444,3 +1483,68 @@ class TestRunReportTurnIntegration:
         ex = self._executor(tmp_path, set())  # model never writes a fresh one
         _, ok = await _run_report_turn(ex, tmp_path, "Q?", KnowledgeState("j", "Q?", 3), None)  # type: ignore[arg-type]
         assert ok is False
+
+
+class TestTurnOutcomePolicy:
+    """The discovery loop interprets a turn's outcome: FAILED aborts the run,
+    TIMED_OUT advances but is recorded, COMPLETED proceeds."""
+
+    @staticmethod
+    def _result(outcome: TurnOutcome, tool_calls: int = 0):
+        from openscientist.agent.base import IterationResult
+
+        return IterationResult(
+            outcome=outcome,
+            output="",
+            tool_calls=tool_calls,
+            transcript=[],
+            error="boom" if outcome is TurnOutcome.FAILED else "",
+        )
+
+    def test_failed_turn_aborts_the_run(self):
+        from openscientist.orchestrator.discovery import _check_turn_outcome
+
+        with pytest.raises(RuntimeError, match="Iteration 3 failed"):
+            _check_turn_outcome(self._result(TurnOutcome.FAILED), 3)
+
+    def test_timed_out_turn_advances(self):
+        from openscientist.orchestrator.discovery import _check_turn_outcome
+
+        # Must NOT raise: a wall-clock timeout advances the loop (work before the
+        # cut is persisted), unlike a failure.
+        _check_turn_outcome(self._result(TurnOutcome.TIMED_OUT, tool_calls=2), 2)
+
+    def test_completed_turn_advances(self):
+        from openscientist.orchestrator.discovery import _check_turn_outcome
+
+        _check_turn_outcome(self._result(TurnOutcome.COMPLETED), 1)
+
+    def test_append_log_records_timeout(self, tmp_path: Path):
+        from openscientist.orchestrator.discovery import _append_log
+
+        log = tmp_path / "log.txt"
+        _append_log(log, 2, "prompt", "output", 0, write=True, timed_out=True)
+        assert "Timed out: yes" in log.read_text()
+
+    def test_append_log_omits_timeout_line_when_not_timed_out(self, tmp_path: Path):
+        from openscientist.orchestrator.discovery import _append_log
+
+        log = tmp_path / "log.txt"
+        _append_log(log, 1, "prompt", "output", 1, write=True)
+        assert "Timed out" not in log.read_text()
+
+    def test_artifacts_record_timeout_from_outcome(self, tmp_path: Path):
+        from openscientist.orchestrator.discovery import _append_iteration_artifacts
+
+        provenance = tmp_path / "prov"
+        provenance.mkdir()
+        log = tmp_path / "log.txt"
+        _append_iteration_artifacts(
+            provenance_dir=provenance,
+            log_file=log,
+            iteration=4,
+            prompt="p",
+            result=self._result(TurnOutcome.TIMED_OUT),
+            overwrite_log=True,
+        )
+        assert "Timed out: yes" in log.read_text()
