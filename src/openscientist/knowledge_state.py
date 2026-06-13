@@ -25,15 +25,10 @@ from openscientist.database.session import AsyncSessionLocal
 KS_FILENAME = "knowledge_state.json"
 
 # Bound the literature abstracts dumped into the report-generation prompt.
-# Full abstracts ground citations, but a job that searched broadly can collect
-# dozens of papers; dumping every uncited paper's full abstract has produced
-# report prompts over 170 KB (~40K tokens) that overflow a model's context
-# window, at which point the tool definitions fall out of context and the model
-# stops emitting the file-write call (the report is never written). The caller
-# passes a budget derived from the model's actual context window, so abstracts
-# are included in full until that budget is reached and the rest are omitted
-# with a note (cited papers are grounded by their per-finding snippets anyway).
-# This default applies only when no budget is supplied.
+# Dumping every abstract has overflowed the model's context window, dropping the
+# tool definitions so the file-write call is never emitted. The caller passes a
+# budget from the model's context window and abstracts fill it until exhausted,
+# the rest omitted with a note. This default applies only when no budget is given.
 _DEFAULT_REPORT_ABSTRACT_BUDGET_CHARS = 8000
 
 

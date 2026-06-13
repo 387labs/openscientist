@@ -66,11 +66,6 @@ def agent_class_for_provider_id(provider_id: str) -> type[AbstractAgent[Any]]:
     return _agent_class_for_provider_class(cls)
 
 
-def backend_for_provider(provider: Provider) -> AgentBackend:
-    """The agent backend that drives a provider instance."""
-    return agent_class_for_provider(provider).backend
-
-
 def backend_for_provider_id(provider_id: str) -> AgentBackend:
     """The agent backend for a provider id without instantiating it (UI)."""
     return agent_class_for_provider_id(provider_id).backend
@@ -91,7 +86,7 @@ def build_agent(config: AgentConfig, provider: Provider) -> AbstractAgent[Provid
 def get_agent(config: AgentConfig) -> AbstractAgent[Provider]:
     """Return the agent for the configured provider.
 
-    The active provider is selected by `settings.provider.provider_id`; its
+    The active provider is selected by `settings.provider.provider_id`, and its
     compatibility family chooses the agent class.
     """
     return build_agent(config, _instantiate_provider(get_settings().provider.provider_id))

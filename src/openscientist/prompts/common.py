@@ -565,7 +565,7 @@ def substitute_fragments(doc: str, frags: BackendFragments) -> str:
     """Swap the backend-divergent phrases in a Claude-authored doc.
 
     For the Claude fragments these are identity substitutions, so a
-    Claude-authored body is unchanged; for codex they drop the ``search_skills``
+    Claude-authored body is unchanged. For codex they drop the ``search_skills``
     tool, the ``.claude/skills/`` path, and the ``Read`` tool name. Skill-
     discovery sentinels are filled first so the codex case drops the
     ``.claude/skills/`` reference inside the ``search_skills`` block entirely.
@@ -583,7 +583,7 @@ def substitute_fragments(doc: str, frags: BackendFragments) -> str:
 def read_chat_template() -> str:
     """Read the packaged ``CHAT_CLAUDE.md`` job-chat guidance template.
 
-    The template is authored in Claude vocabulary; ``render_chat_context``
+    The template is authored in Claude vocabulary, and ``render_chat_context``
     applies the backend fragments to it.
     """
     return (

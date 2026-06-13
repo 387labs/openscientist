@@ -69,7 +69,7 @@ class JobContainerRunner:
         }
         # Only set the run-mode override when it diverges from the default so
         # ordinary discovery launches keep a clean env. The entrypoint reads
-        # OPENSCIENTIST_RUN_MODE; "report_only" re-runs just the report phase.
+        # OPENSCIENTIST_RUN_MODE. "report_only" re-runs just the report phase.
         if run_mode != "discovery":
             env["OPENSCIENTIST_RUN_MODE"] = run_mode
         # Forward the per-turn Codex timeout so the agent (CodexAgent reads
@@ -196,7 +196,7 @@ class JobContainerRunner:
         # path.  Docker requires absolute paths for bind mounts; relative paths
         # are misinterpreted as named volumes.
         job_dir_resolved = job_dir.resolve()
-        # Host-side, pre-launch prep is the agent backend's own concern; ask the
+        # Host-side, pre-launch prep is the agent backend's own concern. Ask the
         # backend class for the configured provider (no agent instance here).
         from openscientist.agent.factory import agent_class_for_provider_id
 

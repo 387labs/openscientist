@@ -290,12 +290,9 @@ Important: You are discussing published research and scientific literature. You 
 
 Be concise, accurate, and cite specific papers or findings when relevant. Focus on what the research literature indicates."""
 
-    # Build the prompt. Structure matters more than wording here: the findings
-    # corpus is framed as background reference (not the thing to recite), long
-    # prior assistant turns are truncated so a past report dump does not few-shot
-    # the model into repeating it, and the live user message is labelled and
-    # framed LAST so the model answers it instead of continuing the findings
-    # document.
+    # Prompt structure matters more than wording: findings are framed as
+    # background reference, long prior turns are truncated so an old report dump
+    # does not few-shot a repeat, and the live user message comes LAST.
     prompt_parts = []
 
     job_context = await load_job_context(str(job_id))
@@ -333,17 +330,10 @@ Be concise, accurate, and cite specific papers or findings when relevant. Focus 
         len(system_prompt),
     )
 
-    # All backend-specific chat prep flows through the shared AbstractAgent
-    # contract (no isinstance here). The backend is the provider's family, so
-    # the prompt + model override are computed from the agent class up front
-    # and the executor is built once:
-    #  - chat_system_prompt: codex folds the fragment-substituted chat guidance
-    #    into the system prompt (so it is not told to use Claude's Read tool);
-    #    Claude returns the base prompt and delivers guidance via .claude/CLAUDE.md.
-    #  - chat_model_override: Claude's ANTHROPIC_CHAT_MODEL escape hatch (route
-    #    chat to a different model than discovery); None for codex.
-    #  - apply_runtime_environment: Claude auth/routing flags; no-op for codex.
-    #  - write_chat_context: Claude writes .claude/CLAUDE.md; no-op for codex.
+    # Backend-specific chat prep flows through the AbstractAgent contract, not
+    # isinstance: the agent class (from the provider) supplies the system prompt
+    # and model override, then the executor applies its own auth and context
+    # setup (no-ops on codex).
     provider = get_provider()
     agent_cls = agent_class_for_provider(provider)
     config = AgentConfig(

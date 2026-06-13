@@ -2,7 +2,7 @@
 
 Each backend materialises the enabled skills in its own on-disk layout from
 its ``prepare_job_workspace``: Claude writes ``.claude/CLAUDE.md`` plus
-``.claude/skills/*.md``; codex writes native ``.agents/skills/*/SKILL.md``
+``.claude/skills/*.md``. Codex writes native ``.agents/skills/*/SKILL.md``
 files it auto-discovers. These live in the agent layer (not the orchestrator)
 so the agents do not depend back on ``orchestrator.discovery``.
 """

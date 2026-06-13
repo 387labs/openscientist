@@ -15,7 +15,7 @@ from openscientist.settings import get_settings
 
 # The single provider registry: id -> (module, class name). Dotted paths keep
 # provider SDK dependencies optional (imported on demand) and avoid importing
-# the agent layer here; the agent factory derives from this, so there is no
+# the agent layer here. The agent factory derives from this, so there is no
 # second registry to keep in sync.
 _PROVIDER_CLASS_PATHS: dict[str, tuple[str, str]] = {
     "anthropic": ("openscientist.providers.anthropic", "AnthropicProvider"),
@@ -57,16 +57,17 @@ def get_provider() -> Provider:
     Get the configured provider based on environment.
 
     Returns:
-        Provider instance (Anthropic/CBORG/Vertex/Bedrock/Foundry, all
-        ClaudeCompatible, or OpenAI, which is CodexCompatible)
+        Provider instance. Anthropic/CBORG/Vertex/Bedrock/Foundry are
+        ClaudeCompatible, OpenAI/Azure-OpenAI/Ollama are CodexCompatible.
 
     Raises:
         ValueError: If provider is unknown or misconfigured
 
     Environment:
         OPENSCIENTIST_PROVIDER: Provider name ("anthropic", "cborg", "vertex",
-                               "bedrock", "foundry", "openai"). Defaults to
-                               "anthropic" if not set.
+                               "bedrock", "foundry", "openai", "azure-openai",
+                               "ollama"). Required: an unset value raises at
+                               startup.
     """
     return provider_class(get_settings().provider.provider_id)()
 

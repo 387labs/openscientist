@@ -10,11 +10,12 @@ Required environment variables:
   JOB_ID      — UUID of the job to run
   JOB_DIR     — Path to the job directory (mounted volume, default /agent/job)
   DATABASE_URL — PostgreSQL connection string (for status updates and KS sync)
-  CLAUDE_PROVIDER / ANTHROPIC_API_KEY / etc. — provider credentials
+  OPENSCIENTIST_PROVIDER / ANTHROPIC_API_KEY / etc. - provider credentials
 
 The container:
 1. Calls run_discovery_async(job_dir) from orchestrator/discovery.py
-2. The discovery loop uses SDKAgentExecutor (CLAUDE_PROVIDER=anthropic)
+2. The discovery loop builds the agent via the provider/agent factory
+   (OPENSCIENTIST_PROVIDER selects the backend)
 3. Status is written to PostgreSQL; the web server reads it from there
 4. On completion (success or failure), the process exits with code 0 or 1
 """
@@ -39,7 +40,7 @@ async def main() -> int:
     job_id = os.environ.get("JOB_ID")  # noqa: env-ok
     job_dir_str = os.environ.get("JOB_DIR", "/agent/job")  # noqa: env-ok
     # "report_only" re-runs just the report-generation phase against the
-    # already-persisted findings (admin "Regenerate report"); default is the
+    # already-persisted findings (admin "Regenerate report"). Default is the
     # full discovery loop.
     run_mode = os.environ.get("OPENSCIENTIST_RUN_MODE", "discovery")  # noqa: env-ok
 
