@@ -274,6 +274,73 @@ class TestJobManagerListAndGet:
             assert manager.get_job(str(uuid4())) is None
 
 
+class TestJobManagerRegenerateReport:
+    """Tests for the admin report-regeneration path."""
+
+    @pytest.fixture(autouse=True)
+    def _mock_ks_progress(self):
+        with patch(
+            "openscientist.job_manager._load_progress_from_knowledge_state",
+            return_value=(0, 0),
+        ):
+            yield
+
+    @pytest.fixture
+    def manager(self, tmp_path) -> JobManager:
+        return _new_manager(tmp_path)
+
+    def test_missing_job_raises(self, manager):
+        with patch(
+            "openscientist.job_manager._db_get_job", new_callable=AsyncMock, return_value=None
+        ):
+            with pytest.raises(ValueError, match="not found"):
+                manager.regenerate_report(str(uuid4()))
+
+    def test_non_completed_raises(self, manager):
+        db_job = _make_db_job("running", "2026-02-01T00:00:00")
+        with patch(
+            "openscientist.job_manager._db_get_job", new_callable=AsyncMock, return_value=db_job
+        ):
+            with pytest.raises(ValueError, match="not completed"):
+                manager.regenerate_report(str(db_job.id))
+
+    def test_already_running_raises(self, manager):
+        db_job = _make_db_job("completed", "2026-02-01T00:00:00")
+        manager._running_jobs[str(db_job.id)] = MagicMock()
+        with patch(
+            "openscientist.job_manager._db_get_job", new_callable=AsyncMock, return_value=db_job
+        ):
+            with pytest.raises(ValueError, match="already running"):
+                manager.regenerate_report(str(db_job.id))
+
+    def test_launches_in_report_only_mode(self, manager):
+        """A completed job spawns a worker thread that runs the container in
+        report-only mode and is tracked as running."""
+        db_job = _make_db_job("completed", "2026-02-01T00:00:00")
+        job_id = str(db_job.id)
+        fake_thread = MagicMock()
+
+        with (
+            patch(
+                "openscientist.job_manager._db_get_job",
+                new_callable=AsyncMock,
+                return_value=db_job,
+            ),
+            patch(
+                "openscientist.job_manager.threading.Thread", return_value=fake_thread
+            ) as mock_thread,
+        ):
+            manager.regenerate_report(job_id)
+
+        assert manager._running_jobs[job_id] is fake_thread
+        fake_thread.start.assert_called_once()
+        # The worker targets _run_job in report-only mode (no discovery loop).
+        kwargs = mock_thread.call_args.kwargs
+        assert kwargs["target"] == manager._run_job
+        assert kwargs["args"] == (job_id,)
+        assert kwargs["kwargs"] == {"run_mode": "report_only"}
+
+
 class TestJobManagerDelete:
     """Tests for job deletion."""
 
@@ -755,3 +822,53 @@ class TestJobManagerCLI:
         )
         stdout = capsys.readouterr().out
         assert '"created_jobs": 1' in stdout
+
+
+class TestEffectiveModel:
+    """`_effective_model` records the model the active provider will actually
+    use, so the job can show a model badge."""
+
+    @staticmethod
+    def _settings(
+        model: str | None = None, anthropic_default: str | None = None
+    ) -> SimpleNamespace:
+        return SimpleNamespace(
+            provider=SimpleNamespace(
+                model=model,
+                anthropic_default_sonnet_model=anthropic_default,
+            )
+        )
+
+    def test_explicit_model_wins(self) -> None:
+        from openscientist.job_manager import _effective_model
+
+        assert _effective_model(self._settings(model="gpt-5")) == "gpt-5"
+
+    def test_anthropic_default_used(self) -> None:
+        from openscientist.job_manager import _effective_model
+
+        assert _effective_model(self._settings(anthropic_default="claude-x")) == "claude-x"
+
+    def test_codex_provider_model_resolved_when_unset(self) -> None:
+        """Codex providers carry the model in provider config (e.g. OLLAMA_MODEL),
+        so it is resolved from the provider rather than OPENSCIENTIST_MODEL."""
+        from openscientist.job_manager import _effective_model
+        from tests.helpers import StubCodexProvider
+
+        with patch("openscientist.job_manager.get_provider", return_value=StubCodexProvider()):
+            assert _effective_model(self._settings()) == "stub-codex-model"
+
+    def test_claude_provider_model_resolved_when_unset(self) -> None:
+        from openscientist.job_manager import _effective_model
+        from tests.helpers import StubClaudeProvider
+
+        with patch("openscientist.job_manager.get_provider", return_value=StubClaudeProvider()):
+            assert _effective_model(self._settings()) is not None
+
+    def test_returns_none_when_provider_unavailable(self) -> None:
+        from openscientist.job_manager import _effective_model
+
+        with patch(
+            "openscientist.job_manager.get_provider", side_effect=ValueError("misconfigured")
+        ):
+            assert _effective_model(self._settings()) is None

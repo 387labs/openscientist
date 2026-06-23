@@ -43,9 +43,12 @@ class ProviderSettings(BaseSettings):
 
     # Provider selection
     provider_id: str = Field(
-        default="anthropic",
+        default="",
         alias="OPENSCIENTIST_PROVIDER",
-        description="Provider id (anthropic, cborg, vertex, bedrock, foundry, openai, azure-openai).",
+        description=(
+            "Provider id (anthropic, cborg, vertex, bedrock, foundry, openai, "
+            "azure-openai, ollama). Required: there is no default provider."
+        ),
     )
 
     # GitHub token for skill syncing
@@ -77,8 +80,23 @@ class ProviderSettings(BaseSettings):
         default=10, alias="AZURE_OPENAI_STREAM_MAX_RETRIES"
     )
 
+    # Ollama (Codex agent backend, open-weight models served locally through
+    # Ollama's OpenAI-compatible Responses endpoint). Local and keyless, so
+    # codex is told the provider needs no OpenAI auth.
+    ollama_base_url: str = Field(default="http://localhost:11434/v1", alias="OLLAMA_BASE_URL")
+    ollama_model: str = Field(default="gpt-oss:20b", alias="OLLAMA_MODEL")
+
     # Model settings
     model: str | None = Field(default=None, alias="OPENSCIENTIST_MODEL")
+    model_context_tokens: int | None = Field(
+        default=None,
+        alias="OPENSCIENTIST_MODEL_CONTEXT_TOKENS",
+        description=(
+            "Override the model's usable context window (tokens) used to budget "
+            "prompt size. When unset, the window is probed (Ollama) or looked up "
+            "for known API models, falling back to a conservative default."
+        ),
+    )
     anthropic_chat_model: str | None = Field(
         default=None,
         alias="ANTHROPIC_CHAT_MODEL",
@@ -223,7 +241,8 @@ class ProviderSettings(BaseSettings):
     def _unknown_provider_warnings(provider: str) -> list[str]:
         return [
             f"Unknown provider '{provider}'. "
-            "Valid options: anthropic, cborg, vertex, bedrock, foundry, openai, azure-openai"
+            "Valid options: anthropic, cborg, vertex, bedrock, foundry, openai, "
+            "azure-openai, ollama"
         ]
 
     _LEGACY_ENV_VAR_RENAMES = (
@@ -246,6 +265,20 @@ class ProviderSettings(BaseSettings):
                     f"Rename the variable in your environment (and .env file) and unset "
                     f"{legacy}. The legacy name is no longer accepted."
                 )
+        return self
+
+    @model_validator(mode="after")
+    def require_provider_selected(self) -> "ProviderSettings":
+        """There is no default provider. An unset ``OPENSCIENTIST_PROVIDER`` is
+        an error so the running configuration is always explicit rather than
+        silently falling back to one vendor.
+        """
+        if not self.provider_id:
+            raise ValueError(
+                "OPENSCIENTIST_PROVIDER is not set and there is no default "
+                "provider. Set OPENSCIENTIST_PROVIDER to one of: anthropic, "
+                "cborg, vertex, bedrock, foundry, openai, azure-openai, ollama."
+            )
         return self
 
     # Per-provider model-name format. Mismatches raise at settings load so
@@ -310,6 +343,7 @@ class ProviderSettings(BaseSettings):
             "foundry": lambda: [],
             "openai": lambda: [],
             "azure-openai": lambda: [],
+            "ollama": lambda: [],
         }
         warnings = warning_builders.get(
             provider, lambda: self._unknown_provider_warnings(provider)
@@ -367,6 +401,13 @@ class ProviderSettings(BaseSettings):
         self._set_env_if_present(
             env_vars, "AZURE_OPENAI_STREAM_MAX_RETRIES", str(self.azure_openai_stream_max_retries)
         )
+
+    def _apply_ollama_env_vars(self, env_vars: dict[str, str]) -> None:
+        # Both have defaults, so they are always forwarded. The base URL must be
+        # reachable from inside the agent container (e.g. host.docker.internal
+        # rather than localhost when Ollama runs on the host).
+        env_vars["OLLAMA_BASE_URL"] = self.ollama_base_url
+        env_vars["OLLAMA_MODEL"] = self.ollama_model
 
     def _apply_vertex_env_vars(
         self,
@@ -436,6 +477,7 @@ class ProviderSettings(BaseSettings):
         self._apply_auth_env_vars(env_vars)
         self._apply_openai_env_vars(env_vars)
         self._apply_azure_openai_env_vars(env_vars)
+        self._apply_ollama_env_vars(env_vars)
         self._apply_vertex_env_vars(env_vars, gcp_credentials_container_path)
         self._apply_bedrock_env_vars(env_vars)
         self._apply_foundry_env_vars(env_vars)
@@ -664,6 +706,13 @@ class ContainerSettings(BaseSettings):
         alias="OPENSCIENTIST_AGENT_PLATFORM",
         description="Docker platform for agent containers (e.g. linux/amd64). "
         "Set to linux/amd64 on Apple Silicon to run x86_64 Phenix via Rosetta.",
+    )
+    agent_timeout: int = Field(
+        default=4 * 3600,
+        alias="OPENSCIENTIST_AGENT_TIMEOUT",
+        description="Wall-clock seconds before a running job container is failed as timed out. "
+        "Raise it for slow local models (e.g. large open-weight models on Ollama) that need "
+        "more than the 4-hour default to finish all iterations.",
     )
 
     # Host path mapping for sibling container volume mounts (executor containers)

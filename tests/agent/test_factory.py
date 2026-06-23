@@ -10,10 +10,10 @@ import pytest
 from openscientist.agent.base import AgentConfig
 from openscientist.agent.claude_code_agent import ClaudeCodeAgent
 from openscientist.agent.factory import (
-    _PROVIDER_REGISTRY,
     _instantiate_provider,
     get_agent,
 )
+from openscientist.providers import provider_class, provider_ids
 from openscientist.providers.anthropic import AnthropicProvider
 from openscientist.providers.base import CostInfo, Provider
 from tests.helpers import StubClaudeProvider as _ClaudeStub
@@ -43,8 +43,8 @@ class _FamilylessProvider(Provider):
 
 
 def test_registry_maps_known_ids() -> None:
-    assert _PROVIDER_REGISTRY["anthropic"] is AnthropicProvider
-    assert set(_PROVIDER_REGISTRY) == {
+    assert provider_class("anthropic") is AnthropicProvider
+    assert set(provider_ids()) == {
         "anthropic",
         "cborg",
         "vertex",
@@ -52,6 +52,7 @@ def test_registry_maps_known_ids() -> None:
         "foundry",
         "openai",
         "azure-openai",
+        "ollama",
     }
 
 
@@ -87,7 +88,7 @@ def test_get_agent_returns_codex_agent(tmp_path: Path) -> None:
 def test_openai_registered_for_codex() -> None:
     from openscientist.providers.openai import OpenAIDirectProvider
 
-    assert _PROVIDER_REGISTRY["openai"] is OpenAIDirectProvider
+    assert provider_class("openai") is OpenAIDirectProvider
 
 
 def test_factory_imports_without_codex_sdk() -> None:
@@ -104,7 +105,7 @@ def test_factory_imports_without_codex_sdk() -> None:
         import builtins
         _orig = builtins.__import__
         def _blocked(name, *a, **k):
-            if name == "openai_codex_sdk" or name.startswith("openai_codex_sdk."):
+            if name == "openai_codex" or name.startswith("openai_codex."):
                 raise ModuleNotFoundError("blocked for test")
             return _orig(name, *a, **k)
         builtins.__import__ = _blocked

@@ -524,6 +524,24 @@ class TestStatsBadgesHypotheses:
         assert self._badge_value(badges, "Provider") == "Azure OpenAI"
         assert self._get_badge(badges, "Model") is None
 
+    def test_ollama_job_shows_codex_and_ollama_provider(self) -> None:
+        from openscientist.webapp_components.pages.job_detail import _stats_badges
+
+        badges = _stats_badges(self._make_job(llm_provider="ollama"), lit_count=0)
+        assert self._badge_value(badges, "Agent") == "Codex"
+        assert self._badge_value(badges, "Provider") == "Ollama (local)"
+
+    def test_ollama_job_with_model_shows_provider_and_model(self) -> None:
+        from openscientist.webapp_components.pages.job_detail import _stats_badges
+
+        badges = _stats_badges(
+            self._make_job(llm_provider="ollama", llm_model="gpt-oss:20b"), lit_count=0
+        )
+        # Provider (where it is hosted) and model (which one ran) appear together.
+        assert self._badge_value(badges, "Agent") == "Codex"
+        assert self._badge_value(badges, "Provider") == "Ollama (local)"
+        assert self._badge_value(badges, "Model") == "gpt-oss:20b"
+
     def test_claude_job_shows_agent_and_model(self) -> None:
         from openscientist.webapp_components.pages.job_detail import _stats_badges
 
@@ -533,7 +551,8 @@ class TestStatsBadgesHypotheses:
         )
         assert self._badge_value(badges, "Agent") == "Claude Code"
         assert self._badge_value(badges, "Model") == "Claude Sonnet 4.5"
-        assert self._get_badge(badges, "Provider") is None
+        # Provider and model are independent badges shown together.
+        assert self._badge_value(badges, "Provider") == "Anthropic"
 
     def test_no_provider_omits_agent_badge(self) -> None:
         from openscientist.webapp_components.pages.job_detail import _stats_badges
@@ -907,10 +926,7 @@ class TestEndToEndHypothesesFlow:
         """_build_agent_executor(use_hypotheses=True) puts it on the AgentConfig."""
         from openscientist.orchestrator.discovery import _build_agent_executor
 
-        with (
-            patch("openscientist.orchestrator.discovery.get_agent") as mock_get_agent,
-            patch("openscientist.orchestrator.discovery.get_system_prompt", return_value="prompt"),
-        ):
+        with patch("openscientist.orchestrator.discovery.get_agent") as mock_get_agent:
             _build_agent_executor(
                 job_dir=tmp_path,
                 data_file=None,
@@ -922,10 +938,7 @@ class TestEndToEndHypothesesFlow:
     async def test_build_agent_executor_false_passes_false(self, tmp_path: Path) -> None:
         from openscientist.orchestrator.discovery import _build_agent_executor
 
-        with (
-            patch("openscientist.orchestrator.discovery.get_agent") as mock_get_agent,
-            patch("openscientist.orchestrator.discovery.get_system_prompt", return_value="prompt"),
-        ):
+        with patch("openscientist.orchestrator.discovery.get_agent") as mock_get_agent:
             _build_agent_executor(
                 job_dir=tmp_path,
                 data_file=None,
@@ -934,24 +947,18 @@ class TestEndToEndHypothesesFlow:
             config = mock_get_agent.call_args[0][0]
             assert config.use_hypotheses is False
 
-    async def test_build_agent_executor_codex_uses_agents_doc(self, tmp_path: Path) -> None:
-        """For the Codex backend the system prompt is the full AGENTS.md doc
-        (no .claude/ vocabulary), not the concise Claude system prompt."""
-        from openscientist.orchestrator.discovery import _build_agent_executor
+    async def test_codex_discovery_system_prompt_uses_agents_doc(self) -> None:
+        """For the Codex backend the discovery system prompt is the full
+        AGENTS.md doc (no .claude/ vocabulary), not the concise Claude prompt.
+        Backend dispatch lives on the agent class, so assert it there."""
+        from openscientist.agent.codex_agent import CodexAgent
 
-        with patch("openscientist.orchestrator.discovery.get_agent") as mock_get_agent:
-            _build_agent_executor(
-                job_dir=tmp_path,
-                data_file=None,
-                agent_backend="codex",
-                use_hypotheses=True,
-            )
-            config = mock_get_agent.call_args[0][0]
-            assert ".claude/" not in config.system_prompt
-            assert "Claude's" not in config.system_prompt
-            # the rich doc body is present (a hypothesis tool, a core tool)
-            assert "add_hypothesis" in config.system_prompt
-            assert "save_iteration_summary" in config.system_prompt
+        prompt = CodexAgent.discovery_system_prompt(use_hypotheses=True, phenix_available=True)
+        assert ".claude/" not in prompt
+        assert "Claude's" not in prompt
+        # the rich doc body is present (a hypothesis tool, a core tool)
+        assert "add_hypothesis" in prompt
+        assert "save_iteration_summary" in prompt
 
 
 # ---------------------------------------------------------------------------
@@ -1071,13 +1078,13 @@ class TestWriteSkillsToClaudeDirJobClaudeMd:
     """_write_skills_to_claude_dir writes the correct CLAUDE.md based on use_hypotheses."""
 
     async def test_writes_job_claude_md_with_hypotheses(self, tmp_path: Path) -> None:
-        from openscientist.orchestrator.discovery import _write_skills_to_claude_dir
+        from openscientist.agent.skills import write_skills_to_claude_dir
 
         with patch(
-            "openscientist.orchestrator.discovery.AsyncSessionLocal",
+            "openscientist.agent.skills.AsyncSessionLocal",
             side_effect=Exception("no db"),
         ):
-            await _write_skills_to_claude_dir(tmp_path, use_hypotheses=True)
+            await write_skills_to_claude_dir(tmp_path, use_hypotheses=True)
 
         claude_md = (tmp_path / ".claude" / "CLAUDE.md").read_text(encoding="utf-8")
         assert "add_hypothesis" in claude_md
@@ -1085,13 +1092,13 @@ class TestWriteSkillsToClaudeDirJobClaudeMd:
         assert "Hypothesis Tracking Workflow" in claude_md
 
     async def test_writes_job_claude_md_without_hypotheses(self, tmp_path: Path) -> None:
-        from openscientist.orchestrator.discovery import _write_skills_to_claude_dir
+        from openscientist.agent.skills import write_skills_to_claude_dir
 
         with patch(
-            "openscientist.orchestrator.discovery.AsyncSessionLocal",
+            "openscientist.agent.skills.AsyncSessionLocal",
             side_effect=Exception("no db"),
         ):
-            await _write_skills_to_claude_dir(tmp_path, use_hypotheses=False)
+            await write_skills_to_claude_dir(tmp_path, use_hypotheses=False)
 
         claude_md = (tmp_path / ".claude" / "CLAUDE.md").read_text(encoding="utf-8")
         assert "add_hypothesis" not in claude_md
@@ -1099,13 +1106,13 @@ class TestWriteSkillsToClaudeDirJobClaudeMd:
         assert "execute_code" in claude_md
 
     async def test_default_use_hypotheses_is_false(self, tmp_path: Path) -> None:
-        from openscientist.orchestrator.discovery import _write_skills_to_claude_dir
+        from openscientist.agent.skills import write_skills_to_claude_dir
 
         with patch(
-            "openscientist.orchestrator.discovery.AsyncSessionLocal",
+            "openscientist.agent.skills.AsyncSessionLocal",
             side_effect=Exception("no db"),
         ):
-            await _write_skills_to_claude_dir(tmp_path)
+            await write_skills_to_claude_dir(tmp_path)
 
         claude_md = (tmp_path / ".claude" / "CLAUDE.md").read_text(encoding="utf-8")
         assert "add_hypothesis" not in claude_md

@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import logging
 import os
-import shutil
 from pathlib import Path
 from typing import Any, cast
 
@@ -56,6 +55,7 @@ class JobContainerRunner:
         *,
         job_id: str,
         job_mount: str,
+        run_mode: str = "discovery",
     ) -> dict[str, str]:
         """Build the environment variables for the agent container."""
         cs = settings.container
@@ -67,6 +67,17 @@ class JobContainerRunner:
             "OPENSCIENTIST_SECRET_KEY": settings.secret_key,
             **provider_env,
         }
+        # Only set the run-mode override when it diverges from the default so
+        # ordinary discovery launches keep a clean env. The entrypoint reads
+        # OPENSCIENTIST_RUN_MODE. "report_only" re-runs just the report phase.
+        if run_mode != "discovery":
+            env["OPENSCIENTIST_RUN_MODE"] = run_mode
+        # Forward the per-turn Codex timeout so the agent (CodexAgent reads
+        # OPENSCIENTIST_CODEX_TURN_TIMEOUT at import) can be tuned for slow
+        # local backends. Without this the agent always uses the 900s default.
+        turn_timeout = os.environ.get("OPENSCIENTIST_CODEX_TURN_TIMEOUT")
+        if turn_timeout:
+            env["OPENSCIENTIST_CODEX_TURN_TIMEOUT"] = turn_timeout
         if cs.host_project_dir:
             env["OPENSCIENTIST_HOST_PROJECT_DIR"] = cs.host_project_dir
             env["OPENSCIENTIST_CONTAINER_APP_DIR"] = AGENT_APP_DIR
@@ -126,6 +137,7 @@ class JobContainerRunner:
         *,
         job_id: str,
         job_dir_host: Path,
+        run_mode: str = "discovery",
     ) -> tuple[
         dict[str, str],
         dict[str, dict[str, str]],
@@ -140,7 +152,7 @@ class JobContainerRunner:
         )
         job_mount = f"{AGENT_APP_DIR}/jobs/{job_id}"
         env = JobContainerRunner._build_container_environment(
-            settings, job_id=job_id, job_mount=job_mount
+            settings, job_id=job_id, job_mount=job_mount, run_mode=run_mode
         )
         volumes = JobContainerRunner._build_container_volumes(
             settings, job_dir_host=job_dir_host, job_mount=job_mount
@@ -155,45 +167,19 @@ class JobContainerRunner:
             return None
         return str(os.stat(socket_path).st_gid)
 
-    @staticmethod
-    def _provision_codex_auth(settings: Settings, job_dir: Path) -> None:
-        """Place the codex CLI auth into the per-job CODEX_HOME so the
-        non-root agent (uid 1001) can read it.
-
-        Mounting the host auth file directly fails on the uid/permission
-        boundary (the host file is mode 600 owned by another user), so we
-        copy it in agent-readable. ``job_dir`` is the runner-local path to
-        the job directory (the same path ``setup.py`` writes into), not the
-        host-translated bind-mount path, so the copy works whether the web
-        server runs on the host or in a container. No-op unless
-        ``codex_auth_host_path`` is set (the API-key path needs no file).
-        """
-        src = settings.provider.codex_auth_host_path
-        if not src:
-            return
-        src_path = Path(src).expanduser()
-        if not src_path.exists():
-            logger.warning("codex_auth_host_path %s does not exist, skipping", src_path)
-            return
-        codex_home = job_dir / ".codex"
-        codex_home.mkdir(parents=True, exist_ok=True)
-        # World-writable so the agent can also write config.toml into CODEX_HOME.
-        codex_home.chmod(0o777)
-        dest = codex_home / "auth.json"
-        shutil.copy2(src_path, dest)
-        dest.chmod(0o644)
-        logger.info("Provisioned codex auth into %s", dest)
-
-    def launch(self, job_id: str, job_dir: Path) -> Any:
+    def launch(self, job_id: str, job_dir: Path, *, run_mode: str = "discovery") -> Any:
         """
         Launch an agent container for the given job.
 
         The container runs docker/agent-entrypoint.py which calls
-        run_discovery_async(job_dir).
+        run_discovery_async(job_dir), or regenerate_report_async(job_dir) when
+        run_mode is "report_only".
 
         Args:
             job_id: Job UUID string (used for container name + labels)
             job_dir: Absolute host path to the job directory
+            run_mode: "discovery" (full loop) or "report_only" (report phase
+                only, against the already-persisted findings)
 
         Returns:
             docker.models.containers.Container object
@@ -210,13 +196,20 @@ class JobContainerRunner:
         # path.  Docker requires absolute paths for bind mounts; relative paths
         # are misinterpreted as named volumes.
         job_dir_resolved = job_dir.resolve()
-        self._provision_codex_auth(settings, job_dir_resolved)
+        # Host-side, pre-launch prep is the agent backend's own concern. Ask the
+        # backend class for the configured provider (no agent instance here).
+        from openscientist.agent.factory import agent_class_for_provider_id
+
+        agent_class_for_provider_id(settings.provider.provider_id).provision_host_prelaunch(
+            settings, job_dir_resolved
+        )
         job_dir_host = to_host_path(job_dir_resolved, cs)
         env, volumes, agent_network, agent_memory, agent_cpu, agent_platform = (
             self._build_launch_configuration(
                 settings,
                 job_id=job_id,
                 job_dir_host=job_dir_host,
+                run_mode=run_mode,
             )
         )
         network = self._get_network(agent_network)
@@ -236,6 +229,11 @@ class JobContainerRunner:
             nano_cpus=int(agent_cpu * 1e9),
             platform=agent_platform or None,
             security_opt=["no-new-privileges:true"],
+            # Map host.docker.internal to the host gateway so a job can reach a
+            # model server running on the host (e.g. a local Ollama at
+            # http://host.docker.internal:11434/v1). Harmless for providers that
+            # do not use it. On Linux this is not provided by default.
+            extra_hosts={"host.docker.internal": "host-gateway"},
             group_add=[docker_gid] if docker_gid else [],
             labels={
                 "openscientist.job_id": job_id,

@@ -5,6 +5,7 @@ Tests chat message creation, conversation history, context loading,
 and executor error handling.
 """
 
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -14,12 +15,35 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from openscientist.agent.base import IterationResult
+from openscientist.agent.base import AbstractAgent, AgentConfig, IterationResult, TurnOutcome
 from openscientist.database.models import Job, JobChatMessage, User
 from openscientist.database.rls import set_current_user
 from openscientist.job_chat import get_chat_history, load_job_context, send_chat_message
+from openscientist.providers.base import Provider
 from tests.helpers import StubClaudeProvider as _ChatProvider
 from tests.helpers import enable_rls
+
+
+def _build_agent_recorder(
+    captured: dict[str, AgentConfig], result: IterationResult
+) -> Callable[[AgentConfig, Provider], AbstractAgent[Provider]]:
+    """A `factory.build_agent` replacement for chat tests.
+
+    Builds the real agent (so the backend's chat prep -- chat_system_prompt /
+    write_chat_context -- runs for real) but mocks `run_iteration`, and records
+    the `AgentConfig` the executor was built with.
+    """
+    from openscientist.agent import factory
+
+    real_build_agent = factory.build_agent
+
+    def _build(config: AgentConfig, provider: Provider) -> AbstractAgent[Provider]:
+        captured["config"] = config
+        agent = real_build_agent(config, provider)
+        agent.run_iteration = AsyncMock(return_value=result)  # type: ignore[method-assign]
+        return agent
+
+    return _build
 
 
 @pytest.mark.asyncio
@@ -453,20 +477,21 @@ async def test_send_chat_message_success(
     job_dir = temp_jobs_dir / str(test_job.id)
     job_dir.mkdir()
 
-    mock_executor = AsyncMock()
-    mock_executor.run_iteration.return_value = IterationResult(
-        success=True,
+    # get_provider drives the backend (Claude), build_agent runs for real so
+    # write_chat_context writes the chat .claude/CLAUDE.md, and only run_iteration
+    # is mocked.
+    captured: dict[str, AgentConfig] = {}
+    result = IterationResult(
+        outcome=TurnOutcome.COMPLETED,
         output="The main findings indicate...",
         tool_calls=0,
         transcript=[],
     )
 
     with (
-        patch("openscientist.agent.claude_code_agent.ClaudeCodeAgent", return_value=mock_executor),
-        patch("openscientist.providers.get_provider") as mock_get_provider,
+        patch("openscientist.providers.get_provider", return_value=_ChatProvider()),
+        patch("openscientist.agent.factory.build_agent", _build_agent_recorder(captured, result)),
     ):
-        mock_get_provider.return_value = _ChatProvider()
-
         response = await send_chat_message(
             db_session, test_job.id, "What are the main findings?", job_dir
         )
@@ -497,9 +522,9 @@ async def test_send_chat_message_raises_on_executor_failure(
     job_dir = temp_jobs_dir / str(test_job.id)
     job_dir.mkdir()
 
-    mock_executor = AsyncMock()
-    mock_executor.run_iteration.return_value = IterationResult(
-        success=False,
+    captured: dict[str, AgentConfig] = {}
+    result = IterationResult(
+        outcome=TurnOutcome.FAILED,
         output="",
         tool_calls=0,
         transcript=[],
@@ -507,11 +532,9 @@ async def test_send_chat_message_raises_on_executor_failure(
     )
 
     with (
-        patch("openscientist.agent.claude_code_agent.ClaudeCodeAgent", return_value=mock_executor),
-        patch("openscientist.providers.get_provider") as mock_get_provider,
+        patch("openscientist.providers.get_provider", return_value=_ChatProvider()),
+        patch("openscientist.agent.factory.build_agent", _build_agent_recorder(captured, result)),
     ):
-        mock_get_provider.return_value = _ChatProvider()
-
         with pytest.raises(RuntimeError, match="Process exited with code 1"):
             await send_chat_message(db_session, test_job.id, "What are the main findings?", job_dir)
 
@@ -532,20 +555,13 @@ async def test_send_chat_message_raises_generic_on_empty_error(
     job_dir = temp_jobs_dir / str(test_job.id)
     job_dir.mkdir()
 
-    mock_executor = AsyncMock()
-    mock_executor.run_iteration.return_value = IterationResult(
-        success=False,
-        output="",
-        tool_calls=0,
-        transcript=[],
-    )
+    captured: dict[str, AgentConfig] = {}
+    result = IterationResult(outcome=TurnOutcome.FAILED, output="", tool_calls=0, transcript=[])
 
     with (
-        patch("openscientist.agent.claude_code_agent.ClaudeCodeAgent", return_value=mock_executor),
-        patch("openscientist.providers.get_provider") as mock_get_provider,
+        patch("openscientist.providers.get_provider", return_value=_ChatProvider()),
+        patch("openscientist.agent.factory.build_agent", _build_agent_recorder(captured, result)),
     ):
-        mock_get_provider.return_value = _ChatProvider()
-
         with pytest.raises(RuntimeError, match="Chat executor returned no output"):
             await send_chat_message(db_session, test_job.id, "Hello", job_dir)
 
@@ -568,42 +584,79 @@ async def test_system_prompt_does_not_include_job_context(
     large_ks = KnowledgeState(str(test_job.id), "Q?", 10)
     large_ks.data["findings"] = [{"content": "x" * 50000}]
 
-    captured_system_prompt = None
-
-    class FakeExecutor:
-        def __init__(self, config, provider, *, model_override=None):
-            _ = (provider, model_override)
-            nonlocal captured_system_prompt
-            captured_system_prompt = config.system_prompt
-
-        async def run_iteration(self, prompt, *, reset_session=False):
-            _ = (prompt, reset_session)
-            return IterationResult(
-                success=True,
-                output="Response",
-                tool_calls=0,
-                transcript=[],
-            )
-
-        async def shutdown(self):
-            pass
+    captured: dict[str, AgentConfig] = {}
+    result = IterationResult(
+        outcome=TurnOutcome.COMPLETED, output="Response", tool_calls=0, transcript=[]
+    )
 
     with (
-        patch("openscientist.agent.claude_code_agent.ClaudeCodeAgent", FakeExecutor),
-        patch("openscientist.providers.get_provider") as mock_get_provider,
+        patch("openscientist.providers.get_provider", return_value=_ChatProvider()),
+        patch("openscientist.agent.factory.build_agent", _build_agent_recorder(captured, result)),
         patch(
             "openscientist.job_chat.KnowledgeState.load_from_database_sync",
             return_value=large_ks,
         ),
     ):
-        mock_get_provider.return_value = _ChatProvider()
-
         await send_chat_message(db_session, test_job.id, "Summarize findings", job_dir)
 
     # System prompt should be small — just instructions, not embedded context
+    captured_system_prompt = captured["config"].system_prompt
     assert captured_system_prompt is not None
     assert len(captured_system_prompt) < 2000
     # Should not reference deprecated knowledge_state.json file
     assert "knowledge_state.json" not in captured_system_prompt
     # Should NOT contain the large content
     assert "x" * 1000 not in captured_system_prompt
+
+
+@pytest.mark.asyncio
+async def test_send_chat_message_codex_provider(
+    db_session: AsyncSession,
+    test_user: User,
+    test_job: Job,
+    temp_jobs_dir: Path,
+):
+    """Chat works for codex-family providers (e.g. Ollama).
+
+    It must route through the factory (no Claude-only RuntimeError), fold the
+    chat guidance into the system prompt so CodexAgent delivers it via AGENTS.md,
+    and must NOT write the Claude-only .claude/CLAUDE.md.
+    """
+    _ = test_user
+    from tests.helpers import StubCodexProvider
+
+    job_dir = temp_jobs_dir / str(test_job.id)
+    job_dir.mkdir()
+
+    # get_provider drives the codex backend, build_agent runs for real, so the
+    # default chat_system_prompt folds the guidance in and write_chat_context is
+    # a no-op (no .claude/CLAUDE.md). Only run_iteration is mocked.
+    captured: dict[str, AgentConfig] = {}
+    result = IterationResult(
+        outcome=TurnOutcome.COMPLETED, output="Codex chat reply", tool_calls=0, transcript=[]
+    )
+
+    with (
+        patch("openscientist.providers.get_provider", return_value=StubCodexProvider()),
+        patch("openscientist.agent.factory.build_agent", _build_agent_recorder(captured, result)),
+    ):
+        response = await send_chat_message(
+            db_session, test_job.id, "Summarize the main findings.", job_dir
+        )
+
+    assert response == "Codex chat reply"
+    # Codex path must NOT write the Claude-only chat context file.
+    assert not (job_dir / ".claude" / "CLAUDE.md").exists()
+    # Chat guidance is folded into the system prompt (delivered via AGENTS.md).
+    config = captured["config"]
+    assert config.system_prompt is not None
+    assert "OpenScientist Job Chat Assistant" in config.system_prompt
+    # No model override on the codex path, the model comes from the provider.
+    assert config.model_override is None
+
+    # Both messages persisted.
+    history = await get_chat_history(db_session, test_job.id)
+    assert len(history) == 2
+    assert history[0].role == "user"
+    assert history[1].role == "assistant"
+    assert history[1].content == "Codex chat reply"

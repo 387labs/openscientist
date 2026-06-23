@@ -385,11 +385,47 @@ class TestProviderContainerEnvVars:
         assert env["AZURE_OPENAI_DEPLOYMENT"] == "mydep"
         assert env["AZURE_OPENAI_API_VERSION"] == "2025-04-01-preview"
 
-    def test_azure_openai_vars_omitted_when_unset(self):
+    def test_azure_openai_vars_omitted_when_unset(self, monkeypatch, tmp_path):
+        # The dev .env reaches tests via both os.environ (database.engine calls
+        # load_dotenv() at import) and the settings env_file. Neutralize both:
+        # chdir to an empty dir so env_file resolves to nothing, and drop any
+        # real Azure values already loaded into os.environ.
+        monkeypatch.chdir(tmp_path)
+        for var in (
+            "AZURE_OPENAI_API_KEY",
+            "AZURE_OPENAI_RESOURCE",
+            "AZURE_OPENAI_DEPLOYMENT",
+            "AZURE_OPENAI_API_VERSION",
+        ):
+            monkeypatch.delenv(var, raising=False)
         settings = ProviderSettings(OPENSCIENTIST_PROVIDER="azure-openai")
         env = settings.get_container_env_vars()
         assert "AZURE_OPENAI_API_KEY" not in env
         assert "AZURE_OPENAI_RESOURCE" not in env
+
+    def test_ollama_vars_passed_for_codex_provider(self):
+        settings = ProviderSettings(
+            OPENSCIENTIST_PROVIDER="ollama",
+            OLLAMA_BASE_URL="http://host.docker.internal:11434/v1",
+            OLLAMA_MODEL="gpt-oss:20b",
+        )
+
+        env = settings.get_container_env_vars()
+
+        assert env["OPENSCIENTIST_PROVIDER"] == "ollama"
+        assert env["OLLAMA_BASE_URL"] == "http://host.docker.internal:11434/v1"
+        assert env["OLLAMA_MODEL"] == "gpt-oss:20b"
+
+    def test_ollama_vars_default_when_unset(self, monkeypatch, tmp_path):
+        # The dev .env reaches tests via both os.environ (database.engine calls
+        # load_dotenv() at import) and the settings env_file. Neutralize both.
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
+        monkeypatch.delenv("OLLAMA_MODEL", raising=False)
+        settings = ProviderSettings(OPENSCIENTIST_PROVIDER="ollama")
+        env = settings.get_container_env_vars()
+        assert env["OLLAMA_BASE_URL"] == "http://localhost:11434/v1"
+        assert env["OLLAMA_MODEL"] == "gpt-oss:20b"
 
     def test_optional_model_and_token_env_vars_are_included(self):
         settings = ProviderSettings(
@@ -684,8 +720,13 @@ class TestFileSettings:
 class TestContainerSettings:
     """Tests for container settings."""
 
-    def test_default_values(self):
+    def test_default_values(self, monkeypatch, tmp_path):
         """Default container settings are reasonable."""
+        # The dev .env reaches tests via both os.environ (database.engine calls
+        # load_dotenv() at import) and the settings env_file. Neutralize both.
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("OPENSCIENTIST_AGENT_IMAGE", raising=False)
+        monkeypatch.delenv("OPENSCIENTIST_EXECUTOR_IMAGE", raising=False)
         settings = ContainerSettings()
         assert settings.executor_image == "openscientist-executor:latest"
         assert settings.agent_image == "openscientist-agent:latest"
