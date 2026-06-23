@@ -354,7 +354,7 @@ async def _ensure_default_skill_sources() -> None:
         {
             "source_type": "github",
             "name": "Claude Scientific Skills",
-            "url": "https://github.com/K-Dense-AI/claude-scientific-skills",
+            "url": "https://github.com/K-Dense-AI/scientific-agent-skills",
             "branch": "main",
             "skills_path": "scientific-skills",
             "is_enabled": True,

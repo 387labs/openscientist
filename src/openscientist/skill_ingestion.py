@@ -259,6 +259,7 @@ class GitHubSkillIngester(BaseSkillIngester):
             self._client = httpx.AsyncClient(
                 headers=headers,
                 timeout=30.0,
+                follow_redirects=True,
             )
         return self._client
 
