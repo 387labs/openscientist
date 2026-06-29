@@ -275,6 +275,30 @@ class TestJobContainerRunner:
         assert exit_code is None
         mock_warning.assert_not_called()
 
+    def test_get_logs_returns_decoded_tail(self):
+        """get_logs returns the decoded tail of the agent container's logs."""
+        mock_client = MagicMock()
+        mock_container = MagicMock()
+        mock_container.logs.return_value = b"FileNotFoundError: boom\n"
+        mock_client.containers.list.return_value = [mock_container]
+
+        with patch("openscientist.job_container.runner.docker.from_env", return_value=mock_client):
+            runner = JobContainerRunner()
+            logs = runner.get_logs("job-123")
+
+        assert logs is not None
+        assert "FileNotFoundError" in logs
+        mock_container.logs.assert_called_once_with(stdout=True, stderr=True, tail=50)
+
+    def test_get_logs_returns_none_when_container_missing(self):
+        """get_logs returns None when the agent container cannot be found."""
+        mock_client = MagicMock()
+        mock_client.containers.list.return_value = []
+
+        with patch("openscientist.job_container.runner.docker.from_env", return_value=mock_client):
+            runner = JobContainerRunner()
+            assert runner.get_logs("job-123") is None
+
 
 class TestPhenixMount:
     """Tests for Phenix volume mount in agent containers."""
