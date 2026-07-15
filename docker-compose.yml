@@ -103,6 +103,15 @@ services:
       # Mount Docker socket for sibling container execution
       - /var/run/docker.sock:/var/run/docker.sock:ro
 
+      # Registry auth for pulling the agent/executor images from a PRIVATE
+      # registry (e.g. ACR). Point OPENSCIENTIST_DOCKER_CONFIG at a docker
+      # config.json holding pull credentials; it is mounted where the app's
+      # docker client (docker.from_env(), talking to the socket above) reads
+      # auth. Defaults to an empty-but-valid config so local/dev with public
+      # images works unchanged. Without valid creds, jobs fail at startup with
+      # "401 ... images/create ... authentication required".
+      - ${OPENSCIENTIST_DOCKER_CONFIG:-./docker/empty-docker-config.json}:/root/.docker/config.json:ro
+
     group_add:
       - "${DOCKER_GID:-999}"
 
