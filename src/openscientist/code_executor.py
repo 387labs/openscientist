@@ -553,7 +553,8 @@ def execute_rust_code(
         _seeded_cargo = Path("/usr/local/cargo")
         if _seeded_cargo.exists():
             env.setdefault("CARGO_HOME", str(_seeded_cargo))
-            env.setdefault("CARGO_TARGET_DIR", str(_seeded_cargo / "target"))
+        # Build artifacts must land on writable storage (executor root is read-only).
+        env["CARGO_TARGET_DIR"] = str(Path(tmpdir) / "target")
 
         try:
             run_result = subprocess.run(
