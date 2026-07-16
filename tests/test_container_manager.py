@@ -8,7 +8,7 @@ import json
 import tempfile
 from datetime import UTC
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
@@ -444,8 +444,8 @@ class TestExecutorRunConfig:
         return mgr, mock_client, mock_settings
 
     @staticmethod
-    def _get_run_kwargs(mock_client: MagicMock) -> dict:
-        return mock_client.containers.run.call_args.kwargs
+    def _get_run_kwargs(mock_client: MagicMock) -> dict[Any, Any]:
+        return cast(dict[Any, Any], mock_client.containers.run.call_args.kwargs)
 
     @staticmethod
     def _get_run_volumes(mock_client: MagicMock) -> dict[str, dict[str, str]]:
