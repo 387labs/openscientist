@@ -116,3 +116,15 @@ class TestChatTemplateContainerIntegration:
         assert payload["template_exists"] is True
         assert payload["rendered_exists"] is True
         assert payload["first_line"] == "# OpenScientist Job Chat Assistant"
+
+    def test_web_image_runs_as_non_root(self, docker_client, built_web_image):
+        """The web image default user should be openscientist (uid 1001), not root."""
+        output = docker_client.containers.run(
+            image=built_web_image,
+            entrypoint=[],
+            command=["sh", "-c", "id -u; id -un"],
+            remove=True,
+        )
+        uid_line, username = output.decode("utf-8").strip().splitlines()
+        assert uid_line == "1001"
+        assert username == "openscientist"

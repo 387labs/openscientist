@@ -67,8 +67,11 @@ COPY src/ src/
 # openai-codex-cli-bin. The codex binary itself is provisioned above.
 RUN uv pip install --system -e .
 
-# Create jobs directory
-RUN mkdir -p jobs
+RUN groupadd --gid 1001 openscientist \
+    && useradd --uid 1001 --gid 1001 --create-home --shell /bin/bash openscientist
+
+RUN mkdir -p jobs .nicegui \
+    && chown -R openscientist:openscientist jobs .nicegui
 
 # Expose port for NiceGUI
 EXPOSE 8080
@@ -79,5 +82,7 @@ ENV OPENSCIENTIST_COMMIT=${OPENSCIENTIST_COMMIT}
 ENV OPENSCIENTIST_BUILD_TIME=${BUILD_TIME}
 # Fixed path for GCP credentials (mounted via GCP_CREDENTIALS_FILE in docker-compose)
 ENV GOOGLE_APPLICATION_CREDENTIALS=/app/gcp-credentials.json
+
+USER openscientist
 
 CMD ["python", "-m", "openscientist.web_app", "--host", "0.0.0.0", "--port", "8080"]
