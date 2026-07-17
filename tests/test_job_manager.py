@@ -8,7 +8,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
-from openscientist.job_manager import JobInfo, JobManager, JobStatus, JobStatusUpdateResult
+from openscientist.job_manager import JobInfo, JobManager, JobStatus, JobStatusUpdateResult, RunMode
 
 
 class TestJobStatus:
@@ -338,7 +338,7 @@ class TestJobManagerRegenerateReport:
         kwargs = mock_thread.call_args.kwargs
         assert kwargs["target"] == manager._run_job
         assert kwargs["args"] == (job_id,)
-        assert kwargs["kwargs"] == {"run_mode": "report_only"}
+        assert kwargs["kwargs"] == {"run_mode": RunMode.REPORT_ONLY}
 
 
 class TestJobManagerDelete:

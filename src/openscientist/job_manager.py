@@ -26,7 +26,7 @@ from openscientist.database.models.job_share import JobShare
 from openscientist.database.rls import set_current_user
 from openscientist.database.session import AsyncSessionLocal
 from openscientist.exceptions import ProviderError
-from openscientist.job.types import JobInfo, JobStatus, JobStatusUpdateResult
+from openscientist.job.types import JobInfo, JobStatus, JobStatusUpdateResult, RunMode
 from openscientist.knowledge_state import KnowledgeState
 from openscientist.ntfy import notify_job_status_change
 from openscientist.orchestrator import create_job
@@ -618,21 +618,21 @@ class JobManager:
             thread = threading.Thread(
                 target=self._run_job,
                 args=(job_id,),
-                kwargs={"run_mode": "report_only"},
+                kwargs={"run_mode": RunMode.REPORT_ONLY},
                 daemon=True,
             )
             self._running_jobs[job_id] = thread
             thread.start()
 
-    def _run_job(self, job_id: str, run_mode: str = "discovery") -> None:
+    def _run_job(self, job_id: str, run_mode: RunMode = RunMode.DISCOVERY) -> None:
         """Run a job (internal, called by thread)."""
         self._run_job_in_container(job_id, run_mode=run_mode)
 
-    def _run_job_in_container(self, job_id: str, run_mode: str = "discovery") -> None:
+    def _run_job_in_container(self, job_id: str, run_mode: RunMode = RunMode.DISCOVERY) -> None:
         """Launch an agent container for the job and block until it reaches a terminal status.
 
-        ``run_mode`` is "discovery" for the full loop or "report_only" to
-        re-run just the report-generation phase against the persisted findings.
+        ``run_mode`` is RunMode.DISCOVERY for the full loop or RunMode.REPORT_ONLY
+        to re-run just the report-generation phase against the persisted findings.
         """
         from openscientist.job_container import JobContainerRunner
 
