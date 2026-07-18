@@ -2,7 +2,7 @@
 
 import shutil
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, call, patch
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -59,6 +59,52 @@ class TestValidateImports:
     def test_os_forbidden_when_not_listed(self):
         with pytest.raises(ForbiddenImportError):
             validate_imports("import os", ["pandas"])
+
+
+# ─── signal alarm helpers ─────────────────────────────────────────────
+
+
+class TestSignalAlarmHelpers:
+    """Tests for cross-platform timeout alarm setup and teardown."""
+
+    def test_set_and_clear_timeout_alarm_unix_like(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import openscientist.code_executor as code_executor
+        from openscientist.code_executor import (
+            _clear_timeout_alarm,
+            _set_timeout_alarm,
+            timeout_handler,
+        )
+
+        mock_alarm = Mock()
+        mock_signal_fn = Mock()
+        sigalrm = 14
+
+        monkeypatch.setattr(code_executor, "_signal_alarm", mock_alarm)
+        monkeypatch.setattr(code_executor.signal, "signal", mock_signal_fn)
+        monkeypatch.setattr(code_executor.signal, "SIGALRM", sigalrm, raising=False)
+
+        _set_timeout_alarm(10)
+
+        mock_signal_fn.assert_called_once_with(sigalrm, timeout_handler)
+        mock_alarm.assert_called_once_with(10)
+
+        _clear_timeout_alarm()
+
+        mock_alarm.assert_has_calls([call(10), call(0)])
+
+    def test_set_and_clear_timeout_alarm_windows_like(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import openscientist.code_executor as code_executor
+        from openscientist.code_executor import _clear_timeout_alarm, _set_timeout_alarm
+
+        mock_signal_fn = Mock()
+
+        monkeypatch.setattr(code_executor, "_signal_alarm", None)
+        monkeypatch.setattr(code_executor.signal, "signal", mock_signal_fn)
+
+        _set_timeout_alarm(10)
+        _clear_timeout_alarm()
+
+        mock_signal_fn.assert_not_called()
 
 
 # ─── execute_code ─────────────────────────────────────────────────────

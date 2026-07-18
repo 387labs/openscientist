@@ -168,15 +168,18 @@ def _next_plot_number(plots_dir: Path) -> int:
     return max_number
 
 
+_signal_alarm = getattr(signal, "alarm", None)
+
+
 def _set_timeout_alarm(timeout: int) -> None:
-    if hasattr(signal, "SIGALRM"):
+    if _signal_alarm is not None and hasattr(signal, "SIGALRM"):
         signal.signal(signal.SIGALRM, timeout_handler)
-        signal.alarm(timeout)
+        _signal_alarm(timeout)
 
 
 def _clear_timeout_alarm() -> None:
-    if hasattr(signal, "SIGALRM"):
-        signal.alarm(0)
+    if _signal_alarm is not None:
+        _signal_alarm(0)
 
 
 def _plot_metadata(
