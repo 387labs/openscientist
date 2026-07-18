@@ -92,7 +92,9 @@ class TestSignalAlarmHelpers:
 
         mock_alarm.assert_has_calls([call(10), call(0)])
 
-    def test_set_and_clear_timeout_alarm_windows_like(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_set_and_clear_timeout_alarm_windows_like(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         import openscientist.code_executor as code_executor
         from openscientist.code_executor import _clear_timeout_alarm, _set_timeout_alarm
 
