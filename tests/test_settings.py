@@ -1,6 +1,7 @@
 """Tests for centralized settings module."""
 
 import logging
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -14,6 +15,7 @@ from openscientist.settings import (
     FileSettings,
     PhenixSettings,
     ProviderSettings,
+    Settings,
     clear_settings_cache,
     get_settings,
 )
@@ -503,6 +505,81 @@ class TestDatabaseSettings:
         """SQL_ECHO defaults to False."""
         settings = DatabaseSettings(DATABASE_URL="postgresql+asyncpg://x:x@localhost/x")
         assert settings.sql_echo is False
+
+
+class TestSettingsAdminDatabaseUrl:
+    """Tests for root Settings validation of ADMIN_DATABASE_URL."""
+
+    def _configure_base_env(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        dev_mode: str,
+    ) -> str:
+        database_url = "postgresql+asyncpg://app:pass@host:5432/db"
+        monkeypatch.setenv("OPENSCIENTIST_SECRET_KEY", "test-secret-key")
+        monkeypatch.setenv("DATABASE_URL", database_url)
+        monkeypatch.setenv("OPENSCIENTIST_PROVIDER", "anthropic")
+        monkeypatch.setenv("OPENSCIENTIST_DEV_MODE", dev_mode)
+        return database_url
+
+    def test_production_requires_admin_database_url(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """Production mode fails when ADMIN_DATABASE_URL is missing."""
+        monkeypatch.chdir(tmp_path)
+        self._configure_base_env(monkeypatch, dev_mode="false")
+        monkeypatch.delenv("ADMIN_DATABASE_URL", raising=False)
+
+        with pytest.raises(ValidationError, match="ADMIN_DATABASE_URL is required"):
+            Settings()
+
+    def test_development_warns_and_falls_back_to_database_url(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Development mode allows fallback with a single warning."""
+        monkeypatch.chdir(tmp_path)
+        database_url = self._configure_base_env(monkeypatch, dev_mode="true")
+        monkeypatch.delenv("ADMIN_DATABASE_URL", raising=False)
+
+        with caplog.at_level(logging.WARNING, logger="openscientist.settings"):
+            settings = Settings()
+
+        assert settings.database.effective_admin_database_url == database_url
+        admin_warnings = [
+            record
+            for record in caplog.records
+            if record.levelname == "WARNING" and "ADMIN_DATABASE_URL" in record.message
+        ]
+        assert len(admin_warnings) == 1
+
+    def test_production_uses_admin_database_url_without_warning(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Production mode succeeds when ADMIN_DATABASE_URL is configured."""
+        monkeypatch.chdir(tmp_path)
+        self._configure_base_env(monkeypatch, dev_mode="false")
+        admin_url = "postgresql+asyncpg://admin:pass@host:5432/db"
+        monkeypatch.setenv("ADMIN_DATABASE_URL", admin_url)
+
+        with caplog.at_level(logging.WARNING, logger="openscientist.settings"):
+            settings = Settings()
+
+        assert settings.database.effective_admin_database_url == admin_url
+        admin_warnings = [
+            record
+            for record in caplog.records
+            if record.levelname == "WARNING" and "ADMIN_DATABASE_URL" in record.message
+        ]
+        assert admin_warnings == []
 
 
 class TestAuthSettings:
