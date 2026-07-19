@@ -290,7 +290,7 @@ class TestDiscoveryCancellationAndFailure:
             ),
             patch("openscientist.orchestrator.discovery.increment_ks_iteration"),
             patch(
-                "openscientist.orchestrator.discovery.get_job_status",
+                "openscientist.orchestrator.discovery._get_job_status",
                 new_callable=AsyncMock,
                 side_effect=["running", "cancelled"],
                 create=True,
@@ -378,7 +378,7 @@ class TestDiscoveryCancellationAndFailure:
             ),
             patch("openscientist.orchestrator.discovery.increment_ks_iteration"),
             patch(
-                "openscientist.orchestrator.discovery.get_job_status",
+                "openscientist.orchestrator.discovery._get_job_status",
                 new_callable=AsyncMock,
                 return_value="running",
                 create=True,
