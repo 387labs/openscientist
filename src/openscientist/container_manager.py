@@ -22,6 +22,8 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_EXECUTOR_TMPFS = {"/tmp": "rw,size=512m,nosuid,nodev,mode=1777"}
+
 
 def _container_error_result(
     *,
@@ -211,6 +213,41 @@ class ContainerManager:
         except docker.errors.NotFound:
             return
 
+    def _build_executor_run_kwargs(
+        self,
+        *,
+        container_name: str,
+        job_id: str,
+        volumes: dict[str, dict[str, str]],
+        input_b64: str,
+    ) -> dict[str, Any]:
+        return {
+            "image": self.image,
+            "name": container_name,
+            "stdin_open": True,
+            "remove": False,
+            "detach": False,
+            "network_mode": "none",
+            "mem_limit": self.memory_limit,
+            "nano_cpus": int(self.cpu_limit * 1e9),
+            "read_only": True,
+            "tmpfs": _EXECUTOR_TMPFS,
+            "security_opt": ["no-new-privileges:true"],
+            "user": "executor",
+            "labels": {
+                "openscientist.job_id": job_id,
+                "openscientist.type": "executor",
+            },
+            "volumes": volumes,
+            "stop_signal": "SIGKILL",
+            "entrypoint": [],
+            "command": [
+                "sh",
+                "-c",
+                f"echo {input_b64} | base64 -d | python -m openscientist_executor",
+            ],
+        }
+
     def execute_code(
         self,
         code: str,
@@ -300,43 +337,14 @@ class ContainerManager:
             self.cpu_limit,
         )
 
-        from openscientist.job_container import resolve_docker_network
-
-        network = resolve_docker_network(self.client, get_settings().container.agent_network)
-
         try:
-            # Run container
             result = self.client.containers.run(
-                image=self.image,
-                name=container_name,
-                stdin_open=True,
-                remove=False,  # We remove manually after getting logs
-                detach=False,
-                network=network,
-                # Resource limits
-                mem_limit=self.memory_limit,
-                nano_cpus=int(self.cpu_limit * 1e9),
-                # Security settings
-                read_only=False,  # Need write access for plots
-                security_opt=["no-new-privileges:true"],
-                user="executor",
-                # Labels for cleanup
-                labels={
-                    "openscientist.job_id": job_id,
-                    "openscientist.type": "executor",
-                },
-                # Volume mounts
-                volumes=volumes,
-                # Timeout
-                stop_signal="SIGKILL",
-                # Clear the entrypoint so we can use shell piping
-                entrypoint=[],
-                # Input via base64-encoded stdin to avoid shell quoting issues
-                command=[
-                    "sh",
-                    "-c",
-                    f"echo {input_b64} | base64 -d | python -m openscientist_executor",
-                ],
+                **self._build_executor_run_kwargs(
+                    container_name=container_name,
+                    job_id=job_id,
+                    volumes=volumes,
+                    input_b64=input_b64,
+                ),
             )
 
             execution_result = self._parse_executor_result(result)
