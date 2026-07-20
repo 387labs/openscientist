@@ -53,12 +53,147 @@ class TestValidateImports:
         # "from scipy.stats import ttest_ind" → top-level is "scipy"
         validate_imports("from scipy.stats import ttest_ind", ["scipy"])
 
-    def test_os_allowed_when_listed(self):
-        validate_imports("import os", ["os"])
-
     def test_os_forbidden_when_not_listed(self):
         with pytest.raises(ForbiddenImportError):
             validate_imports("import os", ["pandas"])
+
+    def test_requests_forbidden(self):
+        with pytest.raises(ForbiddenImportError):
+            validate_imports("import requests", ["pandas", "numpy"])
+
+
+# ─── restricted sandbox ───────────────────────────────────────────────
+
+
+class TestRestrictedExecution:
+    """Tests for hardened sandbox builtins, imports, and SafeOs."""
+
+    @pytest.fixture
+    def plots_dir(self, tmp_path: Path) -> Path:
+        d = tmp_path / "plots"
+        d.mkdir()
+        return d
+
+    def test_import_os_blocked(self, plots_dir):
+        result = execute_code("import os", data=None, plots_dir=plots_dir)
+        assert result["success"] is False
+        assert "not allowed" in result["error"]
+
+    def test_import_requests_blocked(self, plots_dir):
+        result = execute_code("import requests", data=None, plots_dir=plots_dir)
+        assert result["success"] is False
+        assert "not allowed" in result["error"]
+
+    def test_dunder_import_os_blocked(self, plots_dir):
+        result = execute_code('__import__("os")', data=None, plots_dir=plots_dir)
+        assert result["success"] is False
+        assert "not allowed" in result["error"]
+
+    def test_os_environ_unavailable(self, plots_dir):
+        code = """
+try:
+    os.environ
+    print('available')
+except AttributeError:
+    print('unavailable')
+"""
+        result = execute_code(code, data=None, plots_dir=plots_dir)
+        assert result["success"] is True
+        assert "unavailable" in result["output"]
+
+    def test_os_system_unavailable(self, plots_dir):
+        code = """
+try:
+    os.system('echo hi')
+    print('available')
+except AttributeError:
+    print('unavailable')
+"""
+        result = execute_code(code, data=None, plots_dir=plots_dir)
+        assert result["success"] is True
+        assert "unavailable" in result["output"]
+
+    def test_open_blocked(self, plots_dir):
+        result = execute_code("open('test.txt')", data=None, plots_dir=plots_dir)
+        assert result["success"] is False
+        assert "NameError" in result["error"]
+
+    def test_eval_blocked(self, plots_dir):
+        result = execute_code("eval('1+1')", data=None, plots_dir=plots_dir)
+        assert result["success"] is False
+        assert "NameError" in result["error"]
+
+    def test_exec_blocked(self, plots_dir):
+        result = execute_code("exec('x=1')", data=None, plots_dir=plots_dir)
+        assert result["success"] is False
+        assert "NameError" in result["error"]
+
+    def test_compile_blocked(self, plots_dir):
+        result = execute_code("compile('x=1', '<s>', 'exec')", data=None, plots_dir=plots_dir)
+        assert result["success"] is False
+        assert "NameError" in result["error"]
+
+    def test_safe_os_path_helpers_work(self, plots_dir):
+        code = """
+print(os.path.join('a', 'b'))
+print(os.path.basename('/tmp/foo.txt'))
+print(os.path.dirname('/tmp/foo.txt'))
+print(os.path.splitext('a.csv')[1])
+print(os.path.exists('.'))
+print(os.path.isfile('.'))
+print(os.path.isdir('.'))
+print(os.sep)
+print(isinstance(os.getcwd(), str))
+print(isinstance(os.listdir('.'), list))
+"""
+        result = execute_code(code, data=None, plots_dir=plots_dir)
+        assert result["success"] is True
+        assert "a/b" in result["output"] or "a\\b" in result["output"]
+        assert "foo.txt" in result["output"]
+        assert ".csv" in result["output"]
+        assert "True" in result["output"]
+
+    def test_safe_path_no_dict(self, plots_dir):
+        code = """
+try:
+    os.path.__dict__
+    print('available')
+except AttributeError:
+    print('unavailable')
+"""
+        result = execute_code(code, data=None, plots_dir=plots_dir)
+        assert result["success"] is True
+        assert "unavailable" in result["output"]
+
+    def test_safe_path_no_real_os_module(self, plots_dir):
+        code = "print(hasattr(os.path, 'os'))"
+        result = execute_code(code, data=None, plots_dir=plots_dir)
+        assert result["success"] is True
+        assert "False" in result["output"]
+
+    def test_numpy_still_works(self, plots_dir):
+        code = "import numpy.linalg; print(numpy.linalg.norm([3, 4]))"
+        result = execute_code(code, data=None, plots_dir=plots_dir)
+        assert result["success"] is True
+        assert "5.0" in result["output"]
+
+    def test_pandas_still_works(self, plots_dir):
+        code = "import pandas as pd; print(pd.DataFrame({'x': [1]}).shape)"
+        result = execute_code(code, data=None, plots_dir=plots_dir)
+        assert result["success"] is True
+        assert "(1, 1)" in result["output"]
+
+    def test_scipy_from_import_still_works(self, plots_dir):
+        code = "from scipy import stats; print(hasattr(stats, 'ttest_ind'))"
+        result = execute_code(code, data=None, plots_dir=plots_dir)
+        assert result["success"] is True
+        assert "True" in result["output"]
+
+    def test_sklearn_from_import_still_works(self, plots_dir):
+        code = "from sklearn.metrics import accuracy_score; print(accuracy_score([0,1],[0,1]))"
+        result = execute_code(code, data=None, plots_dir=plots_dir)
+        assert result["success"] is True
+        assert "1.0" in result["output"]
 
 
 # ─── execute_code ─────────────────────────────────────────────────────
