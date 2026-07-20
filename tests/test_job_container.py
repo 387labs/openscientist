@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, PropertyMock, patch
 import pytest
 
 from docker import errors as docker_errors
+from openscientist.job.types import RunMode
 from openscientist.job_container.runner import AGENT_APP_DIR, JobContainerRunner
 
 
@@ -193,7 +194,7 @@ class TestJobContainerRunner:
         assert "OPENSCIENTIST_HOST_PROJECT_DIR" not in environment
         assert "OPENSCIENTIST_CONTAINER_APP_DIR" not in environment
 
-    def _launch_and_get_env(self, *, run_mode: str | None) -> dict[str, str]:
+    def _launch_and_get_env(self, *, run_mode: RunMode | None) -> dict[str, str]:
         """Run launch() (optionally with run_mode) and return the container env."""
         mock_client = MagicMock()
         mock_container = MagicMock()
@@ -227,15 +228,15 @@ class TestJobContainerRunner:
         return cast(dict[str, str], mock_client.containers.run.call_args.kwargs["environment"])
 
     def test_launch_sets_run_mode_env_for_report_only(self):
-        """report_only launches carry OPENSCIENTIST_RUN_MODE so the entrypoint
+        """REPORT_ONLY launches carry OPENSCIENTIST_RUN_MODE so the entrypoint
         runs only the report-generation phase."""
-        env = self._launch_and_get_env(run_mode="report_only")
+        env = self._launch_and_get_env(run_mode=RunMode.REPORT_ONLY)
         assert env["OPENSCIENTIST_RUN_MODE"] == "report_only"
 
     def test_launch_omits_run_mode_env_by_default(self):
         """The default discovery launch keeps a clean env (no run-mode override)."""
         assert "OPENSCIENTIST_RUN_MODE" not in self._launch_and_get_env(run_mode=None)
-        assert "OPENSCIENTIST_RUN_MODE" not in self._launch_and_get_env(run_mode="discovery")
+        assert "OPENSCIENTIST_RUN_MODE" not in self._launch_and_get_env(run_mode=RunMode.DISCOVERY)
 
     def test_get_exit_code_looks_up_agent_container_by_labels(self):
         """Exit-code polling filters to the agent container, not job executors."""

@@ -27,6 +27,16 @@ class JobStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
+class RunMode(StrEnum):
+    """How the agent container should run for a given job launch."""
+
+    DISCOVERY = "discovery"
+    """Full discovery loop (default)."""
+
+    REPORT_ONLY = "report_only"
+    """Re-run just the report-generation phase against persisted findings."""
+
+
 @dataclass
 class JobStatusUpdateResult:
     """Result of updating job status, includes data needed for notifications."""
