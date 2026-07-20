@@ -472,6 +472,11 @@ def _configure_host_app(host_app: FastAPI, jobs_dir: Path) -> None:
     if _state.app_configured:
         return
 
+    from openscientist.api.rate_limits import configure_host_rate_limiting, wire_rate_limiter
+
+    configure_host_rate_limiting(host_app)
+    wire_rate_limiter(app)
+
     # Middleware and routes must be registered before startup.
     register_scanner_block_middleware(host_app)
     _register_openapi_docs(host_app)

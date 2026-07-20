@@ -10,6 +10,7 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from openscientist.api.rate_limits import configure_host_rate_limiting
 from openscientist.auth.fastapi_routes import (
     _hash_token,
     generate_review_token,
@@ -21,6 +22,7 @@ from openscientist.database.models import ReviewToken, User
 def _make_app() -> FastAPI:
     """Create a minimal FastAPI app with the review route."""
     test_app = FastAPI()
+    configure_host_rate_limiting(test_app)
     test_app.add_api_route("/review/{token}", redeem_review_token, methods=["GET"])
     return test_app
 

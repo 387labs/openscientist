@@ -12,11 +12,32 @@ import pytest
 from fastapi import FastAPI
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.requests import Request
 from starlette.routing import Match
 
 from openscientist.api.endpoints.skills import router
+from openscientist.api.rate_limits import limiter, wire_rate_limiter
 from openscientist.database.models import Skill, SkillSource, User
 from tests.helpers import enable_rls
+
+
+@pytest.fixture
+def rate_limit_request() -> Request:
+    """Starlette request for direct calls to SlowAPI-decorated skill endpoints."""
+    limiter.reset()
+    host_app = FastAPI()
+    wire_rate_limiter(host_app)
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/api/v1/skills/sources",
+        "headers": [],
+        "query_string": b"",
+        "client": ("testclient", 50000),
+        "server": ("testserver", 80),
+        "app": host_app,
+    }
+    return Request(scope)
 
 
 @pytest.fixture
@@ -510,6 +531,7 @@ class TestSkillSourcesEndpoints:
         self,
         db_session: AsyncSession,
         test_admin_user: User,
+        rate_limit_request: Request,
     ):
         """Test creating a skill source (requires admin)."""
         from openscientist.api.endpoints.skills import SkillSourceCreate, create_skill_source
@@ -526,6 +548,7 @@ class TestSkillSourcesEndpoints:
         )
 
         response = await create_skill_source(
+            request=rate_limit_request,
             source_data=source_data,
             user=test_admin_user,
             session=db_session,
@@ -540,6 +563,7 @@ class TestSkillSourcesEndpoints:
         self,
         db_session: AsyncSession,
         test_admin_user: User,
+        rate_limit_request: Request,
     ):
         """Test creating a GitHub source without URL fails (requires admin)."""
         from fastapi import HTTPException
@@ -557,6 +581,7 @@ class TestSkillSourcesEndpoints:
 
         with pytest.raises(HTTPException) as exc_info:
             await create_skill_source(
+                request=rate_limit_request,
                 source_data=source_data,
                 user=test_admin_user,
                 session=db_session,
@@ -570,6 +595,7 @@ class TestSkillSourcesEndpoints:
         self,
         db_session: AsyncSession,
         test_admin_user: User,
+        rate_limit_request: Request,
     ):
         """Test deleting a skill source (requires admin)."""
         from sqlalchemy import select
@@ -591,6 +617,7 @@ class TestSkillSourcesEndpoints:
         )
 
         created = await create_skill_source(
+            request=rate_limit_request,
             source_data=source_data,
             user=test_admin_user,
             session=db_session,
@@ -599,6 +626,7 @@ class TestSkillSourcesEndpoints:
         # Delete it
         await delete_skill_source(
             source_id=created.id,
+            request=rate_limit_request,
             user=test_admin_user,
             session=db_session,
         )
@@ -618,6 +646,7 @@ class TestSkillSourcesEndpoints:
         db_session: AsyncSession,
         test_admin_user: User,
         test_skill_source: SkillSource,
+        rate_limit_request: Request,
     ):
         """Test triggering a sync for a source (requires admin)."""
         from openscientist.api.endpoints.skills import sync_skill_source_endpoint
@@ -644,6 +673,7 @@ class TestSkillSourcesEndpoints:
 
             response = await sync_skill_source_endpoint(
                 source_id=str(test_skill_source.id),
+                request=rate_limit_request,
                 user=test_admin_user,
                 session=db_session,
             )
@@ -685,6 +715,7 @@ class TestSkillSourcesEndpoints:
         db_session: AsyncSession,
         test_user: User,
         test_skill_source: SkillSource,
+        rate_limit_request: Request,
     ):
         """Test that non-admin users get 404 when deleting a source."""
         from fastapi import HTTPException
@@ -701,6 +732,7 @@ class TestSkillSourcesEndpoints:
         with pytest.raises(HTTPException) as exc_info:
             await delete_skill_source(
                 source_id=str(test_skill_source.id),
+                request=rate_limit_request,
                 user=test_user,
                 session=db_session,
             )
@@ -714,6 +746,7 @@ class TestSkillSourcesEndpoints:
         db_session: AsyncSession,
         test_user: User,
         test_skill_source: SkillSource,
+        rate_limit_request: Request,
     ):
         """Test that non-admin users get 404 when syncing a source."""
         from fastapi import HTTPException
@@ -730,6 +763,7 @@ class TestSkillSourcesEndpoints:
         with pytest.raises(HTTPException) as exc_info:
             await sync_skill_source_endpoint(
                 source_id=str(test_skill_source.id),
+                request=rate_limit_request,
                 user=test_user,
                 session=db_session,
             )
