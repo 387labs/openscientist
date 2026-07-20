@@ -82,3 +82,5 @@ jobs:
 
       - name: Unit & Integration Tests
         run: uv run pytest --cov=src/openscientist --cov-report=term-missing
+        env:
+          POSTGRES_PASSWORD: openscientist_dev_password
