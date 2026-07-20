@@ -5,6 +5,7 @@ Handles job lifecycle, status tracking, and cleanup.
 """
 
 import argparse
+import concurrent.futures
 import json
 import logging
 import shutil
@@ -34,6 +35,19 @@ from openscientist.providers import get_provider
 from openscientist.version import get_version_string
 
 logger = logging.getLogger(__name__)
+
+# Statuses a job thread is still alive for: the poll loop in
+# _run_job_in_container only exits on completed/failed/cancelled, so a job
+# awaiting feedback or generating its report still has a live thread tracked
+# in _running_jobs.
+_NON_TERMINAL_STATUSES = frozenset(
+    {
+        JobStatus.RUNNING,
+        JobStatus.QUEUED,
+        JobStatus.AWAITING_FEEDBACK,
+        JobStatus.GENERATING_REPORT,
+    }
+)
 
 
 def _effective_model(settings: Any) -> str | None:
@@ -313,6 +327,7 @@ class JobManager:
         self.max_concurrent = max_concurrent
         self._running_jobs: dict[str, threading.Thread] = {}
         self._lock = threading.Lock()
+        self._shutting_down = False
 
         # Clean up any stale running/queued jobs from previous restart
         self._cleanup_stale_jobs()
@@ -333,12 +348,7 @@ class JobManager:
         stale_count = 0
         for job_info in self._list_operational_jobs():
             job_id = job_info.job_id
-            if job_info.status in [
-                JobStatus.RUNNING,
-                JobStatus.QUEUED,
-                JobStatus.AWAITING_FEEDBACK,
-                JobStatus.GENERATING_REPORT,
-            ]:
+            if job_info.status in _NON_TERMINAL_STATUSES:
                 logger.warning(
                     "Marking stale job %s as cancelled (was %s)",
                     job_id,
@@ -567,6 +577,9 @@ class JobManager:
             ValueError: If job not found or already running
         """
         with self._lock:
+            if self._shutting_down:
+                raise ValueError("Job manager is shutting down; cannot start new jobs")
+
             # Check job exists
             job_info = self.get_job(job_id)
             if job_info is None:
@@ -604,6 +617,8 @@ class JobManager:
                 or the max concurrent limit is reached.
         """
         with self._lock:
+            if self._shutting_down:
+                raise ValueError("Job manager is shutting down; cannot start new jobs")
             job_info = self.get_job(job_id)
             if job_info is None:
                 raise ValueError(f"Job {job_id} not found")
@@ -711,6 +726,8 @@ class JobManager:
     def _start_next_queued_job(self) -> None:
         """Start the next queued job if slots available."""
         with self._lock:
+            if self._shutting_down:
+                return
             if self._get_active_job_count() >= self.max_concurrent:
                 return
 
@@ -766,6 +783,84 @@ class JobManager:
 
         # Start next queued job if any
         self._start_next_queued_job()
+
+    def shutdown(self, timeout: float = 30.0) -> None:
+        """Drain in-flight job threads gracefully before process exit.
+
+        Job threads are daemon threads (see ``start_job``), so on their own
+        they would be killed the instant the process exits, leaving
+        containers running and job rows stuck at RUNNING forever. This stops
+        the active jobs the same way ``cancel_job`` does — mark cancelled in
+        the DB, then SIGTERM the container — and waits up to ``timeout``
+        total for their worker threads to notice and exit. Also blocks
+        ``start_job``/``regenerate_report``/``_start_next_queued_job`` from
+        spawning new threads for the remainder of the process lifetime, so a
+        job finishing mid-drain can't queue a fresh one behind our back.
+
+        Cancelling and stopping containers happens concurrently across jobs:
+        ``JobContainerRunner.stop`` blocks for up to its own 10s timeout per
+        container, so doing this one job at a time would let N concurrent
+        jobs burn up to N*10s before the join phase below even starts,
+        blowing well past ``timeout`` when more than one job is running.
+        """
+        with self._lock:
+            self._shutting_down = True
+            job_ids = list(self._running_jobs.keys())
+            threads = list(self._running_jobs.values())
+
+        if not threads:
+            return
+
+        logger.info("Shutting down: draining %d in-flight job(s)", len(threads))
+
+        from openscientist.job_container import JobContainerRunner
+
+        runner = JobContainerRunner()
+
+        def _cancel_and_stop(job_id: str) -> None:
+            job_info = self.get_job(job_id)
+            if job_info is not None and job_info.status in _NON_TERMINAL_STATUSES:
+                self._update_job_status(
+                    job_id,
+                    JobStatus.CANCELLED,
+                    cancellation_reason="Server shut down while job was running",
+                )
+                try:
+                    runner.stop(job_id)
+                except Exception as e:
+                    logger.warning(
+                        "Failed to stop container for job %s during shutdown: %s", job_id, e
+                    )
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(job_ids)) as pool:
+            list(pool.map(_cancel_and_stop, job_ids))
+
+        per_thread_timeout = timeout / len(threads)
+        stuck_job_ids = []
+        for job_id, thread in zip(job_ids, threads, strict=True):
+            thread.join(timeout=per_thread_timeout)
+            if thread.is_alive():
+                stuck_job_ids.append(job_id)
+
+        if stuck_job_ids:
+            logger.warning(
+                "%d job thread(s) did not exit within %.1fs shutdown timeout: %s",
+                len(stuck_job_ids),
+                timeout,
+                stuck_job_ids,
+            )
+            with self._lock:
+                for job_id in stuck_job_ids:
+                    self._running_jobs.pop(job_id, None)
+            for job_id in stuck_job_ids:
+                try:
+                    runner.cleanup(job_id, log_dir=self.jobs_dir / job_id)
+                except Exception as e:
+                    logger.warning(
+                        "Failed to clean up container for job %s during shutdown: %s", job_id, e
+                    )
+
+        logger.info("Job manager shutdown complete")
 
     def get_job(self, job_id: str) -> JobInfo | None:
         """
