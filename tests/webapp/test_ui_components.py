@@ -143,3 +143,25 @@ class TestBadgeSymbolsReexportedFromUiComponents:
         assert callable(render_status_cell_slot)
         assert callable(render_text_with_pmid_links)
         assert callable(transform_pmid_references)
+
+
+class TestFormsSymbolsReexportedFromUiComponents:
+    """
+    render_dialog_actions was extracted to
+    openscientist.webapp_components.components.forms. This test guards the
+    backward-compatibility re-export from ui_components, since production code
+    across the app still imports it directly from this module.
+    """
+
+    def test_render_dialog_actions_is_same_object_in_both_modules(self):
+        """ui_components must expose the exact same render_dialog_actions object."""
+        from openscientist.webapp_components import ui_components
+        from openscientist.webapp_components.components import forms
+
+        assert ui_components.render_dialog_actions is forms.render_dialog_actions
+
+    def test_named_import_from_ui_components_still_works(self):
+        """Exercise the historical `from ui_components import render_dialog_actions` pattern."""
+        from openscientist.webapp_components.ui_components import render_dialog_actions
+
+        assert callable(render_dialog_actions)

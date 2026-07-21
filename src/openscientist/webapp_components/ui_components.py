@@ -44,6 +44,11 @@ from openscientist.webapp_components.components.badges import (  # noqa: F401
     transform_pmid_references,
 )
 
+# Re-exported below for backward compatibility: dialog action buttons moved to
+# openscientist.webapp_components.components.forms, but existing call sites import
+# them from this module, so they must remain importable from here unchanged.
+from openscientist.webapp_components.components.forms import render_dialog_actions  # noqa: F401
+
 # Re-exported below for backward compatibility: navigation moved to
 # openscientist.webapp_components.components.navigation, but existing call sites
 # import it from this module, so it must remain importable from here unchanged.
@@ -591,31 +596,6 @@ def render_loading_spinner(message: str = "Loading...") -> ui.element:
         ui.spinner(size="lg")
         ui.label(message).classes("ml-4 text-gray-500")
     return container
-
-
-def render_dialog_actions(
-    on_confirm: Callable[[], None | Awaitable[None]],
-    on_cancel: Callable[[], None],
-    confirm_label: str = "Confirm",
-    cancel_label: str = "Cancel",
-    confirm_props: str = "color=primary",
-) -> None:
-    """
-    Render standard dialog action buttons (Cancel/Confirm).
-
-    Creates a right-aligned row with Cancel and Confirm buttons.
-    Use this in dialogs to ensure consistent footer styling.
-
-    Args:
-        on_confirm: Callback when confirm button is clicked (can be async)
-        on_cancel: Callback when cancel button is clicked
-        confirm_label: Text for the confirm button
-        cancel_label: Text for the cancel button
-        confirm_props: Quasar props for the confirm button
-    """
-    with ui.row().classes("w-full justify-end gap-2 mt-4"):
-        ui.button(cancel_label, on_click=on_cancel).props("flat")
-        ui.button(confirm_label, on_click=on_confirm).props(confirm_props)
 
 
 def make_action_button_slot(
