@@ -1,6 +1,7 @@
 import warnings
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import nicegui
 import pytest
@@ -174,7 +175,7 @@ def test_patch_nicegui_timer_deactivates_on_runtime_error(monkeypatch) -> None:
             nonlocal deactivated
             deactivated = True
 
-    result = _NiceGUITimer._get_context(_FakeTimer())
+    result = _NiceGUITimer._get_context(cast(_NiceGUITimer, _FakeTimer()))
 
     assert deactivated is True
     assert result is not None  # nullcontext() sentinel returned instead of raising
