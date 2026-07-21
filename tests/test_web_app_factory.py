@@ -1,9 +1,13 @@
+import warnings
 from pathlib import Path
 from types import SimpleNamespace
 
+import nicegui
+import pytest
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
+from nicegui.elements.timer import Timer as _NiceGUITimer
 
 from openscientist import web_app
 
@@ -134,6 +138,46 @@ def test_register_apple_touch_icon_redirects_root_requests() -> None:
 
         assert response.status_code == 301
         assert response.headers["location"] == "/assets/apple-touch-icon.png"
+
+
+def test_patch_nicegui_timer_no_warning_on_validated_version(monkeypatch) -> None:
+    monkeypatch.setattr(nicegui, "__version__", web_app._NICEGUI_PATCH_VALIDATED_VERSION)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        web_app._patch_nicegui_timer()
+
+
+def test_patch_nicegui_timer_warns_on_version_mismatch(monkeypatch) -> None:
+    monkeypatch.setattr(nicegui, "__version__", "999.0.0")
+
+    # UserWarning (not DeprecationWarning) so it isn't dropped by Python's default
+    # filters when this module is imported normally rather than run as __main__
+    # (e.g. the uvicorn --reload worker subprocess).
+    with pytest.warns(UserWarning, match="999.0.0"):
+        web_app._patch_nicegui_timer()
+
+
+def test_patch_nicegui_timer_deactivates_on_runtime_error(monkeypatch) -> None:
+    monkeypatch.setattr(nicegui, "__version__", web_app._NICEGUI_PATCH_VALIDATED_VERSION)
+
+    def _raise(_self) -> None:
+        raise RuntimeError("parent slot deleted")
+
+    monkeypatch.setattr(_NiceGUITimer, "_get_context", _raise, raising=True)
+    web_app._patch_nicegui_timer()
+
+    deactivated = False
+
+    class _FakeTimer:
+        def deactivate(self) -> None:
+            nonlocal deactivated
+            deactivated = True
+
+    result = _NiceGUITimer._get_context(_FakeTimer())
+
+    assert deactivated is True
+    assert result is not None  # nullcontext() sentinel returned instead of raising
 
 
 def test_register_pwa_metadata_adds_shared_head_html(monkeypatch) -> None:

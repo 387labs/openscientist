@@ -38,10 +38,29 @@ JOBS_DIR_ENV = "OPENSCIENTIST_JOBS_DIR"
 # `with self._get_context():` call at line 90 of timer.py, so the error
 # propagates to the background task handler and fills the log.
 # Patch: return nullcontext() and deactivate the timer instead of raising.
+#
+# Validated against nicegui==3.7.1. Remove once upstream fixes the underlying
+# issue, or revalidate against timer.py after any NiceGUI upgrade.
+_NICEGUI_PATCH_VALIDATED_VERSION = "3.7.1"
+
+
 def _patch_nicegui_timer() -> None:
+    import warnings
     from contextlib import nullcontext
 
+    import nicegui
     from nicegui.elements.timer import Timer as _NiceGUITimer
+
+    if nicegui.__version__ != _NICEGUI_PATCH_VALIDATED_VERSION:
+        warnings.warn(
+            f"NiceGUI timer patch was validated against nicegui=="
+            f"{_NICEGUI_PATCH_VALIDATED_VERSION}, but installed version is "
+            f"{nicegui.__version__}. Verify the patch in _patch_nicegui_timer() "
+            "still applies to nicegui.elements.timer.Timer._get_context "
+            "before relying on it.",
+            UserWarning,
+            stacklevel=2,
+        )
 
     _orig = _NiceGUITimer._get_context
 
