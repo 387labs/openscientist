@@ -3,7 +3,11 @@
 Stands up tecnativa/docker-socket-proxy with the exact environment from
 docker-compose.yml, points a Docker client at it, and asserts that the
 container-per-job lifecycle ops are allowed while everything outside the
-whitelist is denied (HTTP 403). Skips when Docker is unavailable.
+whitelist is denied (HTTP 403).
+
+This is environment-dependent: it SKIPS (never errors) when Docker is
+unavailable, images can't be pulled, or the proxy can't be reached — so it
+adds value where Docker cooperates without ever making CI flaky.
 """
 
 from __future__ import annotations
@@ -48,6 +52,25 @@ PROXY_ENV = {
 }
 
 
+def _connect_ready(base_url: str, timeout: float = 45.0):
+    """Return a Docker client once the proxy answers /version, else skip.
+
+    The client is (re)created inside the loop because DockerClient negotiates
+    the API version at construction time, which fails until haproxy is up.
+    """
+    deadline = time.monotonic() + timeout
+    last: Exception | None = None
+    while time.monotonic() < deadline:
+        try:
+            client = docker.DockerClient(base_url=base_url)
+            client.version()
+            return client
+        except Exception as exc:  # not-ready yet — retry
+            last = exc
+            time.sleep(1.0)
+    pytest.skip(f"socket proxy not reachable after {timeout}s: {last}")
+
+
 @pytest.mark.integration
 class TestDockerSocketProxy:
     """Behavioural checks against a live socket proxy."""
@@ -69,8 +92,6 @@ class TestDockerSocketProxy:
     @pytest.fixture(scope="class")
     def proxied_client(self, host_docker):
         """A Docker client that reaches the daemon ONLY through the proxy."""
-        # Pull via the host (not the proxy) so the lifecycle test does not depend
-        # on the proxy's image-pull path; skip the whole class on network issues.
         try:
             host_docker.images.pull(PROXY_IMAGE)
             host_docker.images.pull(LIFECYCLE_IMAGE)
@@ -89,14 +110,18 @@ class TestDockerSocketProxy:
             pytest.skip(f"could not start socket proxy: {exc}")
 
         try:
-            proxy.reload()
-            host_port = proxy.attrs["NetworkSettings"]["Ports"]["2375/tcp"][0]["HostPort"]
-            client = docker.DockerClient(base_url=f"tcp://127.0.0.1:{host_port}")
-            _wait_ready(client)
+            try:
+                proxy.reload()
+                host_port = proxy.attrs["NetworkSettings"]["Ports"]["2375/tcp"][0]["HostPort"]
+            except Exception as exc:
+                pytest.skip(f"proxy port not published: {exc}")
+
+            client = _connect_ready(f"tcp://127.0.0.1:{host_port}")
             try:
                 yield client
             finally:
-                client.close()
+                with suppress(Exception):
+                    client.close()
         finally:
             with suppress(Exception):
                 proxy.remove(force=True)
@@ -135,18 +160,6 @@ class TestDockerSocketProxy:
 
     def test_network_create_denied(self, proxied_client):
         _assert_forbidden(lambda: proxied_client.networks.create("r6-denied"))
-
-
-def _wait_ready(client: docker.DockerClient, timeout: float = 30.0) -> None:
-    deadline = time.monotonic() + timeout
-    while True:
-        try:
-            client.version()
-            return
-        except Exception:
-            if time.monotonic() > deadline:
-                pytest.skip("socket proxy did not become ready")
-            time.sleep(0.5)
 
 
 def _assert_forbidden(call) -> None:
