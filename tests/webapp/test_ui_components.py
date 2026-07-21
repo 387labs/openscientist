@@ -8,6 +8,28 @@ from openscientist.webapp_components.ui_components import (
 )
 
 
+class TestActionsSymbolsReexportedFromUiComponents:
+    """
+    render_job_action_buttons was extracted to
+    openscientist.webapp_components.components.actions. This test guards the
+    backward-compatibility re-export from ui_components, since production code
+    across the app still imports it directly from this module.
+    """
+
+    def test_render_job_action_buttons_is_same_object_in_both_modules(self):
+        """ui_components must expose the exact same render_job_action_buttons object."""
+        from openscientist.webapp_components import ui_components
+        from openscientist.webapp_components.components import actions
+
+        assert ui_components.render_job_action_buttons is actions.render_job_action_buttons
+
+    def test_named_import_from_ui_components_still_works(self):
+        """Exercise the historical `from ui_components import render_job_action_buttons` pattern."""
+        from openscientist.webapp_components.ui_components import render_job_action_buttons
+
+        assert callable(render_job_action_buttons)
+
+
 class TestProjectResourceLinks:
     """Tests for shared public resource links."""
 
