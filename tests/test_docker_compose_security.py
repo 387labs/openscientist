@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import yaml
+import yaml  # type: ignore[import-untyped]
 
 _COMPOSE_PATH = Path(__file__).resolve().parents[1] / "docker-compose.yml"
 _SOCKET = "/var/run/docker.sock"
