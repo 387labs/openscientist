@@ -94,9 +94,7 @@ class TestMakeActionButtonSlot:
 
     def test_icon_included_when_provided(self):
         """Test that the icon attribute is rendered when icon is provided."""
-        template = make_action_button_slot(
-            label="Assign", event_name="assign", icon="person_add"
-        )
+        template = make_action_button_slot(label="Assign", event_name="assign", icon="person_add")
         assert 'icon="person_add"' in template
 
     def test_event_name_used_in_emit(self):
