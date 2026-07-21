@@ -295,7 +295,7 @@ class TestBedrockCostAndMessages:
             info = provider.get_cost_info()
         assert info.total_spend_usd is None
         assert info.recent_spend_usd is None
-        assert "unavailable" in info.data_lag_note.lower()
+        assert "unavailable" in (info.data_lag_note or "").lower()
 
     async def test_send_message_uses_bedrock_client(self) -> None:
         provider = self._provider()
