@@ -169,8 +169,9 @@ exclude_lines = [
     "@overload",
     "except ImportError:",
 ]
-# Minimum coverage threshold
-fail_under = 60
+# Minimum coverage threshold. Audit R19: ratcheting 60 -> 75 as coverage lands;
+# 67 locks the current measured floor so coverage can't regress.
+fail_under = 67
 
 [tool.coverage.html]
 directory = "htmlcov"
