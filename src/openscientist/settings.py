@@ -886,6 +886,22 @@ class Settings(BaseSettings):
         ).hexdigest()
         return self
 
+    @model_validator(mode="after")
+    def validate_admin_database_url(self) -> "Settings":
+        """Require ADMIN_DATABASE_URL outside development; warn when falling back in dev."""
+        if self.database.admin_database_url:
+            return self
+        if self.dev.dev_mode:
+            logger.warning(
+                "ADMIN_DATABASE_URL is not set; falling back to DATABASE_URL for admin "
+                "operations. Configure a separate admin connection in production."
+            )
+            return self
+        raise ValueError(
+            "ADMIN_DATABASE_URL is required when OPENSCIENTIST_DEV_MODE is not enabled. "
+            "Set ADMIN_DATABASE_URL to a PostgreSQL URL using the elevated admin role."
+        )
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
