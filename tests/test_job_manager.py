@@ -872,3 +872,94 @@ class TestEffectiveModel:
             "openscientist.job_manager.get_provider", side_effect=ValueError("misconfigured")
         ):
             assert _effective_model(self._settings()) is None
+
+
+class TestJobManagerCancelSummaryCoverage:
+    """Coverage for cancel_job branches, active-count, and job summary (Priority-7)."""
+
+    @pytest.fixture(autouse=True)
+    def _mock_ks_progress(self):
+        with patch(
+            "openscientist.job_manager._load_progress_from_knowledge_state",
+            return_value=(0, 0),
+        ):
+            yield
+
+    def _job(self, status: JobStatus, job_id: str = "j1") -> JobInfo:
+        return JobInfo(
+            job_id=job_id,
+            research_question="Q?",
+            status=status,
+            created_at="2026-01-01T00:00:00+00:00",
+        )
+
+    def test_cancel_nonexistent_raises(self, tmp_path):
+        manager = _new_manager(tmp_path)
+        with patch.object(manager, "get_job", return_value=None):
+            with pytest.raises(ValueError, match="not found"):
+                manager.cancel_job(str(uuid4()))
+
+    def test_cancel_completed_raises(self, tmp_path):
+        manager = _new_manager(tmp_path)
+        with patch.object(manager, "get_job", return_value=self._job(JobStatus.COMPLETED)):
+            with pytest.raises(ValueError, match="not pending, running, or queued"):
+                manager.cancel_job("j1")
+
+    def test_cancel_pending_untracks_without_container_stop(self, tmp_path):
+        manager = _new_manager(tmp_path)
+        job_id = str(uuid4())
+        manager._running_jobs[job_id] = MagicMock()
+        with (
+            patch.object(manager, "get_job", return_value=self._job(JobStatus.PENDING, job_id)),
+            patch.object(manager, "_update_job_status") as mock_update,
+            patch.object(manager, "_start_next_queued_job"),
+        ):
+            manager.cancel_job(job_id)
+        assert mock_update.call_args.args[1] == JobStatus.CANCELLED
+        assert job_id not in manager._running_jobs
+
+    def test_active_job_count_zero_when_none_running(self, tmp_path):
+        manager = _new_manager(tmp_path)
+        assert manager._get_active_job_count() == 0
+
+    def test_list_operational_jobs_returns_empty_on_db_error(self, tmp_path):
+        manager = _new_manager(tmp_path)
+        with patch(
+            "openscientist.job_manager._db_list_jobs",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("db down"),
+        ):
+            assert manager._list_operational_jobs() == []
+
+    def test_get_job_summary_counts_and_cost(self, tmp_path):
+        manager = _new_manager(tmp_path)
+        jobs = [self._job(JobStatus.COMPLETED, "a"), self._job(JobStatus.FAILED, "b")]
+        provider = MagicMock()
+        provider.get_cost_info.return_value = "cost"
+        provider.evaluate_budget.return_value = "budget"
+        with (
+            patch.object(manager, "list_jobs", return_value=jobs),
+            patch("openscientist.job_manager.get_provider", return_value=provider),
+        ):
+            summary = manager.get_job_summary()
+        assert summary["total_jobs"] == 2
+        assert summary["status_counts"]["completed"] == 1
+        assert summary["status_counts"]["failed"] == 1
+        assert summary["cost_info"] == "cost"
+        assert summary["budget_check"] == "budget"
+
+    def test_get_job_summary_handles_provider_error(self, tmp_path):
+        from openscientist.exceptions import ProviderError
+
+        manager = _new_manager(tmp_path)
+        with (
+            patch.object(manager, "list_jobs", return_value=[]),
+            patch(
+                "openscientist.job_manager.get_provider",
+                side_effect=ProviderError("no cost"),
+            ),
+        ):
+            summary = manager.get_job_summary()
+        assert summary["total_jobs"] == 0
+        assert summary["cost_info"] is None
+        assert summary["budget_check"] is None
