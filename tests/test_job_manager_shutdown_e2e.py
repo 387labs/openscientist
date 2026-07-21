@@ -13,6 +13,7 @@ and is meant as a one-off confidence check, not a fast-running unit test.
 
 import threading
 import time
+from typing import Any, cast
 from uuid import uuid4
 
 import pytest
@@ -46,9 +47,12 @@ async def test_shutdown_real_docker_and_postgres(tmp_path, test_engine):
         name=container_name,
     )
 
-    def remaining_containers() -> list:
-        return docker_client.containers.list(
-            all=True, filters={"label": f"openscientist.job_id={job_id}"}
+    def remaining_containers() -> list[Any]:
+        return cast(
+            "list[Any]",
+            docker_client.containers.list(
+                all=True, filters={"label": f"openscientist.job_id={job_id}"}
+            ),
         )
 
     try:
