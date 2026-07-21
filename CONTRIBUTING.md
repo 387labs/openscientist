@@ -116,3 +116,12 @@ uv run ruff check src/ tests/   # lint
 uv run mypy src/openscientist/ tests/  # types
 uv run pytest                   # tests (60% coverage minimum)
 ```
+
+## Git Hooks
+
+Hooks are managed by [pre-commit](https://pre-commit.com) (see `.pre-commit-config.yaml`). Install both hook types once after cloning:
+
+```bash
+uv run pre-commit install                     # runs lint/type/test checks on commit
+uv run pre-commit install --hook-type pre-push # blocks direct pushes to main
+```
