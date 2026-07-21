@@ -163,10 +163,18 @@ class TestJobContainerRunner:
         run_kwargs = cast(MagicMock, mock_client.containers.run).call_args.kwargs
         assert run_kwargs["extra_hosts"] == {"host.docker.internal": "host-gateway"}
 
-    def test_launch_routes_agent_docker_through_proxy(self):
-        """The agent inherits DOCKER_HOST so its ContainerManager talks to the
-        restricted socket proxy, not a mounted host socket (R6)."""
-        with patch.dict(os.environ, {"DOCKER_HOST": "tcp://docker-socket-proxy:2375"}):
+    def test_launch_inherits_docker_host_for_proxy(self):
+        """The agent inherits the web app's DOCKER_HOST verbatim, so its
+        ContainerManager talks to the same restricted socket proxy (R6)."""
+        with patch.dict(os.environ, {"DOCKER_HOST": "tcp://custom-proxy:9999"}):
+            env = self._launch_and_get_env(run_mode=None)
+        assert env["DOCKER_HOST"] == "tcp://custom-proxy:9999"
+
+    def test_launch_defaults_docker_host_to_socket_proxy(self):
+        """With no DOCKER_HOST in the environment, the agent still points at the
+        compose proxy service - never a raw host socket (R6)."""
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("DOCKER_HOST", None)
             env = self._launch_and_get_env(run_mode=None)
         assert env["DOCKER_HOST"] == "tcp://docker-socket-proxy:2375"
 
