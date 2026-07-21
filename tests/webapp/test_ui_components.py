@@ -189,3 +189,41 @@ class TestAlertsSymbolsReexportedFromUiComponents:
         assert callable(render_alert_banner)
         assert callable(render_config_error_banner)
         assert callable(render_error_card)
+
+
+class TestTextSymbolsReexportedFromUiComponents:
+    """
+    Text formatting/rendering helpers were extracted to
+    openscientist.webapp_components.components.text. These tests guard the
+    backward-compatibility re-export from ui_components, since production code
+    across the app still imports these symbols directly from this module.
+    """
+
+    REEXPORTED_TEXT_SYMBOLS = [
+        "format_relative_time",
+        "format_uptime",
+        "render_justified_text",
+    ]
+
+    def test_text_symbols_are_identical_objects_in_both_modules(self):
+        """ui_components must expose the exact same objects as the text module."""
+        from openscientist.webapp_components import ui_components
+        from openscientist.webapp_components.components import text
+
+        for name in self.REEXPORTED_TEXT_SYMBOLS:
+            assert hasattr(ui_components, name), f"{name} is not importable from ui_components"
+            assert getattr(ui_components, name) is getattr(text, name), (
+                f"ui_components.{name} is not the same object as text.{name}"
+            )
+
+    def test_named_imports_from_ui_components_still_work(self):
+        """Exercise the historical `from ui_components import X` usage pattern."""
+        from openscientist.webapp_components.ui_components import (
+            format_relative_time,
+            format_uptime,
+            render_justified_text,
+        )
+
+        assert callable(format_relative_time)
+        assert callable(format_uptime)
+        assert callable(render_justified_text)
