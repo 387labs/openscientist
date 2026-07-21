@@ -5,10 +5,8 @@ Provides UI rendering functions for error displays, status badges,
 page headers, and other common interface elements.
 """
 
-import html
 import logging
 from collections.abc import Awaitable, Callable
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
@@ -72,6 +70,15 @@ from openscientist.webapp_components.components.tables import (  # noqa: F401
     render_skill_name_slot,
 )
 
+# Re-exported below for backward compatibility: text formatting/rendering helpers
+# moved to openscientist.webapp_components.components.text, but existing call sites
+# import them from this module, so they must remain importable from here unchanged.
+from openscientist.webapp_components.components.text import (  # noqa: F401
+    format_relative_time,
+    format_uptime,
+    render_justified_text,
+)
+
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
@@ -106,73 +113,8 @@ def render_project_resource_links() -> None:
                 )
 
 
-def format_relative_time(dt: datetime | None) -> str:
-    """
-    Format datetime as relative time (e.g., '2 hours ago').
-
-    Args:
-        dt: Datetime to format, or None
-
-    Returns:
-        Human-readable relative time string, or '-' if dt is None
-    """
-    if dt is None:
-        return "-"
-
-    # Ensure dt is timezone-aware (assume UTC if naive)
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=UTC)
-
-    now = datetime.now(UTC)
-    delta = now - dt
-
-    seconds = delta.total_seconds()
-
-    if seconds < 0:
-        return "just now"
-    if seconds < 60:
-        return "just now"
-    if seconds < 3600:
-        minutes = int(seconds / 60)
-        return f"{minutes} minute{'s' if minutes != 1 else ''} ago"
-    if seconds < 86400:
-        hours = int(seconds / 3600)
-        return f"{hours} hour{'s' if hours != 1 else ''} ago"
-    if seconds < 604800:
-        days = int(seconds / 86400)
-        return f"{days} day{'s' if days != 1 else ''} ago"
-    if seconds < 2592000:
-        weeks = int(seconds / 604800)
-        return f"{weeks} week{'s' if weeks != 1 else ''} ago"
-    months = int(seconds / 2592000)
-    return f"{months} month{'s' if months != 1 else ''} ago"
-
-
 # Type alias for async callbacks
 AsyncCallback = Callable[[dict[str, Any]], Awaitable[None]]
-
-
-def render_justified_text(
-    text: str,
-    text_classes: str = "text-sm text-gray-700",
-) -> None:
-    """
-    Render text as a justified paragraph for better readability.
-
-    Uses text-align: justify with automatic hyphenation for clean
-    paragraph formatting in large text blocks.
-
-    Args:
-        text: The text to render
-        text_classes: CSS classes for styling (color, size, etc.)
-    """
-    if not text:
-        return
-
-    ui.html(
-        f'<p class="{text_classes}" style="text-align:justify;hyphens:auto;'
-        f'text-justify:inter-word;margin:0;">{html.escape(text)}</p>'
-    )
 
 
 def render_job_action_buttons(
@@ -1002,31 +944,6 @@ _ASSETS_DIR = Path(__file__).parent.parent / "assets"
 # Animated OpenScientist logo SVG — loaded from assets/thinking.svg at import time.
 # Rendered inline (via ui.html) so SMIL animations work; <img> tags disable them.
 OPENSCIENTIST_THINKING_SVG = (_ASSETS_DIR / "thinking.svg").read_text(encoding="utf-8")
-
-
-def format_uptime(seconds: float) -> str:
-    """Format seconds as a human-readable uptime string.
-
-    Examples:
-        >>> format_uptime(30)
-        '30s'
-        >>> format_uptime(90)
-        '1m 30s'
-        >>> format_uptime(8100)
-        '2h 15m'
-    """
-    if seconds < 0:
-        return "0s"
-    seconds = int(seconds)
-    if seconds < 60:
-        return f"{seconds}s"
-    minutes = seconds // 60
-    secs = seconds % 60
-    if minutes < 60:
-        return f"{minutes}m {secs}s" if secs else f"{minutes}m"
-    hours = minutes // 60
-    mins = minutes % 60
-    return f"{hours}h {mins}m" if mins else f"{hours}h"
 
 
 def render_thinking_status(status_text: str = "Thinking...") -> ui.element:
