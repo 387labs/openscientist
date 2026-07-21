@@ -165,3 +165,41 @@ class TestFormsSymbolsReexportedFromUiComponents:
         from openscientist.webapp_components.ui_components import render_dialog_actions
 
         assert callable(render_dialog_actions)
+
+
+class TestTablesSymbolsReexportedFromUiComponents:
+    """
+    Table slot-template generators were extracted to
+    openscientist.webapp_components.components.tables. These tests guard the
+    backward-compatibility re-export from ui_components, since production code
+    across the app still imports these symbols directly from this module.
+    """
+
+    REEXPORTED_TABLE_SYMBOLS = [
+        "make_action_button_slot",
+        "render_actions_slot_with_delete",
+        "render_skill_name_slot",
+    ]
+
+    def test_table_symbols_are_identical_objects_in_both_modules(self):
+        """ui_components must expose the exact same objects as the tables module."""
+        from openscientist.webapp_components import ui_components
+        from openscientist.webapp_components.components import tables
+
+        for name in self.REEXPORTED_TABLE_SYMBOLS:
+            assert hasattr(ui_components, name), f"{name} is not importable from ui_components"
+            assert getattr(ui_components, name) is getattr(tables, name), (
+                f"ui_components.{name} is not the same object as tables.{name}"
+            )
+
+    def test_named_imports_from_ui_components_still_work(self):
+        """Exercise the historical `from ui_components import X` usage pattern."""
+        from openscientist.webapp_components.ui_components import (
+            make_action_button_slot,
+            render_actions_slot_with_delete,
+            render_skill_name_slot,
+        )
+
+        assert callable(make_action_button_slot)
+        assert callable(render_actions_slot_with_delete)
+        assert callable(render_skill_name_slot)
