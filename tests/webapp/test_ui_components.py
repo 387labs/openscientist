@@ -1,10 +1,5 @@
 """Tests for UI components module."""
 
-from contextlib import suppress
-from pathlib import Path
-from unittest.mock import Mock, patch
-
-from openscientist.job_manager import JobStatus
 from openscientist.webapp_components.ui_components import (
     OPENSCIENTIST_GITHUB_URL,
     OPENSCIENTIST_PAPER_URL,
@@ -24,54 +19,6 @@ class TestProjectResourceLinks:
             ("Paper", OPENSCIENTIST_PAPER_URL),
             ("Latest Release", OPENSCIENTIST_RELEASE_URL),
         ]
-
-
-class TestRenderErrorCard:
-    """Tests for render_error_card function (basic structure testing)."""
-
-    @patch("openscientist.webapp_components.ui_components.ui")
-    def test_render_error_card_called(self, mock_ui):
-        """Test that render_error_card can be called without errors."""
-        from openscientist.webapp_components.ui_components import render_error_card
-
-        # Mock UI components
-        mock_ui.card.return_value.__enter__ = Mock()
-        mock_ui.card.return_value.__exit__ = Mock(return_value=False)
-        mock_ui.row.return_value.__enter__ = Mock()
-        mock_ui.row.return_value.__exit__ = Mock(return_value=False)
-        mock_ui.column.return_value.__enter__ = Mock()
-        mock_ui.column.return_value.__exit__ = Mock(return_value=False)
-        mock_ui.expansion.return_value.__enter__ = Mock()
-        mock_ui.expansion.return_value.__exit__ = Mock(return_value=False)
-        mock_ui.element.return_value.__enter__ = Mock()
-        mock_ui.element.return_value.__exit__ = Mock(return_value=False)
-        mock_ui.button.return_value.__enter__ = Mock()
-        mock_ui.button.return_value.__exit__ = Mock(return_value=False)
-
-        error_info = {
-            "category": "configuration",
-            "title": "Test Error",
-            "message": "Test message",
-            "extracted_error": "Error details",
-            "steps": ["Step 1", "Step 2"],
-            "raw": "Raw error",
-            "contact_admin": True,
-        }
-
-        job_info = Mock()
-        job_info.status = JobStatus.FAILED
-        job_info.iterations_completed = 1
-        job_info.max_iterations = 5
-        job_info.failed_at = "2026-02-05T10:00:00"
-
-        job_dir = Path("/fake/job/dir")
-
-        # Some exceptions are acceptable due to mock limitations.
-        with suppress(Exception):
-            render_error_card(error_info, job_info, job_dir)
-
-        # Verify UI elements were called
-        assert mock_ui.card.called or mock_ui.row.called
 
 
 class TestBadgeSymbolsReexportedFromUiComponents:
@@ -203,3 +150,42 @@ class TestTablesSymbolsReexportedFromUiComponents:
         assert callable(make_action_button_slot)
         assert callable(render_actions_slot_with_delete)
         assert callable(render_skill_name_slot)
+
+
+class TestAlertsSymbolsReexportedFromUiComponents:
+    """
+    Alert/banner components were extracted to
+    openscientist.webapp_components.components.alerts. These tests guard the
+    backward-compatibility re-export from ui_components, since production code
+    across the app (and webapp_components/__init__.py) still imports these
+    symbols directly from this module.
+    """
+
+    REEXPORTED_ALERT_SYMBOLS = [
+        "render_alert_banner",
+        "render_config_error_banner",
+        "render_error_card",
+    ]
+
+    def test_alert_symbols_are_identical_objects_in_both_modules(self):
+        """ui_components must expose the exact same objects as the alerts module."""
+        from openscientist.webapp_components import ui_components
+        from openscientist.webapp_components.components import alerts
+
+        for name in self.REEXPORTED_ALERT_SYMBOLS:
+            assert hasattr(ui_components, name), f"{name} is not importable from ui_components"
+            assert getattr(ui_components, name) is getattr(alerts, name), (
+                f"ui_components.{name} is not the same object as alerts.{name}"
+            )
+
+    def test_named_imports_from_ui_components_still_work(self):
+        """Exercise the historical `from ui_components import X` usage pattern."""
+        from openscientist.webapp_components.ui_components import (
+            render_alert_banner,
+            render_config_error_banner,
+            render_error_card,
+        )
+
+        assert callable(render_alert_banner)
+        assert callable(render_config_error_banner)
+        assert callable(render_error_card)
