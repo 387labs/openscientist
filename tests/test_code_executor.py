@@ -2,6 +2,7 @@
 
 import shutil
 from pathlib import Path
+from typing import Any
 from unittest.mock import Mock, call, patch
 
 import matplotlib.pyplot as plt
@@ -382,11 +383,11 @@ class TestLoadData:
     def test_none_path_returns_none(self):
         assert load_data(None) is None
 
-    def test_missing_path_raises(self, tmp_path: Path):
+    def test_missing_path_raises(self, tmp_path: Path) -> None:
         with pytest.raises(FileNotFoundError):
             load_data(str(tmp_path / "missing.csv"))
 
-    def test_load_csv(self, tmp_path: Path):
+    def test_load_csv(self, tmp_path: Path) -> None:
         csv_path = tmp_path / "data.csv"
         csv_path.write_text("a,b\n1,2\n3,4\n", encoding="utf-8")
         df = load_data(str(csv_path))
@@ -394,7 +395,7 @@ class TestLoadData:
         assert list(df.columns) == ["a", "b"]
         assert len(df) == 2
 
-    def test_load_tsv(self, tmp_path: Path):
+    def test_load_tsv(self, tmp_path: Path) -> None:
         tsv_path = tmp_path / "data.tsv"
         tsv_path.write_text("a\tb\n1\t2\n", encoding="utf-8")
         df = load_data(str(tsv_path))
@@ -402,7 +403,7 @@ class TestLoadData:
         assert list(df.columns) == ["a", "b"]
         assert len(df) == 1
 
-    def test_csv_fallback_for_unknown_extension(self, tmp_path: Path):
+    def test_csv_fallback_for_unknown_extension(self, tmp_path: Path) -> None:
         data_path = tmp_path / "data.custom"
         data_path.write_text("x,y\n5,6\n", encoding="utf-8")
         df = load_data(str(data_path))
@@ -490,7 +491,7 @@ class TestExecuteSparqlCode:
     def test_sets_descriptive_user_agent(self, plots_dir):
         """A descriptive User-Agent is required by Wikidata's policy (generic
         library defaults get throttled/blocked). The wrapper must carry ours."""
-        sparql_json = {"head": {"vars": []}, "results": {"bindings": []}}
+        sparql_json: dict[str, Any] = {"head": {"vars": []}, "results": {"bindings": []}}
         query = "# ENDPOINT: https://example.org/sparql\nSELECT ?s WHERE { }"
         with patch("SPARQLWrapper.SPARQLWrapper") as mock_cls:
             mock_cls.return_value.query.return_value.convert.return_value = sparql_json
@@ -545,13 +546,13 @@ class TestExecuteSparqlCode:
         query = "# ENDPOINT: https://example.org/sparql\nSELECT ?s WHERE { }"
         with patch("SPARQLWrapper.SPARQLWrapper") as mock_cls:
             mock_instance = mock_cls.return_value
-            mock_instance.query.side_effect = SPARQLWrapperException("bad query")
+            mock_instance.query.side_effect = SPARQLWrapperException(b"bad query")
             result = execute_sparql_code(query, plots_dir)
         assert result["success"] is False
         assert "SPARQL query error" in result["error"]
 
     def test_execution_time_tracked(self, plots_dir):
-        sparql_json = {"head": {"vars": []}, "results": {"bindings": []}}
+        sparql_json: dict[str, Any] = {"head": {"vars": []}, "results": {"bindings": []}}
         query = "# ENDPOINT: https://example.org/sparql\nSELECT * WHERE { }"
         with patch("SPARQLWrapper.SPARQLWrapper") as mock_cls:
             mock_instance = mock_cls.return_value

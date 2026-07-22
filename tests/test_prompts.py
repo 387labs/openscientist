@@ -1,5 +1,7 @@
 """Tests for prompts module."""
 
+from typing import Any
+
 from openscientist.agent.claude_code_agent import ClaudeCodeAgent
 from openscientist.agent.codex_agent import CodexAgent
 from openscientist.prompts import (
@@ -214,6 +216,6 @@ class TestFormatSkillsList:
         assert "result-interpretation" in result
 
     def test_missing_description(self):
-        skills = {"my-skill": {}}
+        skills: dict[str, dict[str, Any]] = {"my-skill": {}}
         result = format_skills_list(skills)
         assert "No description" in result

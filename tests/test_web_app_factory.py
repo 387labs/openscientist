@@ -1,6 +1,8 @@
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
+import pytest
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
@@ -8,11 +10,11 @@ from fastapi.testclient import TestClient
 from openscientist import web_app
 
 
-def _noop(*_args, **_kwargs) -> None:
+def _noop(*_args: Any, **_kwargs: Any) -> None:
     pass
 
 
-def test_create_app_builds_host_app_once(monkeypatch, tmp_path: Path) -> None:
+def test_create_app_builds_host_app_once(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(web_app, "_state", web_app._AppState())
     monkeypatch.setattr(web_app, "_register_openapi_docs", _noop)
     monkeypatch.setattr(web_app, "_register_health_endpoint", _noop)
@@ -42,7 +44,9 @@ def test_create_app_builds_host_app_once(monkeypatch, tmp_path: Path) -> None:
     assert run_with_calls[0][1]["mount_path"] == "/"
 
 
-def test_main_reload_uses_factory_import_target(monkeypatch, tmp_path: Path) -> None:
+def test_main_reload_uses_factory_import_target(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setattr(web_app, "_settings_error", None)
     monkeypatch.setattr(
         "openscientist.settings.get_settings",
@@ -66,7 +70,9 @@ def test_main_reload_uses_factory_import_target(monkeypatch, tmp_path: Path) -> 
     assert Path(web_app.os.environ[web_app.JOBS_DIR_ENV]) == tmp_path / "jobs"
 
 
-def test_main_non_reload_runs_with_created_app(monkeypatch, tmp_path: Path) -> None:
+def test_main_non_reload_runs_with_created_app(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setattr(web_app, "_settings_error", None)
     monkeypatch.setattr(
         "openscientist.settings.get_settings",
@@ -91,7 +97,9 @@ def test_main_non_reload_runs_with_created_app(monkeypatch, tmp_path: Path) -> N
     assert kwargs["reload"] is False
 
 
-def test_register_nicegui_static_files_tolerates_duplicates(monkeypatch, tmp_path: Path) -> None:
+def test_register_nicegui_static_files_tolerates_duplicates(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     calls: list[tuple[str, str]] = []
 
     def fake_add_static_files(route: str, directory: str) -> None:
@@ -136,7 +144,7 @@ def test_register_apple_touch_icon_redirects_root_requests() -> None:
         assert response.headers["location"] == "/assets/apple-touch-icon.png"
 
 
-def test_register_pwa_metadata_adds_shared_head_html(monkeypatch) -> None:
+def test_register_pwa_metadata_adds_shared_head_html(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[str, bool]] = []
 
     monkeypatch.setattr(

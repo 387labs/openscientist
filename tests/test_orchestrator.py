@@ -8,13 +8,16 @@ unit testing.
 import os
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
 
 from openscientist.agent.base import TurnOutcome
+
+if TYPE_CHECKING:
+    from openscientist.agent.base import IterationResult
 from openscientist.orchestrator import (
     get_version_metadata,
     increment_ks_iteration,
@@ -133,6 +136,7 @@ class TestUpdateJobStatus:
             await update_job_status(job_dir, "awaiting_feedback")
 
         mock_notify.assert_awaited_once()
+        assert mock_notify.await_args is not None
         kwargs = mock_notify.await_args.kwargs
         assert kwargs["job_id"] == job_id
         assert kwargs["job_title"] == "Short title"
@@ -218,6 +222,7 @@ class TestDiscoveryCancellationAndFailure:
         assert result == wait_outcome
         # Should enter awaiting_feedback but must not flip back to running when cancelled.
         assert mock_update.await_count == 1
+        assert mock_update.await_args is not None
         assert mock_update.await_args.args == (job_dir, "awaiting_feedback")
 
     @pytest.mark.asyncio
@@ -848,10 +853,15 @@ class TestSaveTranscript:
 
     def test_writes_json_list(self, tmp_path):
         from openscientist.orchestrator.discovery import _save_transcript
-        from openscientist.transcript import AssistantText, UserPrompt, load_transcript
+        from openscientist.transcript import (
+            AssistantText,
+            TranscriptEntry,
+            UserPrompt,
+            load_transcript,
+        )
 
         path = tmp_path / "transcript.json"
-        transcript = [UserPrompt(text="hello"), AssistantText(text="hi")]
+        transcript: list[TranscriptEntry] = [UserPrompt(text="hello"), AssistantText(text="hi")]
         _save_transcript(path, transcript)
 
         loaded = load_transcript(path)
@@ -1045,7 +1055,7 @@ class TestReportGenerationPhase:
         assert "Does X cause Y?" in build_consensus_prompt("Does X cause Y?")
         assert "set_consensus_answer" in build_consensus_retry_prompt("Does X cause Y?")
 
-    def test_report_retry_prompt_is_self_contained(self, tmp_path: Path):
+    def test_report_retry_prompt_is_self_contained(self, tmp_path: Path) -> None:
         """The retry must restate the whole task, not just remind the model to
         write a file. A weak model re-anchors on the last instruction, so the
         retry has to carry the findings outline, the required structure, and the
@@ -1093,7 +1103,7 @@ class TestReportGenerationPhase:
         )
 
     @pytest.mark.asyncio
-    async def test_report_turn_succeeds_first_attempt(self, tmp_path: Path):
+    async def test_report_turn_succeeds_first_attempt(self, tmp_path: Path) -> None:
         from openscientist.knowledge_state import KnowledgeState
         from openscientist.orchestrator import discovery
 
@@ -1114,7 +1124,7 @@ class TestReportGenerationPhase:
         assert calls == [("FULL", False)]  # one attempt, continues the session
 
     @pytest.mark.asyncio
-    async def test_report_turn_retries_until_written(self, tmp_path: Path):
+    async def test_report_turn_retries_until_written(self, tmp_path: Path) -> None:
         from openscientist.knowledge_state import KnowledgeState
         from openscientist.orchestrator import discovery
 
@@ -1137,7 +1147,7 @@ class TestReportGenerationPhase:
         assert calls == [("FULL", False), ("RETRY", False)]
 
     @pytest.mark.asyncio
-    async def test_report_turn_gives_up_after_max(self, tmp_path: Path):
+    async def test_report_turn_gives_up_after_max(self, tmp_path: Path) -> None:
         from openscientist.knowledge_state import KnowledgeState
         from openscientist.orchestrator import discovery
 
@@ -1159,7 +1169,7 @@ class TestReportGenerationPhase:
         assert len(calls) == discovery._MAX_REPORT_ATTEMPTS
 
     @pytest.mark.asyncio
-    async def test_consensus_retries_until_recorded(self, tmp_path: Path):
+    async def test_consensus_retries_until_recorded(self, tmp_path: Path) -> None:
         from openscientist.agent.base import IterationResult
         from openscientist.knowledge_state import KnowledgeState
         from openscientist.orchestrator import discovery
@@ -1189,7 +1199,7 @@ class TestReportGenerationPhase:
         assert len(calls) == 2  # first attempt + one retry
 
     @pytest.mark.asyncio
-    async def test_consensus_rejects_stale_baseline(self, tmp_path: Path):
+    async def test_consensus_rejects_stale_baseline(self, tmp_path: Path) -> None:
         # On regeneration the KS already holds the prior run's consensus. A turn
         # that does not write a new one must NOT be accepted as fresh, so the
         # model is re-asked until attempts run out (the stale value is never
@@ -1218,7 +1228,9 @@ class TestReportGenerationPhase:
         assert len(calls) == discovery._MAX_CONSENSUS_ATTEMPTS
 
     @pytest.mark.asyncio
-    async def test_consensus_accepts_a_freshly_changed_answer_over_baseline(self, tmp_path: Path):
+    async def test_consensus_accepts_a_freshly_changed_answer_over_baseline(
+        self, tmp_path: Path
+    ) -> None:
         from openscientist.agent.base import IterationResult
         from openscientist.knowledge_state import KnowledgeState
         from openscientist.orchestrator import discovery
@@ -1245,7 +1257,7 @@ class TestReportGenerationPhase:
         assert len(calls) == 2
 
     @pytest.mark.asyncio
-    async def test_phase_happy_path(self, tmp_path: Path):
+    async def test_phase_happy_path(self, tmp_path: Path) -> None:
         from openscientist.agent.base import IterationResult
         from openscientist.knowledge_state import KnowledgeState
         from openscientist.orchestrator import discovery
@@ -1278,7 +1290,7 @@ class TestReportGenerationPhase:
         pdf.assert_awaited_once()
 
     @pytest.mark.asyncio
-    async def test_phase_fails_when_report_never_written(self, tmp_path: Path):
+    async def test_phase_fails_when_report_never_written(self, tmp_path: Path) -> None:
         from openscientist.agent.base import IterationResult
         from openscientist.knowledge_state import KnowledgeState
         from openscientist.orchestrator import discovery
@@ -1330,7 +1342,7 @@ class TestRegenerateReportAsync:
         }
 
     @pytest.mark.asyncio
-    async def test_skips_discovery_loop_and_runs_report(self, tmp_path: Path):
+    async def test_skips_discovery_loop_and_runs_report(self, tmp_path: Path) -> None:
         from openscientist.knowledge_state import KnowledgeState
         from openscientist.orchestrator import discovery
 
@@ -1363,7 +1375,7 @@ class TestRegenerateReportAsync:
         assert result["status"] == "completed"
 
     @pytest.mark.asyncio
-    async def test_failure_marks_job_failed_and_finalizes(self, tmp_path: Path):
+    async def test_failure_marks_job_failed_and_finalizes(self, tmp_path: Path) -> None:
         from openscientist.orchestrator import discovery
 
         executor = SimpleNamespace()
@@ -1407,12 +1419,12 @@ class TestEnsureReportWritten:
             outcome=TurnOutcome.COMPLETED, output="", tool_calls=0, transcript=[]
         )
 
-    def test_missing_file_is_not_written(self, tmp_path: Path):
+    def test_missing_file_is_not_written(self, tmp_path: Path) -> None:
         from openscientist.orchestrator.discovery import _ensure_report_written
 
         assert _ensure_report_written(tmp_path / "final_report.md", self._result()) is False
 
-    def test_existing_file_no_baseline_is_written(self, tmp_path: Path):
+    def test_existing_file_no_baseline_is_written(self, tmp_path: Path) -> None:
         from openscientist.orchestrator.discovery import _ensure_report_written
 
         report = tmp_path / "final_report.md"
@@ -1420,7 +1432,7 @@ class TestEnsureReportWritten:
         # No baseline (fresh job): existence is sufficient.
         assert _ensure_report_written(report, self._result()) is True
 
-    def test_stale_file_unchanged_since_baseline_is_not_written(self, tmp_path: Path):
+    def test_stale_file_unchanged_since_baseline_is_not_written(self, tmp_path: Path) -> None:
         from openscientist.orchestrator.discovery import _ensure_report_written
 
         report = tmp_path / "final_report.md"
@@ -1429,7 +1441,7 @@ class TestEnsureReportWritten:
         # The model claimed success but never rewrote the file: mtime == baseline.
         assert _ensure_report_written(report, self._result(), baseline_mtime_ns=baseline) is False
 
-    def test_freshly_rewritten_file_is_written(self, tmp_path: Path):
+    def test_freshly_rewritten_file_is_written(self, tmp_path: Path) -> None:
         from openscientist.orchestrator.discovery import _ensure_report_written
 
         report = tmp_path / "final_report.md"
@@ -1437,7 +1449,7 @@ class TestEnsureReportWritten:
         baseline = report.stat().st_mtime_ns - 1_000_000  # report is now strictly newer
         assert _ensure_report_written(report, self._result(), baseline_mtime_ns=baseline) is True
 
-    def test_nested_fresh_report_is_moved_into_place(self, tmp_path: Path):
+    def test_nested_fresh_report_is_moved_into_place(self, tmp_path: Path) -> None:
         from openscientist.orchestrator.discovery import _ensure_report_written
 
         report = tmp_path / "final_report.md"
@@ -1499,7 +1511,7 @@ class TestRunReportTurnIntegration:
         )
 
     @pytest.mark.asyncio
-    async def test_succeeds_when_model_writes_on_first_attempt(self, tmp_path: Path):
+    async def test_succeeds_when_model_writes_on_first_attempt(self, tmp_path: Path) -> None:
         from openscientist.knowledge_state import KnowledgeState
         from openscientist.orchestrator.discovery import _run_report_turn
 
@@ -1510,7 +1522,7 @@ class TestRunReportTurnIntegration:
         assert (tmp_path / "final_report.md").read_text().startswith("# Final Report")
 
     @pytest.mark.asyncio
-    async def test_recovers_when_model_writes_on_retry(self, tmp_path: Path):
+    async def test_recovers_when_model_writes_on_retry(self, tmp_path: Path) -> None:
         from openscientist.knowledge_state import KnowledgeState
         from openscientist.orchestrator.discovery import _run_report_turn
 
@@ -1520,7 +1532,7 @@ class TestRunReportTurnIntegration:
         assert ex.calls["n"] == 2
 
     @pytest.mark.asyncio
-    async def test_fails_when_file_never_written(self, tmp_path: Path):
+    async def test_fails_when_file_never_written(self, tmp_path: Path) -> None:
         from openscientist.knowledge_state import KnowledgeState
         from openscientist.orchestrator.discovery import _MAX_REPORT_ATTEMPTS, _run_report_turn
 
@@ -1530,7 +1542,7 @@ class TestRunReportTurnIntegration:
         assert ex.calls["n"] == _MAX_REPORT_ATTEMPTS
 
     @pytest.mark.asyncio
-    async def test_stale_report_is_not_accepted(self, tmp_path: Path):
+    async def test_stale_report_is_not_accepted(self, tmp_path: Path) -> None:
         # A leftover report from a prior run must not pass as this turn's output.
         from openscientist.knowledge_state import KnowledgeState
         from openscientist.orchestrator.discovery import _run_report_turn
@@ -1546,7 +1558,7 @@ class TestTurnOutcomePolicy:
     TIMED_OUT advances but is recorded, COMPLETED proceeds."""
 
     @staticmethod
-    def _result(outcome: TurnOutcome, tool_calls: int = 0):
+    def _result(outcome: TurnOutcome, tool_calls: int = 0) -> "IterationResult":
         from openscientist.agent.base import IterationResult
 
         return IterationResult(
@@ -1575,21 +1587,21 @@ class TestTurnOutcomePolicy:
 
         _check_turn_outcome(self._result(TurnOutcome.COMPLETED), 1)
 
-    def test_append_log_records_timeout(self, tmp_path: Path):
+    def test_append_log_records_timeout(self, tmp_path: Path) -> None:
         from openscientist.orchestrator.discovery import _append_log
 
         log = tmp_path / "log.txt"
         _append_log(log, 2, "prompt", "output", 0, write=True, timed_out=True)
         assert "Timed out: yes" in log.read_text()
 
-    def test_append_log_omits_timeout_line_when_not_timed_out(self, tmp_path: Path):
+    def test_append_log_omits_timeout_line_when_not_timed_out(self, tmp_path: Path) -> None:
         from openscientist.orchestrator.discovery import _append_log
 
         log = tmp_path / "log.txt"
         _append_log(log, 1, "prompt", "output", 1, write=True)
         assert "Timed out" not in log.read_text()
 
-    def test_artifacts_record_timeout_from_outcome(self, tmp_path: Path):
+    def test_artifacts_record_timeout_from_outcome(self, tmp_path: Path) -> None:
         from openscientist.orchestrator.discovery import _append_iteration_artifacts
 
         provenance = tmp_path / "prov"
