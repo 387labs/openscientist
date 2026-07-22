@@ -1,6 +1,7 @@
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import FastAPI
@@ -42,6 +43,41 @@ def test_create_app_builds_host_app_once(monkeypatch: pytest.MonkeyPatch, tmp_pa
     assert run_with_calls
     assert run_with_calls[0][0][0] is app_one
     assert run_with_calls[0][1]["mount_path"] == "/"
+
+
+async def test_lifespan_shuts_down_job_manager_on_exit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The lifespan must call job_manager.shutdown() after yield (app
+    shutdown) so in-flight job threads are drained instead of being killed
+    outright as daemon threads when the process exits."""
+    monkeypatch.setattr(web_app, "_state", web_app._AppState())
+    fake_manager = MagicMock()
+    web_app._state.job_manager = fake_manager
+    monkeypatch.setattr(web_app, "_start_background_tasks", AsyncMock())
+
+    lifespan = web_app._create_lifespan()
+    host_app = FastAPI()
+
+    async with lifespan(host_app):
+        fake_manager.shutdown.assert_not_called()
+
+    fake_manager.shutdown.assert_called_once_with(timeout=30.0)
+
+
+async def test_lifespan_skips_shutdown_when_job_manager_never_initialized(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Config-error startup paths never set _state.job_manager; the lifespan
+    shutdown hook must not blow up on the None case."""
+    monkeypatch.setattr(web_app, "_state", web_app._AppState())
+    monkeypatch.setattr(web_app, "_start_background_tasks", AsyncMock())
+
+    lifespan = web_app._create_lifespan()
+    host_app = FastAPI()
+
+    async with lifespan(host_app):
+        pass
 
 
 def test_main_reload_uses_factory_import_target(
