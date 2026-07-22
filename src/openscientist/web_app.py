@@ -5,6 +5,7 @@ Provides web UI for job submission, monitoring, and results viewing.
 """
 
 import argparse
+import asyncio
 import importlib
 import logging
 import os
@@ -441,6 +442,8 @@ def _create_lifespan() -> Callable[[FastAPI], AbstractAsyncContextManager[None]]
             logger.error("Failed to initialize database: %s", e)
             logger.warning("Application will continue but database features may not work")
         yield
+        if _state.job_manager is not None:
+            await asyncio.to_thread(_state.job_manager.shutdown, timeout=30.0)
 
     return lifespan
 
