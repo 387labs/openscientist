@@ -1,5 +1,6 @@
 """Tests for openscientist.job_container module."""
 
+import os
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
@@ -161,6 +162,54 @@ class TestJobContainerRunner:
 
         run_kwargs = cast(MagicMock, mock_client.containers.run).call_args.kwargs
         assert run_kwargs["extra_hosts"] == {"host.docker.internal": "host-gateway"}
+
+    def test_launch_inherits_docker_host_for_proxy(self):
+        """The agent inherits the web app's DOCKER_HOST verbatim, so its
+        ContainerManager talks to the same restricted socket proxy (R6)."""
+        with patch.dict(os.environ, {"DOCKER_HOST": "tcp://custom-proxy:9999"}):
+            env = self._launch_and_get_env(run_mode=None)
+        assert env["DOCKER_HOST"] == "tcp://custom-proxy:9999"
+
+    def test_launch_defaults_docker_host_to_socket_proxy(self):
+        """With no DOCKER_HOST in the environment, the agent still points at the
+        compose proxy service - never a raw host socket (R6)."""
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("DOCKER_HOST", None)
+            env = self._launch_and_get_env(run_mode=None)
+        assert env["DOCKER_HOST"] == "tcp://docker-socket-proxy:2375"
+
+    def test_launch_does_not_mount_docker_socket(self):
+        """The host Docker socket is never bind-mounted into agent containers,
+        and no docker group is added — Docker access is via the proxy only (R6)."""
+        mock_client = MagicMock()
+        mock_container = MagicMock()
+        mock_container.short_id = "abc123"
+        mock_client.containers.run.return_value = mock_container
+        settings = self._make_settings(host_project_dir=None)
+
+        original_exists = Path.exists
+
+        def fake_exists(path: Path) -> bool:
+            if path == Path("/var/run/docker.sock"):
+                return False
+            return cast(bool, original_exists(path))
+
+        with (
+            patch("openscientist.job_container.runner.docker.from_env", return_value=mock_client),
+            patch("openscientist.job_container.runner.get_settings", return_value=settings),
+            patch.object(JobContainerRunner, "_get_network", return_value="bridge"),
+            patch(
+                "openscientist.job_container.runner.to_host_path",
+                return_value=Path("/app/jobs/job-123"),
+            ),
+            patch.object(Path, "exists", autospec=True, side_effect=fake_exists),
+        ):
+            runner = JobContainerRunner()
+            runner.launch("job-123", Path("/app/jobs/job-123"))
+
+        run_kwargs = cast(MagicMock, mock_client.containers.run).call_args.kwargs
+        assert "/var/run/docker.sock" not in run_kwargs["volumes"]
+        assert "group_add" not in run_kwargs
 
     def test_launch_omits_host_path_mapping_without_host_project_dir(self):
         """Launch omits host-path env vars when the host project path is unset."""
