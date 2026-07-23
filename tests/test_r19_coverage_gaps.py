@@ -6,8 +6,10 @@ import asyncio
 import builtins
 import subprocess
 import sys
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
+from typing import cast
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -21,6 +23,7 @@ from openscientist.code_executor import (
     load_data,
     timeout_handler,
 )
+from openscientist.database.models import SkillSource
 from openscientist.exceptions import ProviderError
 from openscientist.job.types import JobInfo, JobStatus
 from openscientist.pdf_generator import ReportPDF
@@ -153,8 +156,14 @@ class TestSkillSchedulerLifecycle:
     @pytest.mark.asyncio
     async def test_sync_all_sources_success_and_failure(self) -> None:
         scheduler = SkillSyncScheduler(sync_interval=3600, github_token="t")
-        source_ok = SimpleNamespace(id=uuid4(), name="ok", is_enabled=True)
-        source_bad = SimpleNamespace(id=uuid4(), name="bad", is_enabled=True)
+        source_ok = cast(
+            SkillSource,
+            SimpleNamespace(id=uuid4(), name="ok", is_enabled=True),
+        )
+        source_bad = cast(
+            SkillSource,
+            SimpleNamespace(id=uuid4(), name="bad", is_enabled=True),
+        )
 
         session = AsyncMock()
         ctx = AsyncMock()
@@ -694,11 +703,14 @@ class TestSkillSyncSourcePaths:
         from datetime import UTC, datetime, timedelta
 
         scheduler = SkillSyncScheduler(sync_interval=3600, github_token="t")
-        source = SimpleNamespace(
-            id=uuid4(),
-            name="src",
-            last_synced_at=None,
-            sync_error=None,
+        source = cast(
+            SkillSource,
+            SimpleNamespace(
+                id=uuid4(),
+                name="src",
+                last_synced_at=None,
+                sync_error=None,
+            ),
         )
         session = AsyncMock()
         scheduler._last_sync[str(source.id)] = datetime.now(UTC)
@@ -908,10 +920,16 @@ class TestFoundryAndVertexCostSuccess:
         settings.provider.azure_subscription_id = "sub"
         real_import = builtins.__import__
 
-        def _import(name: str, *args: object, **kwargs: object) -> object:
+        def _import(
+            name: str,
+            globals: Mapping[str, object] | None = None,
+            locals: Mapping[str, object] | None = None,
+            fromlist: Sequence[str] = (),
+            level: int = 0,
+        ) -> ModuleType:
             if name == "azure.mgmt.costmanagement" or name.startswith("azure.mgmt.costmanagement."):
                 raise ImportError("missing sdk")
-            return real_import(name, *args, **kwargs)
+            return real_import(name, globals, locals, fromlist, level)
 
         with (
             patch("openscientist.providers.foundry.get_settings", return_value=settings),
@@ -1393,7 +1411,7 @@ class TestSkillIngestionUnknownType:
     async def test_sync_skill_source_unknown_type(self) -> None:
         from openscientist.skill_ingestion import sync_skill_source
 
-        source = SimpleNamespace(source_type="unknown-type")
+        source = cast(SkillSource, SimpleNamespace(source_type="unknown-type"))
         with pytest.raises(ValueError, match="Unknown source type"):
             await sync_skill_source(AsyncMock(), source)
 
@@ -1622,12 +1640,12 @@ class TestSkillSyncRegisteredIngester:
                 return None
 
         si.register_ingester("r19-test-type", _FakeIngester)  # type: ignore[arg-type]
-        source = SimpleNamespace(source_type="r19-test-type")
+        source = cast(SkillSource, SimpleNamespace(source_type="r19-test-type"))
         stats = await si.sync_skill_source(AsyncMock(), source)
         assert stats["created"] == 1
         # non-github branch
         si.register_ingester("r19-other", _FakeIngester)  # type: ignore[arg-type]
-        source2 = SimpleNamespace(source_type="r19-other")
+        source2 = cast(SkillSource, SimpleNamespace(source_type="r19-other"))
         assert (await si.sync_skill_source(AsyncMock(), source2))["created"] == 1
 
 
