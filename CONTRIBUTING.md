@@ -114,7 +114,7 @@ All PRs must pass:
 ```bash
 uv run ruff check src/ tests/   # lint
 uv run mypy src/openscientist/ tests/  # types
-uv run pytest                   # tests (60% coverage minimum)
+uv run pytest                   # tests (75% coverage minimum)
 ```
 
 ## Git Hooks
