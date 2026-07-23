@@ -128,10 +128,8 @@ jobs:
             docker:
               - 'Dockerfile.base'
               - 'Dockerfile.executor'
-              - 'Dockerfile.agent'
               - 'cargo-seed/**'
               - 'requirements-executor.txt'
-              - 'docker/agent-entrypoint.py'
               - 'pyproject.toml'
               - 'uv.lock'
               - 'src/**'
@@ -141,7 +139,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: docker-changes
     if: needs.docker-changes.outputs.docker == 'true'
-    # executor/agent FROM openscientist-base:latest, but the isolated
+    # executor FROM's openscientist-base:latest, but the isolated
     # docker-container builder can't see a `load`ed image from an earlier
     # step. Push base to a throwaway local registry and redirect via
     # build-contexts instead (docs.docker.com/build/ci/github-actions/named-contexts).
@@ -159,12 +157,18 @@ jobs:
           # service published on the runner's localhost:5000.
           driver-opts: network=host
 
-      # The main Dockerfile is intentionally not built here: it COPYs a
-      # prebuilt codex binary from the private ACR image
-      # acrcbraindev.azurecr.io/openscientist-agent:latest, which isn't
-      # reachable without registry credentials (and shouldn't be handed to
-      # PR workflows, especially from forks). It's covered by docker-lint
-      # above and built for real in the deploy pipelines (az acr build).
+      # Dockerfile and Dockerfile.agent are intentionally not built here,
+      # lint-only (docker-lint above):
+      #   - Dockerfile COPYs a prebuilt codex binary from the private ACR
+      #     image acrcbraindev.azurecr.io/openscientist-agent:latest, which
+      #     isn't reachable without registry credentials this workflow
+      #     shouldn't have, especially for fork PRs.
+      #   - Dockerfile.agent compiles the codex-cli fork from source: a
+      #     1,300+ crate workspace in release mode. On a standard 2-core
+      #     runner with no cargo cache this reliably eats the runner's
+      #     memory and stalls rather than completing, so it's not a viable
+      #     PR-gating build. Both are still built for real elsewhere
+      #     (deploy pipelines / `make build`).
 
       - name: Build base image
         uses: docker/build-push-action@v6
@@ -188,19 +192,6 @@ jobs:
             openscientist-base:latest=docker-image://localhost:5000/openscientist-base:latest
           cache-from: type=gha,scope=docker-executor
           cache-to: type=gha,mode=max,scope=docker-executor
-
-      - name: Build agent image
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Dockerfile.agent
-          push: false
-          load: true
-          tags: openscientist-agent:latest
-          build-contexts: |
-            openscientist-base:latest=docker-image://localhost:5000/openscientist-base:latest
-          cache-from: type=gha,scope=docker-agent
-          cache-to: type=gha,mode=max,scope=docker-agent
 
   test:
     runs-on: ubuntu-latest
