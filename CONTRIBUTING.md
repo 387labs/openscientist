@@ -114,8 +114,17 @@ All PRs must pass:
 ```bash
 uv run ruff check src/ tests/   # lint
 uv run mypy src/openscientist/ tests/  # types
-uv run pytest                   # tests (60% coverage minimum)
+uv run pytest                   # tests (67% coverage minimum, see pyproject.toml)
 ```
+
+CI (`.github/workflows/ci.yml`) also runs on every PR and blocks merging on:
+
+- **Secret scanning** (gitleaks) over the PR's commits
+- **Dependency vulnerability scanning** — `pip-audit` against installed Python packages, plus `dependency-review-action` (fails on high/critical severity)
+- **Docker build validation** — hadolint on all Dockerfiles, plus full builds of `Dockerfile.base`, `Dockerfile.executor`, and `Dockerfile.agent` when Docker-relevant files change
+- **Coverage delta** — fails if this branch's coverage drops more than 0.5 points below `main`'s
+
+Coverage reports (XML, JSON, HTML) are uploaded as a workflow artifact on every run.
 
 ## Git Hooks
 
