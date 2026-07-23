@@ -12,14 +12,10 @@ with a PostgreSQL role that has elevated privileges (table owner or role with
 BYPASSRLS). If not configured, falls back to the regular DATABASE_URL.
 """
 
-from dotenv import load_dotenv
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from openscientist.settings import get_settings
-
-# Load environment variables from .env file
-load_dotenv()
 
 # Global engine instances
 _engine: AsyncEngine | None = None
