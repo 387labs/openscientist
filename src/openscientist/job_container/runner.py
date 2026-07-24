@@ -100,19 +100,21 @@ class JobContainerRunner:
         job_mount: str,
     ) -> dict[str, dict[str, str]]:
         """Build the bind mounts for the agent container."""
+        # Use as_posix() so Docker volume keys stay forward-slash on Windows
+        # (str(Path(...)) would otherwise produce backslash keys).
         volumes: dict[str, dict[str, str]] = {
-            str(job_dir_host): {"bind": job_mount, "mode": "rw"},
+            job_dir_host.as_posix(): {"bind": job_mount, "mode": "rw"},
         }
         gcp_path = settings.provider.google_application_credentials
         if gcp_path:
             gcp_host_path = settings.provider.gcp_credentials_host_path or gcp_path
-            volumes[str(gcp_host_path)] = {
+            volumes[Path(gcp_host_path).as_posix()] = {
                 "bind": "/agent/gcp-credentials.json",
                 "mode": "ro",
             }
         phenix_host = settings.phenix.phenix_host_path
         if phenix_host:
-            volumes[str(Path(phenix_host).expanduser().resolve())] = {
+            volumes[Path(phenix_host).expanduser().resolve().as_posix()] = {
                 "bind": "/opt/phenix",
                 "mode": "ro",
             }

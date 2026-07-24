@@ -11,6 +11,7 @@ import pytest
 from docker import errors as docker_errors
 from openscientist.job.types import RunMode
 from openscientist.job_container.runner import AGENT_APP_DIR, JobContainerRunner
+from openscientist.settings import Settings
 
 
 class TestJobContainerRunner:
@@ -92,6 +93,33 @@ class TestJobContainerRunner:
         assert environment["OPENSCIENTIST_HOST_PROJECT_DIR"] == "/host/project"
         assert environment["OPENSCIENTIST_CONTAINER_APP_DIR"] == AGENT_APP_DIR
         assert run_kwargs["volumes"]["/host/project/jobs/job-123"]["bind"] == environment["JOB_DIR"]
+
+    def test_build_container_volumes_uses_posix_host_keys(self):
+        """Docker volume host keys use forward slashes on all platforms."""
+        settings = self._make_settings(host_project_dir="/host/project")
+        settings.provider.google_application_credentials = "C:/creds/gcp.json"
+        settings.provider.gcp_credentials_host_path = "C:/creds/gcp.json"
+        settings.phenix = SimpleNamespace(phenix_host_path="/opt/host-phenix")
+
+        job_dir_host = Path("/host/project/jobs/job-123")
+        with patch.object(Path, "resolve", lambda self: self):
+            volumes = JobContainerRunner._build_container_volumes(
+                cast(Settings, settings),
+                job_dir_host=job_dir_host,
+                job_mount=f"{AGENT_APP_DIR}/jobs/job-123",
+            )
+
+        assert volumes["/host/project/jobs/job-123"] == {
+            "bind": f"{AGENT_APP_DIR}/jobs/job-123",
+            "mode": "rw",
+        }
+        assert volumes["C:/creds/gcp.json"] == {
+            "bind": "/agent/gcp-credentials.json",
+            "mode": "ro",
+        }
+        assert volumes["/opt/host-phenix"] == {"bind": "/opt/phenix", "mode": "ro"}
+        for host_key in volumes:
+            assert "\\" not in host_key
 
     def test_launch_uses_agent_image_from_settings(self):
         """Launch passes the configured agent_image to containers.run.
@@ -409,8 +437,10 @@ class TestPhenixMount:
         volumes = call_kwargs.kwargs.get("volumes") or call_kwargs[1].get("volumes")
         env = call_kwargs.kwargs.get("environment") or call_kwargs[1].get("environment")
 
-        assert "/Applications/phenix-1.21.2" in volumes
-        assert volumes["/Applications/phenix-1.21.2"] == {"bind": "/opt/phenix", "mode": "ro"}
+        phenix_key = Path("/Applications/phenix-1.21.2").expanduser().resolve().as_posix()
+        assert phenix_key in volumes
+        assert volumes[phenix_key] == {"bind": "/opt/phenix", "mode": "ro"}
+        assert "\\" not in phenix_key
         assert env["PHENIX_PATH"] == "/opt/phenix"
 
     @patch("openscientist.job_container.runner.os.stat")
