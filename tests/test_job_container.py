@@ -386,12 +386,10 @@ class TestPhenixMount:
 
         return settings
 
-    @patch("openscientist.job_container.runner.os.stat")
     @patch("openscientist.job_container.runner.resolve_docker_network", return_value="bridge")
     @patch("openscientist.job_container.runner.get_settings")
-    def test_phenix_mounted_when_available(self, mock_get_settings, _net, mock_stat):
+    def test_phenix_mounted_when_available(self, mock_get_settings, _net):
         """The configured Linux Phenix path is mounted into the agent container."""
-        mock_stat.return_value = MagicMock(st_gid=999)
         settings = self._mock_settings(
             phenix_available=True,
             phenix_path="/opt/phenix",
@@ -401,16 +399,28 @@ class TestPhenixMount:
 
         runner, mock_client = self._make_runner()
         job_dir = Path("/app/jobs/test-job-id")
+        phenix_host = Path("/Applications/phenix-1.21.2")
+        expected_host = phenix_host.expanduser().resolve()
+        original_exists = Path.exists
 
-        with patch.object(Path, "exists", return_value=True):
+        def fake_exists(path: Path) -> bool:
+            if path == Path("/var/run/docker.sock"):
+                return False
+            if path == phenix_host or path == expected_host:
+                return True
+            return cast(bool, original_exists(path))
+
+        with patch.object(Path, "exists", autospec=True, side_effect=fake_exists):
             runner.launch("test-job-id", job_dir)
 
         call_kwargs = cast(MagicMock, mock_client.containers.run).call_args
         volumes = call_kwargs.kwargs.get("volumes") or call_kwargs[1].get("volumes")
         env = call_kwargs.kwargs.get("environment") or call_kwargs[1].get("environment")
 
-        assert "/Applications/phenix-1.21.2" in volumes
-        assert volumes["/Applications/phenix-1.21.2"] == {"bind": "/opt/phenix", "mode": "ro"}
+        # Match host key via Path equality: resolve()/str() formatting differs by OS.
+        phenix_mounts = [spec for host, spec in volumes.items() if Path(host) == expected_host]
+        assert len(phenix_mounts) == 1
+        assert phenix_mounts[0] == {"bind": "/opt/phenix", "mode": "ro"}
         assert env["PHENIX_PATH"] == "/opt/phenix"
 
     @patch("openscientist.job_container.runner.os.stat")
