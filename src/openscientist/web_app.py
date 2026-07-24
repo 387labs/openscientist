@@ -5,6 +5,7 @@ Provides web UI for job submission, monitoring, and results viewing.
 """
 
 import argparse
+import asyncio
 import importlib
 import logging
 import os
@@ -38,10 +39,29 @@ JOBS_DIR_ENV = "OPENSCIENTIST_JOBS_DIR"
 # `with self._get_context():` call at line 90 of timer.py, so the error
 # propagates to the background task handler and fills the log.
 # Patch: return nullcontext() and deactivate the timer instead of raising.
+#
+# Validated against nicegui==3.7.1. Remove once upstream fixes the underlying
+# issue, or revalidate against timer.py after any NiceGUI upgrade.
+_NICEGUI_PATCH_VALIDATED_VERSION = "3.7.1"
+
+
 def _patch_nicegui_timer() -> None:
+    import warnings
     from contextlib import nullcontext
 
+    import nicegui
     from nicegui.elements.timer import Timer as _NiceGUITimer
+
+    if nicegui.__version__ != _NICEGUI_PATCH_VALIDATED_VERSION:
+        warnings.warn(
+            f"NiceGUI timer patch was validated against nicegui=="
+            f"{_NICEGUI_PATCH_VALIDATED_VERSION}, but installed version is "
+            f"{nicegui.__version__}. Verify the patch in _patch_nicegui_timer() "
+            "still applies to nicegui.elements.timer.Timer._get_context "
+            "before relying on it.",
+            UserWarning,
+            stacklevel=2,
+        )
 
     _orig = _NiceGUITimer._get_context
 
@@ -441,6 +461,8 @@ def _create_lifespan() -> Callable[[FastAPI], AbstractAsyncContextManager[None]]
             logger.error("Failed to initialize database: %s", e)
             logger.warning("Application will continue but database features may not work")
         yield
+        if _state.job_manager is not None:
+            await asyncio.to_thread(_state.job_manager.shutdown, timeout=30.0)
 
     return lifespan
 
@@ -471,6 +493,11 @@ def _configure_host_app(host_app: FastAPI, jobs_dir: Path) -> None:
     """Configure middleware, routes, and mounted NiceGUI app before startup."""
     if _state.app_configured:
         return
+
+    from openscientist.api.rate_limits import configure_host_rate_limiting, wire_rate_limiter
+
+    configure_host_rate_limiting(host_app)
+    wire_rate_limiter(app)
 
     # Middleware and routes must be registered before startup.
     register_scanner_block_middleware(host_app)

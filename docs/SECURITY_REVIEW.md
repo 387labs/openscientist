@@ -71,7 +71,7 @@ The main areas for improvement are **operational security gaps** rather than arc
 | Finding | Description | Recommended Next Step |
 |---------|-------------|----------------------|
 | **Web server runs as root** | The main application container does not set a non-root `USER` in its Dockerfile. If the web process is compromised, the attacker has root inside the container. | Add a non-root user to the Dockerfile and run the application as that user. |
-| **Docker socket mounted read-write** | The web server and agent containers mount `/var/run/docker.sock` with read-write access. A compromise of either container could spawn arbitrary sibling containers on the host. | Evaluate whether the web server truly needs socket access, or if a Docker API proxy with restricted permissions could be used instead. |
+| **Docker socket mounted read-write** *(resolved — R6)* | The web server and agent containers mounted `/var/run/docker.sock` directly, so a compromise of either could spawn arbitrary sibling containers on the host. | **Resolved:** the raw socket mount is removed. A `docker-socket-proxy` sidecar is now the only container with socket access; the web app and agent containers reach it over `DOCKER_HOST=tcp://docker-socket-proxy:2375`, restricted to the container/image verbs the job lifecycle needs (create/start/stop/wait/list/inspect/logs/remove + image inspect/pull). Exec, info, networks, volumes, build, swarm, and secrets are denied. |
 
 ### High
 

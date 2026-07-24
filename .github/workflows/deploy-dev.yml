@@ -5,6 +5,13 @@ on:
     branches: [ "development" ]
   workflow_dispatch:
 
+concurrency:
+  # Serialize deploys per env: az vm run-command allows only one execution per VM
+  # at a time, so overlapping runs (e.g. batch-merges to main) hit a Conflict and
+  # fail. Queue them instead of racing; never cancel an in-flight deploy midway.
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest

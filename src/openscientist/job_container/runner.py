@@ -25,6 +25,7 @@ from typing import Any, cast
 
 import docker
 from docker import errors as docker_errors
+from openscientist.job.types import RunMode
 from openscientist.job_container.utils import resolve_docker_network, to_host_path
 from openscientist.settings import Settings, get_settings
 from openscientist.version import SHORT_COMMIT_LENGTH
@@ -55,7 +56,7 @@ class JobContainerRunner:
         *,
         job_id: str,
         job_mount: str,
-        run_mode: str = "discovery",
+        run_mode: RunMode = RunMode.DISCOVERY,
     ) -> dict[str, str]:
         """Build the environment variables for the agent container."""
         cs = settings.container
@@ -65,13 +66,17 @@ class JobContainerRunner:
             "JOB_DIR": job_mount,
             "DATABASE_URL": settings.database.effective_database_url,
             "OPENSCIENTIST_SECRET_KEY": settings.secret_key,
+            # Agent containers reach Docker only through the restricted socket
+            # proxy (docker-socket-proxy), never the raw host socket. from_env()
+            # picks this up automatically for the agent's ContainerManager.
+            "DOCKER_HOST": os.environ.get("DOCKER_HOST", "tcp://docker-socket-proxy:2375"),
             **provider_env,
         }
         # Only set the run-mode override when it diverges from the default so
         # ordinary discovery launches keep a clean env. The entrypoint reads
-        # OPENSCIENTIST_RUN_MODE. "report_only" re-runs just the report phase.
-        if run_mode != "discovery":
-            env["OPENSCIENTIST_RUN_MODE"] = run_mode
+        # OPENSCIENTIST_RUN_MODE. REPORT_ONLY re-runs just the report phase.
+        if run_mode != RunMode.DISCOVERY:
+            env["OPENSCIENTIST_RUN_MODE"] = run_mode.value
         # Forward the per-turn Codex timeout so the agent (CodexAgent reads
         # OPENSCIENTIST_CODEX_TURN_TIMEOUT at import) can be tuned for slow
         # local backends. Without this the agent always uses the 900s default.
@@ -97,7 +102,6 @@ class JobContainerRunner:
         """Build the bind mounts for the agent container."""
         volumes: dict[str, dict[str, str]] = {
             str(job_dir_host): {"bind": job_mount, "mode": "rw"},
-            "/var/run/docker.sock": {"bind": "/var/run/docker.sock", "mode": "rw"},
         }
         gcp_path = settings.provider.google_application_credentials
         if gcp_path:
@@ -137,7 +141,7 @@ class JobContainerRunner:
         *,
         job_id: str,
         job_dir_host: Path,
-        run_mode: str = "discovery",
+        run_mode: RunMode = RunMode.DISCOVERY,
     ) -> tuple[
         dict[str, str],
         dict[str, dict[str, str]],
@@ -159,27 +163,19 @@ class JobContainerRunner:
         )
         return env, volumes, agent_network, agent_memory, agent_cpu, agent_platform
 
-    @staticmethod
-    def _docker_socket_group() -> str | None:
-        """Return the Docker socket GID when the socket is present."""
-        socket_path = Path("/var/run/docker.sock")
-        if not socket_path.exists():
-            return None
-        return str(os.stat(socket_path).st_gid)
-
-    def launch(self, job_id: str, job_dir: Path, *, run_mode: str = "discovery") -> Any:
+    def launch(self, job_id: str, job_dir: Path, *, run_mode: RunMode = RunMode.DISCOVERY) -> Any:
         """
         Launch an agent container for the given job.
 
         The container runs docker/agent-entrypoint.py which calls
         run_discovery_async(job_dir), or regenerate_report_async(job_dir) when
-        run_mode is "report_only".
+        run_mode is RunMode.REPORT_ONLY.
 
         Args:
             job_id: Job UUID string (used for container name + labels)
             job_dir: Absolute host path to the job directory
-            run_mode: "discovery" (full loop) or "report_only" (report phase
-                only, against the already-persisted findings)
+            run_mode: RunMode.DISCOVERY (full loop) or RunMode.REPORT_ONLY
+                (report phase only, against the already-persisted findings)
 
         Returns:
             docker.models.containers.Container object
@@ -214,9 +210,6 @@ class JobContainerRunner:
         )
         network = self._get_network(agent_network)
 
-        # We read the socket gid directly because the docker group may not exist
-        # inside the web server container.
-        docker_gid = self._docker_socket_group()
         container = self._docker.containers.run(
             image=cs.agent_image,
             name=f"openscientist-agent-{job_id[:SHORT_COMMIT_LENGTH]}",
@@ -234,7 +227,6 @@ class JobContainerRunner:
             # http://host.docker.internal:11434/v1). Harmless for providers that
             # do not use it. On Linux this is not provided by default.
             extra_hosts={"host.docker.internal": "host-gateway"},
-            group_add=[docker_gid] if docker_gid else [],
             labels={
                 "openscientist.job_id": job_id,
                 "openscientist.type": "agent",

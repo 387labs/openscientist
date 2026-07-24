@@ -51,7 +51,7 @@ async def test_create_chat_message(
     db_session: AsyncSession,
     test_user: User,
     test_job: Job,
-):
+) -> None:
     """Test creating a chat message."""
     _ = test_user
     message = JobChatMessage(
@@ -75,7 +75,7 @@ async def test_chat_conversation_flow(
     db_session: AsyncSession,
     test_user: User,
     test_job: Job,
-):
+) -> None:
     """Test a full conversation flow with user and assistant messages."""
     _ = test_user
     # User asks a question
@@ -115,7 +115,7 @@ async def test_get_chat_history(
     db_session: AsyncSession,
     test_user: User,
     test_job: Job,
-):
+) -> None:
     """Test retrieving chat history."""
     _ = test_user
     # Create multiple messages
@@ -148,7 +148,7 @@ async def test_chat_history_limit(
     db_session: AsyncSession,
     test_user: User,
     test_job: Job,
-):
+) -> None:
     """Test that chat history respects limit parameter."""
     _ = test_user
     # Create 20 messages
@@ -172,7 +172,7 @@ async def test_chat_messages_per_job(
     db_session: AsyncSession,
     test_user: User,
     test_job: Job,
-):
+) -> None:
     """Test that chat messages are isolated per job."""
     # Create second job
     job2 = Job(
@@ -214,7 +214,7 @@ async def test_chat_messages_per_job(
 async def test_cascade_delete_chat_messages(
     db_session: AsyncSession,
     test_user: User,
-):
+) -> None:
     """Test that deleting a job deletes its chat messages."""
     # Create job with messages
     job = Job(
@@ -388,7 +388,7 @@ async def test_chat_message_role_validation(
     db_session: AsyncSession,
     test_user: User,
     test_job: Job,
-):
+) -> None:
     """Test that chat messages have proper role values."""
     _ = test_user
     # Create user message
@@ -427,7 +427,7 @@ async def test_chat_access_with_rls(
     db_session: AsyncSession,
     test_user: User,
     test_user2: User,
-):
+) -> None:
     """Test that chat messages respect RLS policies."""
     # Create job for test_user
     job = Job(
@@ -471,7 +471,7 @@ async def test_send_chat_message_success(
     test_user: User,
     test_job: Job,
     temp_jobs_dir: Path,
-):
+) -> None:
     """Test that send_chat_message stores messages and returns response."""
     _ = test_user
     job_dir = temp_jobs_dir / str(test_job.id)
@@ -516,7 +516,7 @@ async def test_send_chat_message_raises_on_executor_failure(
     test_user: User,
     test_job: Job,
     temp_jobs_dir: Path,
-):
+) -> None:
     """Test that executor failure raises RuntimeError instead of returning empty string."""
     _ = test_user
     job_dir = temp_jobs_dir / str(test_job.id)
@@ -549,7 +549,7 @@ async def test_send_chat_message_raises_generic_on_empty_error(
     test_user: User,
     test_job: Job,
     temp_jobs_dir: Path,
-):
+) -> None:
     """Test that executor failure with no error message still raises."""
     _ = test_user
     job_dir = temp_jobs_dir / str(test_job.id)
@@ -572,7 +572,7 @@ async def test_system_prompt_does_not_include_job_context(
     test_user: User,
     test_job: Job,
     temp_jobs_dir: Path,
-):
+) -> None:
     """Test that the system prompt is small and doesn't embed job context."""
     _ = test_user
     job_dir = temp_jobs_dir / str(test_job.id)
@@ -615,7 +615,7 @@ async def test_send_chat_message_codex_provider(
     test_user: User,
     test_job: Job,
     temp_jobs_dir: Path,
-):
+) -> None:
     """Chat works for codex-family providers (e.g. Ollama).
 
     It must route through the factory (no Claude-only RuntimeError), fold the

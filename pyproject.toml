@@ -126,6 +126,8 @@ python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false
+disallow_incomplete_defs = true
+check_untyped_defs = true
 plugins = ["pydantic.mypy"]
 
 [tool.pydantic-mypy]
@@ -169,8 +171,8 @@ exclude_lines = [
     "@overload",
     "except ImportError:",
 ]
-# Minimum coverage threshold
-fail_under = 60
+# Minimum coverage threshold. Audit R19: enforce 75% total coverage floor.
+fail_under = 75
 
 [tool.coverage.html]
 directory = "htmlcov"

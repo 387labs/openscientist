@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
 
+# Least-privilege default; jobs that need more (coverage-delta needs to read
+# other workflow runs' artifacts) override this individually.
+permissions:
+  contents: read
+
 jobs:
   secret-scan:
     runs-on: ubuntu-latest
@@ -58,6 +63,149 @@ jobs:
       - name: Type check
         run: uv run mypy src/openscientist/ tests/
 
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Uses the gitleaks CLI directly (MIT licensed) rather than
+      # gitleaks/gitleaks-action, whose v2 requires a paid/free license key
+      # for org-owned repos (this repo is under the 387labs org).
+      - name: Scan for secrets (gitleaks)
+        run: |
+          RANGE="${{ github.event.before }}..${{ github.event.after }}"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            RANGE="${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"
+          fi
+          docker run --rm -v "${{ github.workspace }}":/repo -w /repo \
+            zricethezav/gitleaks:v8.30.1 \
+            detect --source . -v --redact --exit-code 1 --log-opts="${RANGE}"
+
+  dependency-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: uv sync
+
+      - name: Python dependency vulnerability scan (pip-audit)
+        run: uv run --with pip-audit pip-audit --local --desc
+
+  dependency-review:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+
+  docker-lint:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dockerfile: [Dockerfile, Dockerfile.agent, Dockerfile.base, Dockerfile.executor]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Hadolint ${{ matrix.dockerfile }}
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: ${{ matrix.dockerfile }}
+          failure-threshold: error
+
+  docker-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      docker: ${{ steps.filter.outputs.docker }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            docker:
+              - 'Dockerfile.base'
+              - 'Dockerfile.executor'
+              - 'cargo-seed/**'
+              - 'requirements-executor.txt'
+              - 'pyproject.toml'
+              - 'uv.lock'
+              - 'src/**'
+              - '.github/workflows/ci.yml'
+
+  docker-build:
+    runs-on: ubuntu-latest
+    needs: docker-changes
+    if: needs.docker-changes.outputs.docker == 'true'
+    # executor FROM's openscientist-base:latest, but the isolated
+    # docker-container builder can't see a `load`ed image from an earlier
+    # step. Push base to a throwaway local registry and redirect via
+    # build-contexts instead (docs.docker.com/build/ci/github-actions/named-contexts).
+    services:
+      registry:
+        image: registry:3
+        ports:
+          - 5000:5000
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+        with:
+          # network=host so the buildx container can reach the registry
+          # service published on the runner's localhost:5000.
+          driver-opts: network=host
+
+      # Dockerfile and Dockerfile.agent are intentionally not built here,
+      # lint-only (docker-lint above):
+      #   - Dockerfile COPYs a prebuilt codex binary from the private ACR
+      #     image acrcbraindev.azurecr.io/openscientist-agent:latest, which
+      #     isn't reachable without registry credentials this workflow
+      #     shouldn't have, especially for fork PRs.
+      #   - Dockerfile.agent compiles the codex-cli fork from source: a
+      #     1,300+ crate workspace in release mode. On a standard 2-core
+      #     runner with no cargo cache this reliably eats the runner's
+      #     memory and stalls rather than completing, so it's not a viable
+      #     PR-gating build. Both are still built for real elsewhere
+      #     (deploy pipelines / `make build`).
+
+      - name: Build base image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.base
+          push: true
+          tags: localhost:5000/openscientist-base:latest
+          cache-from: type=gha,scope=docker-base
+          cache-to: type=gha,mode=max,scope=docker-base
+
+      - name: Build executor image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.executor
+          push: false
+          load: true
+          tags: openscientist-executor:latest
+          build-contexts: |
+            openscientist-base:latest=docker-image://localhost:5000/openscientist-base:latest
+          cache-from: type=gha,scope=docker-executor
+          cache-to: type=gha,mode=max,scope=docker-executor
+
   test:
     runs-on: ubuntu-latest
     needs: [lint, typecheck]
@@ -94,4 +242,55 @@ jobs:
       - run: uv sync
 
       - name: Unit & Integration Tests
-        run: uv run pytest --cov=src/openscientist --cov-report=term-missing
+        run: |
+          uv run pytest \
+            --cov=src/openscientist \
+            --cov-report=term-missing \
+            --cov-report=xml \
+            --cov-report=json:coverage.json
+        env:
+          POSTGRES_PASSWORD: openscientist_dev_password
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: |
+            coverage.xml
+            coverage.json
+            htmlcov/
+          retention-days: 30
+
+  coverage-delta:
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download this branch's coverage report
+        uses: actions/download-artifact@v4
+        with:
+          name: coverage-report
+          path: current
+
+      - name: Download baseline coverage report from main
+        uses: dawidd6/action-download-artifact@v6
+        continue-on-error: true
+        with:
+          workflow: ci.yml
+          branch: main
+          name: coverage-report
+          path: baseline
+          workflow_conclusion: success
+          if_no_artifact_found: warn
+
+      - name: Compare coverage against main
+        run: |
+          python3 tools/check_coverage_delta.py \
+            --current current/coverage.json \
+            --baseline baseline/coverage.json
