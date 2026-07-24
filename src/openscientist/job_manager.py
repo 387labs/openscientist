@@ -1049,7 +1049,7 @@ class JobManager:
         return {
             "total_jobs": len(jobs),
             "status_counts": status_counts,
-            "cost_info": cost_info,
+            "cost_info": cost_info.to_dict() if cost_info is not None else None,
             "budget_check": budget_check,
         }
 

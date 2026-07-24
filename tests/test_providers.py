@@ -188,6 +188,36 @@ class TestCostInfo:
         assert info.budget_remaining_usd == 150.0
         assert info.data_lag_note == "Data current as of 6:35 AM"
 
+    def test_to_dict_is_json_serializable(self):
+        import json
+        from datetime import UTC, datetime
+
+        info = CostInfo(
+            provider_name="test",
+            total_spend_usd=100.0,
+            recent_spend_usd=None,
+            recent_period_hours=24,
+            budget_limit_usd=None,
+            last_updated=datetime(2026, 1, 15, 12, 0, 0, tzinfo=UTC),
+            data_lag_note="fresh",
+            key_expires=None,
+            metadata={"region": "us"},
+        )
+        result = info.to_dict()
+        assert result == {
+            "provider_name": "test",
+            "total_spend_usd": 100.0,
+            "recent_spend_usd": None,
+            "recent_period_hours": 24,
+            "budget_limit_usd": None,
+            "budget_remaining_usd": None,
+            "last_updated": "2026-01-15T12:00:00+00:00",
+            "data_lag_note": "fresh",
+            "key_expires": None,
+            "metadata": {"region": "us"},
+        }
+        json.dumps(result)
+
 
 class TestCheckBudgetLimits:
     """Tests for Provider.check_budget_limits()."""

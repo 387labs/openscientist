@@ -1147,10 +1147,23 @@ class TestJobManagerCancelSummaryCoverage:
             assert manager._list_operational_jobs() == []
 
     def test_get_job_summary_counts_and_cost(self, tmp_path):
+        import json
+        from datetime import UTC, datetime
+
+        from openscientist.providers.base import CostInfo
+
         manager = _new_manager(tmp_path)
         jobs = [self._job(JobStatus.COMPLETED, "a"), self._job(JobStatus.FAILED, "b")]
+        cost_info = CostInfo(
+            provider_name="stub",
+            total_spend_usd=10.0,
+            recent_spend_usd=2.5,
+            recent_period_hours=24,
+            last_updated=datetime(2026, 1, 15, 12, 0, 0, tzinfo=UTC),
+            metadata={"source": "test"},
+        )
         provider = MagicMock()
-        provider.get_cost_info.return_value = "cost"
+        provider.get_cost_info.return_value = cost_info
         provider.evaluate_budget.return_value = "budget"
         with (
             patch.object(manager, "list_jobs", return_value=jobs),
@@ -1160,8 +1173,15 @@ class TestJobManagerCancelSummaryCoverage:
         assert summary["total_jobs"] == 2
         assert summary["status_counts"]["completed"] == 1
         assert summary["status_counts"]["failed"] == 1
-        assert summary["cost_info"] == "cost"
+        assert isinstance(summary["cost_info"], dict)
+        assert summary["cost_info"]["provider_name"] == "stub"
+        assert summary["cost_info"]["total_spend_usd"] == 10.0
+        assert summary["cost_info"]["recent_spend_usd"] == 2.5
+        assert summary["cost_info"]["last_updated"] == "2026-01-15T12:00:00+00:00"
+        assert summary["cost_info"]["metadata"] == {"source": "test"}
         assert summary["budget_check"] == "budget"
+        # Regression: summary must be JSON-serializable with a real CostInfo
+        json.dumps(summary)
 
     def test_get_job_summary_handles_provider_error(self, tmp_path):
         from openscientist.exceptions import ProviderError
