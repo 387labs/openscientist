@@ -724,9 +724,7 @@ class JobManager:
                 self._running_jobs.pop(job_id, None)
             self._start_next_queued_job()
 
-    def _build_container_failure_message(
-        self, exit_code: int, container_logs: str | None
-    ) -> str:
+    def _build_container_failure_message(self, exit_code: int, container_logs: str | None) -> str:
         """Compose a diagnostic message for an agent container that exited
         non-zero before writing a terminal status.
 
