@@ -54,7 +54,7 @@ dependencies = [
     # Authentication (OAuth)
     "authlib>=1.3.0",
     "httpx>=0.27.0",  # Required by authlib for async OAuth
-    "python-jose[cryptography]>=3.3.0",  # JWT handling
+    "PyJWT[crypto]>=2.11.0",  # JWT handling (replaces unmaintained python-jose)
     "bcrypt>=4.0.0",  # Password hashing
 
     # Database
