@@ -14,14 +14,10 @@ BYPASSRLS). If not configured, falls back to the regular DATABASE_URL.
 
 import threading
 
-from dotenv import load_dotenv
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from openscientist.settings import get_settings
-
-# Load environment variables from .env file
-load_dotenv()
 
 # Global engine instances
 _engine: AsyncEngine | None = None
