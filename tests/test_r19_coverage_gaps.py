@@ -778,28 +778,28 @@ class TestJobManagerCliAndNotify:
 
         with (
             patch.object(sys, "argv", ["job_manager", "list"]),
-            patch.object(jm, "JobManager", return_value=manager),
+            patch("openscientist.job.cli.JobManager", return_value=manager),
         ):
             jm.main()
         assert "abc" in capsys.readouterr().out
 
         with (
             patch.object(sys, "argv", ["job_manager", "get", "missing"]),
-            patch.object(jm, "JobManager", return_value=manager),
+            patch("openscientist.job.cli.JobManager", return_value=manager),
         ):
             jm.main()
         assert "not found" in capsys.readouterr().out
 
         with (
             patch.object(sys, "argv", ["job_manager", "get", "abc"]),
-            patch.object(jm, "JobManager", return_value=manager),
+            patch("openscientist.job.cli.JobManager", return_value=manager),
         ):
             jm.main()
         assert "abc" in capsys.readouterr().out
 
         with (
             patch.object(sys, "argv", ["job_manager", "delete", "abc"]),
-            patch.object(jm, "JobManager", return_value=manager),
+            patch("openscientist.job.cli.JobManager", return_value=manager),
         ):
             jm.main()
         manager.delete_job.assert_called_with("abc")
@@ -808,14 +808,14 @@ class TestJobManagerCliAndNotify:
             patch.object(
                 sys, "argv", ["job_manager", "cleanup", "--days", "2", "--delete-completed"]
             ),
-            patch.object(jm, "JobManager", return_value=manager),
+            patch("openscientist.job.cli.JobManager", return_value=manager),
         ):
             jm.main()
         assert "Deleted 3" in capsys.readouterr().out
 
         with (
             patch.object(sys, "argv", ["job_manager", "summary"]),
-            patch.object(jm, "JobManager", return_value=manager),
+            patch("openscientist.job.cli.JobManager", return_value=manager),
         ):
             jm.main()
         assert "total" in capsys.readouterr().out
