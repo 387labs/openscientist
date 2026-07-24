@@ -1,7 +1,7 @@
 import warnings
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import nicegui
@@ -14,11 +14,11 @@ from nicegui.elements.timer import Timer as _NiceGUITimer
 from openscientist import web_app
 
 
-def _noop(*_args, **_kwargs) -> None:
+def _noop(*_args: Any, **_kwargs: Any) -> None:
     pass
 
 
-def test_create_app_builds_host_app_once(monkeypatch, tmp_path: Path) -> None:
+def test_create_app_builds_host_app_once(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(web_app, "_state", web_app._AppState())
     monkeypatch.setattr(web_app, "_register_openapi_docs", _noop)
     monkeypatch.setattr(web_app, "_register_health_endpoint", _noop)
@@ -48,7 +48,9 @@ def test_create_app_builds_host_app_once(monkeypatch, tmp_path: Path) -> None:
     assert run_with_calls[0][1]["mount_path"] == "/"
 
 
-async def test_lifespan_shuts_down_job_manager_on_exit(monkeypatch, tmp_path: Path) -> None:
+async def test_lifespan_shuts_down_job_manager_on_exit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     """The lifespan must call job_manager.shutdown() after yield (app
     shutdown) so in-flight job threads are drained instead of being killed
     outright as daemon threads when the process exits."""
@@ -67,7 +69,7 @@ async def test_lifespan_shuts_down_job_manager_on_exit(monkeypatch, tmp_path: Pa
 
 
 async def test_lifespan_skips_shutdown_when_job_manager_never_initialized(
-    monkeypatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """Config-error startup paths never set _state.job_manager; the lifespan
     shutdown hook must not blow up on the None case."""
@@ -81,7 +83,9 @@ async def test_lifespan_skips_shutdown_when_job_manager_never_initialized(
         pass
 
 
-def test_main_reload_uses_factory_import_target(monkeypatch, tmp_path: Path) -> None:
+def test_main_reload_uses_factory_import_target(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setattr(web_app, "_settings_error", None)
     monkeypatch.setattr(
         "openscientist.settings.get_settings",
@@ -105,7 +109,9 @@ def test_main_reload_uses_factory_import_target(monkeypatch, tmp_path: Path) -> 
     assert Path(web_app.os.environ[web_app.JOBS_DIR_ENV]) == tmp_path / "jobs"
 
 
-def test_main_non_reload_runs_with_created_app(monkeypatch, tmp_path: Path) -> None:
+def test_main_non_reload_runs_with_created_app(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setattr(web_app, "_settings_error", None)
     monkeypatch.setattr(
         "openscientist.settings.get_settings",
@@ -130,7 +136,9 @@ def test_main_non_reload_runs_with_created_app(monkeypatch, tmp_path: Path) -> N
     assert kwargs["reload"] is False
 
 
-def test_register_nicegui_static_files_tolerates_duplicates(monkeypatch, tmp_path: Path) -> None:
+def test_register_nicegui_static_files_tolerates_duplicates(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     calls: list[tuple[str, str]] = []
 
     def fake_add_static_files(route: str, directory: str) -> None:
@@ -175,7 +183,9 @@ def test_register_apple_touch_icon_redirects_root_requests() -> None:
         assert response.headers["location"] == "/assets/apple-touch-icon.png"
 
 
-def test_patch_nicegui_timer_no_warning_on_validated_version(monkeypatch) -> None:
+def test_patch_nicegui_timer_no_warning_on_validated_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(nicegui, "__version__", web_app._NICEGUI_PATCH_VALIDATED_VERSION)
 
     with warnings.catch_warnings():
@@ -183,7 +193,7 @@ def test_patch_nicegui_timer_no_warning_on_validated_version(monkeypatch) -> Non
         web_app._patch_nicegui_timer()
 
 
-def test_patch_nicegui_timer_warns_on_version_mismatch(monkeypatch) -> None:
+def test_patch_nicegui_timer_warns_on_version_mismatch(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(nicegui, "__version__", "999.0.0")
 
     # UserWarning (not DeprecationWarning) so it isn't dropped by Python's default
@@ -193,10 +203,12 @@ def test_patch_nicegui_timer_warns_on_version_mismatch(monkeypatch) -> None:
         web_app._patch_nicegui_timer()
 
 
-def test_patch_nicegui_timer_deactivates_on_runtime_error(monkeypatch) -> None:
+def test_patch_nicegui_timer_deactivates_on_runtime_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(nicegui, "__version__", web_app._NICEGUI_PATCH_VALIDATED_VERSION)
 
-    def _raise(_self) -> None:
+    def _raise(_self: _NiceGUITimer) -> None:
         raise RuntimeError("parent slot deleted")
 
     monkeypatch.setattr(_NiceGUITimer, "_get_context", _raise, raising=True)
@@ -215,7 +227,7 @@ def test_patch_nicegui_timer_deactivates_on_runtime_error(monkeypatch) -> None:
     assert result is not None  # nullcontext() sentinel returned instead of raising
 
 
-def test_register_pwa_metadata_adds_shared_head_html(monkeypatch) -> None:
+def test_register_pwa_metadata_adds_shared_head_html(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[str, bool]] = []
 
     monkeypatch.setattr(

@@ -2,6 +2,7 @@
 
 import os
 from contextlib import ExitStack
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -222,7 +223,7 @@ class TestCostInfo:
 class TestCheckBudgetLimits:
     """Tests for Provider.check_budget_limits()."""
 
-    def _make_provider(self, **cost_kwargs) -> StubProvider:
+    def _make_provider(self, **cost_kwargs: Any) -> StubProvider:
         cost = CostInfo(
             provider_name="stub",
             recent_period_hours=24,

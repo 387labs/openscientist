@@ -2,9 +2,11 @@
 
 import threading
 import time
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
@@ -91,7 +93,7 @@ class TestJobInfo:
         assert info.llm_model == "claude-sonnet-4-5-20250929"
 
 
-def _write_config(jobs_dir: Path, job_id: str, **overrides) -> dict:
+def _write_config(jobs_dir: Path, job_id: str, **overrides: Any) -> dict:
     """Helper: create a minimal job directory scaffold."""
     job_dir = jobs_dir / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
@@ -111,7 +113,7 @@ def _make_db_job(
     status: str,
     created_at: str,
     job_id: str | None = None,
-    **overrides,
+    **overrides: Any,
 ) -> SimpleNamespace:
     """Helper: create a fake DB job model."""
     job_uuid = UUID(job_id) if job_id else uuid4()
@@ -135,11 +137,13 @@ def _make_db_job(
     return SimpleNamespace(**defaults)
 
 
-def _db_get_job_side_effect(models: list[SimpleNamespace]):
+def _db_get_job_side_effect(
+    models: list[SimpleNamespace],
+) -> Callable[[str, str | None], Awaitable[SimpleNamespace | None]]:
     """Build side-effect that returns models by UUID id."""
     by_id = {m.id: m for m in models}
 
-    async def _inner(job_id: str, user_id=None):
+    async def _inner(job_id: str, user_id: str | None = None) -> SimpleNamespace | None:
         _ = user_id
         try:
             return by_id.get(UUID(job_id))
@@ -223,7 +227,7 @@ class TestJobManagerListAndGet:
         ]
 
     @pytest.fixture
-    def manager(self, tmp_path) -> JobManager:
+    def manager(self, tmp_path: Path) -> JobManager:
         return _new_manager(tmp_path)
 
     def test_list_all_jobs(self, manager, db_jobs):
@@ -288,7 +292,7 @@ class TestJobManagerRegenerateReport:
             yield
 
     @pytest.fixture
-    def manager(self, tmp_path) -> JobManager:
+    def manager(self, tmp_path: Path) -> JobManager:
         return _new_manager(tmp_path)
 
     def test_missing_job_raises(self, manager):
@@ -447,6 +451,7 @@ class TestJobManagerStatusUpdate:
             manager._update_job_status(job_id, JobStatus.RUNNING)
 
         mock_update.assert_awaited_once()
+        assert mock_update.await_args is not None
         assert mock_update.await_args.args[0] == job_id
         assert mock_update.await_args.args[1] == JobStatus.RUNNING
 
@@ -462,6 +467,7 @@ class TestJobManagerStatusUpdate:
         ) as mock_update:
             manager._update_job_status(job_id, JobStatus.COMPLETED)
 
+        assert mock_update.await_args is not None
         assert mock_update.await_args.args[1] == JobStatus.COMPLETED
 
     def test_failed_passes_status_to_database(self, tmp_path):
@@ -476,6 +482,7 @@ class TestJobManagerStatusUpdate:
         ) as mock_update:
             manager._update_job_status(job_id, JobStatus.FAILED)
 
+        assert mock_update.await_args is not None
         assert mock_update.await_args.args[1] == JobStatus.FAILED
 
 
