@@ -117,6 +117,15 @@ uv run mypy src/openscientist/ tests/  # types
 uv run pytest                   # tests (75% coverage minimum)
 ```
 
+CI (`.github/workflows/ci.yml`) also runs on every PR and blocks merging on:
+
+- **Secret scanning** (gitleaks) over the PR's commits
+- **Dependency vulnerability scanning** — `pip-audit` against installed Python packages, plus `dependency-review-action` (fails on high/critical severity)
+- **Docker build validation** — hadolint on all Dockerfiles, plus full builds of `Dockerfile.base` and `Dockerfile.executor` when Docker-relevant files change. `Dockerfile` and `Dockerfile.agent` are lint-only (see comments in `ci.yml`) — the former needs a private registry credential CI shouldn't have, and the latter's dependency tree (1,300+ crates) isn't a viable full build on a standard runner
+- **Coverage delta** — fails if this branch's coverage drops more than 0.5 points below `main`'s
+
+Coverage reports (XML, JSON, HTML) are uploaded as a workflow artifact on every run.
+
 ## Git Hooks
 
 Hooks are managed by [pre-commit](https://pre-commit.com) (see `.pre-commit-config.yaml`). Install both hook types once after cloning:
