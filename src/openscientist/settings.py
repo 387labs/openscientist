@@ -10,6 +10,7 @@ import hmac
 import logging
 import os
 import re
+from enum import StrEnum
 from functools import lru_cache
 from typing import Any
 
@@ -21,6 +22,13 @@ logger = logging.getLogger(__name__)
 _SIMPLE_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+$")
 
 
+class AppEnvironment(StrEnum):
+    """Deployment environment identity for the OpenScientist application."""
+
+    DEVELOPMENT = "development"
+    PRODUCTION = "production"
+
+
 class DevSettings(BaseSettings):
     """Development mode settings."""
 
@@ -30,6 +38,14 @@ class DevSettings(BaseSettings):
         extra="ignore",
     )
 
+    environment: AppEnvironment = Field(
+        default=AppEnvironment.DEVELOPMENT,
+        alias="OPENSCIENTIST_ENVIRONMENT",
+        description=(
+            "Deployment environment (development or production). "
+            "Production rejects OPENSCIENTIST_DEV_MODE=true."
+        ),
+    )
     dev_mode: bool = Field(default=False, alias="OPENSCIENTIST_DEV_MODE")
     simulate_provider_error: bool = Field(default=False, alias="SIMULATE_PROVIDER_ERROR")
 
@@ -938,6 +954,17 @@ class Settings(BaseSettings):
         self.auth.token_encryption_key = hmac.new(
             key, b"token_encryption_key", hashlib.sha256
         ).hexdigest()
+        return self
+
+    @model_validator(mode="after")
+    def validate_dev_mode_not_in_production(self) -> "Settings":
+        """Reject OPENSCIENTIST_DEV_MODE when OPENSCIENTIST_ENVIRONMENT is production."""
+        if self.dev.environment == AppEnvironment.PRODUCTION and self.dev.dev_mode:
+            raise ValueError(
+                "OPENSCIENTIST_DEV_MODE cannot be enabled when "
+                "OPENSCIENTIST_ENVIRONMENT=production. Disable OPENSCIENTIST_DEV_MODE "
+                "or set OPENSCIENTIST_ENVIRONMENT=development."
+            )
         return self
 
     @model_validator(mode="after")

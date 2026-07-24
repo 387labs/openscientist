@@ -8,6 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from openscientist.settings import (
+    AppEnvironment,
     AuthSettings,
     BudgetSettings,
     ContainerSettings,
@@ -580,6 +581,86 @@ class TestSettingsAdminDatabaseUrl:
             if record.levelname == "WARNING" and "ADMIN_DATABASE_URL" in record.message
         ]
         assert admin_warnings == []
+
+
+class TestSettingsDevModeNotInProduction:
+    """Tests for R14: reject OPENSCIENTIST_DEV_MODE in production."""
+
+    def _configure_base_env(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        environment: str | None,
+        dev_mode: str,
+    ) -> None:
+        monkeypatch.setenv("OPENSCIENTIST_SECRET_KEY", "test-secret-key")
+        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://app:pass@host:5432/db")
+        monkeypatch.setenv("ADMIN_DATABASE_URL", "postgresql+asyncpg://admin:pass@host:5432/db")
+        monkeypatch.setenv("OPENSCIENTIST_PROVIDER", "anthropic")
+        monkeypatch.setenv("OPENSCIENTIST_DEV_MODE", dev_mode)
+        if environment is None:
+            monkeypatch.delenv("OPENSCIENTIST_ENVIRONMENT", raising=False)
+        else:
+            monkeypatch.setenv("OPENSCIENTIST_ENVIRONMENT", environment)
+
+    def test_production_with_dev_mode_enabled_fails(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        self._configure_base_env(monkeypatch, environment="production", dev_mode="true")
+
+        with pytest.raises(ValidationError, match="OPENSCIENTIST_DEV_MODE cannot be enabled"):
+            Settings()
+
+    def test_production_with_dev_mode_disabled_succeeds(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        self._configure_base_env(monkeypatch, environment="production", dev_mode="false")
+
+        settings = Settings()
+        assert settings.dev.environment == AppEnvironment.PRODUCTION
+        assert settings.dev.dev_mode is False
+
+    def test_development_with_dev_mode_enabled_succeeds(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        self._configure_base_env(monkeypatch, environment="development", dev_mode="true")
+
+        settings = Settings()
+        assert settings.dev.environment == AppEnvironment.DEVELOPMENT
+        assert settings.dev.dev_mode is True
+
+    def test_default_environment_is_development_and_allows_dev_mode(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """Unset OPENSCIENTIST_ENVIRONMENT remains development (backward compatible)."""
+        monkeypatch.chdir(tmp_path)
+        self._configure_base_env(monkeypatch, environment=None, dev_mode="true")
+
+        settings = Settings()
+        assert settings.dev.environment == AppEnvironment.DEVELOPMENT
+        assert settings.dev.dev_mode is True
+
+    def test_invalid_environment_value_fails(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        self._configure_base_env(monkeypatch, environment="staging", dev_mode="false")
+
+        with pytest.raises(ValidationError):
+            Settings()
 
 
 class TestAuthSettings:
