@@ -694,10 +694,13 @@ class JobManager:
                         job_id,
                         exit_code,
                     )
+                    container_logs = runner.get_logs(job_id)
                     self._update_job_status(
                         job_id,
                         JobStatus.FAILED,
-                        error_message=f"Agent container exited with code {exit_code}",
+                        error_message=self._build_container_failure_message(
+                            exit_code, container_logs
+                        ),
                     )
                     return
 
@@ -720,6 +723,54 @@ class JobManager:
             with self._lock:
                 self._running_jobs.pop(job_id, None)
             self._start_next_queued_job()
+
+    def _build_container_failure_message(
+        self, exit_code: int, container_logs: str | None
+    ) -> str:
+        """Compose a diagnostic message for an agent container that exited
+        non-zero before writing a terminal status.
+
+        The agent entrypoint catches its own exceptions, logs the traceback to
+        stderr, and exits 1 — so without surfacing the container logs here the
+        failure is opaque in the UI. Include the log tail plus a hint for the
+        most common local-dev misconfiguration.
+        """
+        parts = [f"Agent container exited with code {exit_code}."]
+
+        hint = self._host_project_dir_hint()
+        if hint:
+            parts.append(hint)
+
+        if container_logs:
+            parts.append(f"Last container log lines:\n{container_logs.strip()}")
+
+        return "\n\n".join(parts)
+
+    def _host_project_dir_hint(self) -> str | None:
+        """Return a fix hint when the agent job directory was likely mounted empty.
+
+        When the web app itself runs inside Docker but OPENSCIENTIST_HOST_PROJECT_DIR
+        is unset, sibling agent containers bind-mount a non-existent host path, so
+        the job directory arrives empty and the agent crashes immediately on
+        startup. Detect that specific case and point the operator at the fix.
+        """
+        try:
+            from openscientist.settings import get_settings
+
+            in_container = Path("/.dockerenv").exists()
+            host_project_dir = get_settings().container.host_project_dir
+        except Exception:  # pragma: no cover - defensive; settings load elsewhere
+            return None
+
+        if in_container and not host_project_dir:
+            return (
+                "Likely cause: the web app is running in Docker but "
+                "OPENSCIENTIST_HOST_PROJECT_DIR is not set, so the agent container's "
+                "job directory is mounted empty. Set OPENSCIENTIST_HOST_PROJECT_DIR to "
+                "the absolute host path of the project (the directory that contains "
+                "./jobs) and recreate the web container."
+            )
+        return None
 
     def _start_next_queued_job(self) -> None:
         """Start the next queued job if slots available."""
