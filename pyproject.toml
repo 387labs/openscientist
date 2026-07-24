@@ -52,7 +52,7 @@ dependencies = [
     "pydantic-settings>=2.0.0",
 
     # Authentication (OAuth)
-    "authlib>=1.3.0",
+    "authlib>=1.6.12",
     "httpx>=0.27.0",  # Required by authlib for async OAuth
     "python-jose[cryptography]>=3.3.0",  # JWT handling
     "bcrypt>=4.0.0",  # Password hashing
