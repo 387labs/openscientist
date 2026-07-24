@@ -9,6 +9,8 @@ import uuid
 import zipfile
 from contextlib import asynccontextmanager
 from datetime import UTC
+from pathlib import Path
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -19,6 +21,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from openscientist.api.auth import hash_secret
 from openscientist.database.models import APIKey, Job, User
 from tests.helpers import enable_rls
+
+if TYPE_CHECKING:
+    from fastapi import FastAPI
 
 
 @pytest.fixture
@@ -131,8 +136,10 @@ async def completed_job_db(
     return job
 
 
-def _build_authenticated_app(db_session: AsyncSession, user: User):
+def _build_authenticated_app(db_session: AsyncSession, user: User) -> "FastAPI":
     """Create an app with authenticated user + RLS-aware session overrides."""
+    from collections.abc import AsyncIterator
+
     from fastapi import FastAPI
 
     from openscientist.api.auth import get_current_user_from_api_key
@@ -142,11 +149,11 @@ def _build_authenticated_app(db_session: AsyncSession, user: User):
 
     app = FastAPI()
 
-    async def override_get_session():
+    async def override_get_session() -> AsyncIterator[AsyncSession]:
         await set_current_user(db_session, user.id)
         yield db_session
 
-    async def override_get_user():
+    async def override_get_user() -> User:
         return user
 
     app.dependency_overrides[get_session] = override_get_session
@@ -212,7 +219,7 @@ class TestAPIKeyEndpoints:
         db_session: AsyncSession,
         test_user_db: User,
         test_api_key_db: tuple[APIKey, str],
-    ):
+    ) -> None:
         """Create a new API key successfully."""
         from fastapi import FastAPI
 
@@ -258,7 +265,7 @@ class TestAPIKeyEndpoints:
         db_session: AsyncSession,
         test_user_db: User,
         test_api_key_db: tuple[APIKey, str],
-    ):
+    ) -> None:
         """List API keys for authenticated user."""
         from fastapi import FastAPI
 
@@ -304,7 +311,7 @@ class TestAPIKeyEndpoints:
         db_session: AsyncSession,
         test_user_db: User,
         test_api_key_db: tuple[APIKey, str],
-    ):
+    ) -> None:
         """Revoke an API key."""
         from fastapi import FastAPI
 
@@ -358,7 +365,7 @@ class TestAPIKeyEndpoints:
         db_session: AsyncSession,
         test_user_db: User,
         test_api_key_db: tuple[APIKey, str],
-    ):
+    ) -> None:
         """Duplicate API key name for same user is rejected."""
         from fastapi import FastAPI
 
@@ -415,7 +422,7 @@ class TestJobEndpoints:
         test_user_db: User,
         test_api_key_db: tuple[APIKey, str],
         test_job_db: Job,
-    ):
+    ) -> None:
         """List jobs for authenticated user."""
         _ = test_job_db
         from fastapi import FastAPI
@@ -463,7 +470,7 @@ class TestJobEndpoints:
         test_user_db: User,
         test_api_key_db: tuple[APIKey, str],
         test_job_db: Job,
-    ):
+    ) -> None:
         """Get job details."""
         from fastapi import FastAPI
 
@@ -509,7 +516,7 @@ class TestJobEndpoints:
         test_user_db: User,
         test_api_key_db: tuple[APIKey, str],
         test_job_db: Job,
-    ):
+    ) -> None:
         """Job detail should use DB fields for research metadata."""
         from fastapi import FastAPI
 
@@ -554,7 +561,7 @@ class TestJobEndpoints:
         test_user_db: User,
         test_api_key_db: tuple[APIKey, str],
         test_job_db: Job,
-    ):
+    ) -> None:
         """Get job status (lightweight endpoint)."""
         from fastapi import FastAPI
 
@@ -600,7 +607,7 @@ class TestJobEndpoints:
         db_session: AsyncSession,
         test_user_db: User,
         test_api_key_db: tuple[APIKey, str],
-    ):
+    ) -> None:
         """Getting a non-existent job returns 404."""
         from fastapi import FastAPI
 
@@ -643,7 +650,7 @@ class TestJobEndpoints:
         db_session: AsyncSession,
         test_user_db: User,
         test_api_key_db: tuple[APIKey, str],
-    ):
+    ) -> None:
         """Malformed job IDs should return client errors, not 500s."""
         from fastapi import FastAPI
 
@@ -686,7 +693,7 @@ class TestJobEndpoints:
         test_user_db: User,
         test_user2_db: User,
         test_api_key_db: tuple[APIKey, str],
-    ):
+    ) -> None:
         """Users cannot access jobs they don't own."""
         from fastapi import FastAPI
 
@@ -743,7 +750,7 @@ class TestJobEndpoints:
         db_session: AsyncSession,
         test_user_db: User,
         test_api_key_db: tuple[APIKey, str],
-    ):
+    ) -> None:
         """Cancel a running job."""
         _, full_key = test_api_key_db
 
@@ -784,7 +791,7 @@ class TestJobEndpoints:
         db_session: AsyncSession,
         test_user_db: User,
         test_api_key_db: tuple[APIKey, str],
-    ):
+    ) -> None:
         """Cancel a pending job."""
         _, full_key = test_api_key_db
 
@@ -823,7 +830,7 @@ class TestJobEndpoints:
         db_session: AsyncSession,
         test_user_db: User,
         test_api_key_db: tuple[APIKey, str],
-    ):
+    ) -> None:
         """Cancel endpoint should delegate status update to JobManager only."""
         _, full_key = test_api_key_db
 
@@ -864,7 +871,7 @@ class TestJobEndpoints:
         test_user_db: User,
         test_api_key_db: tuple[APIKey, str],
         completed_job_db: Job,
-    ):
+    ) -> None:
         """Cannot cancel a completed job."""
         _, full_key = test_api_key_db
 
@@ -888,7 +895,7 @@ class TestJobEndpoints:
         db_session: AsyncSession,
         test_user_db: User,
         test_api_key_db: tuple[APIKey, str],
-    ):
+    ) -> None:
         """Create a new job via API."""
         from datetime import datetime
         from types import SimpleNamespace
@@ -971,7 +978,7 @@ class TestJobEndpoints:
         db_session: AsyncSession,
         test_user_db: User,
         test_api_key_db: tuple[APIKey, str],
-    ):
+    ) -> None:
         """Create job via multipart/form-data and forward uploaded files."""
         from datetime import datetime
         from types import SimpleNamespace
@@ -1067,7 +1074,7 @@ class TestJobEndpoints:
         db_session: AsyncSession,
         test_user_db: User,
         test_api_key_db: tuple[APIKey, str],
-    ):
+    ) -> None:
         """Duplicate multipart upload names should not overwrite each other."""
         from datetime import datetime
         from types import SimpleNamespace
@@ -1151,7 +1158,7 @@ class TestJobEndpoints:
         db_session: AsyncSession,
         test_user_db: User,
         test_api_key_db: tuple[APIKey, str],
-    ):
+    ) -> None:
         """User-correctable create errors are returned as 400 responses."""
         _, full_key = test_api_key_db
         app = _build_authenticated_app(db_session, test_user_db)
@@ -1187,7 +1194,7 @@ class TestJobEndpoints:
         self,
         db_session: AsyncSession,
         test_api_key_db: tuple[APIKey, str],
-    ):
+    ) -> None:
         """Unapproved users cannot start jobs via the API."""
         from fastapi import FastAPI
 
@@ -1246,7 +1253,7 @@ class TestJobEndpoints:
         test_api_key_db: tuple[APIKey, str],
         test_job_db: Job,
         completed_job_db: Job,
-    ):
+    ) -> None:
         """Filter jobs by status."""
         _ = (test_job_db, completed_job_db)
         from fastapi import FastAPI
@@ -1293,7 +1300,7 @@ class TestJobEndpoints:
         test_user_db: User,
         test_api_key_db: tuple[APIKey, str],
         test_job_db: Job,
-    ):
+    ) -> None:
         """Report endpoint requires a completed job."""
         from fastapi import FastAPI
 
@@ -1337,8 +1344,8 @@ class TestJobEndpoints:
         test_user_db: User,
         test_api_key_db: tuple[APIKey, str],
         completed_job_db: Job,
-        tmp_path,
-    ):
+        tmp_path: Path,
+    ) -> None:
         """Report endpoint returns report for completed job."""
         from fastapi import FastAPI
 
@@ -1389,8 +1396,8 @@ class TestJobEndpoints:
         test_user_db: User,
         test_api_key_db: tuple[APIKey, str],
         completed_job_db: Job,
-        tmp_path,
-    ):
+        tmp_path: Path,
+    ) -> None:
         """Report endpoint should read artifacts from configured JobManager jobs_dir."""
         from fastapi import FastAPI
 
@@ -1443,7 +1450,7 @@ class TestJobEndpoints:
         test_user_db: User,
         test_api_key_db: tuple[APIKey, str],
         test_job_db: Job,
-    ):
+    ) -> None:
         """Artifacts endpoint returns 404 if job directory doesn't exist."""
         _, full_key = test_api_key_db
 
@@ -1468,8 +1475,8 @@ class TestJobEndpoints:
         test_user_db: User,
         test_api_key_db: tuple[APIKey, str],
         test_job_db: Job,
-        tmp_path,
-    ):
+        tmp_path: Path,
+    ) -> None:
         """Artifacts endpoint returns ZIP archive."""
         _, full_key = test_api_key_db
 
@@ -1504,8 +1511,8 @@ class TestJobEndpoints:
         test_user_db: User,
         test_api_key_db: tuple[APIKey, str],
         test_job_db: Job,
-        tmp_path,
-    ):
+        tmp_path: Path,
+    ) -> None:
         """Artifacts endpoint should not include config.json in archives."""
         _, full_key = test_api_key_db
 
@@ -1540,8 +1547,8 @@ class TestJobEndpoints:
         test_user_db: User,
         test_api_key_db: tuple[APIKey, str],
         test_job_db: Job,
-        tmp_path,
-    ):
+        tmp_path: Path,
+    ) -> None:
         """Artifacts endpoint should zip files from configured JobManager jobs_dir."""
         _, full_key = test_api_key_db
 
@@ -1583,7 +1590,7 @@ class TestJobSharingEndpoints:
         test_user2_db: User,
         test_api_key_db: tuple[APIKey, str],
         test_job_db: Job,
-    ):
+    ) -> None:
         """Share a job with another user."""
         from contextlib import asynccontextmanager
         from unittest.mock import patch
@@ -1644,7 +1651,7 @@ class TestJobSharingEndpoints:
         test_user_db: User,
         test_user2_db: User,
         test_api_key_db: tuple[APIKey, str],
-    ):
+    ) -> None:
         """Search for users to share with."""
         from contextlib import asynccontextmanager
         from unittest.mock import patch
@@ -1698,7 +1705,7 @@ class TestJobSharingEndpoints:
         test_user2_db: User,
         test_api_key_db: tuple[APIKey, str],
         test_job_db: Job,
-    ):
+    ) -> None:
         """Sharing to an inactive user should be rejected as not found."""
         from contextlib import asynccontextmanager
         from unittest.mock import patch
@@ -1766,7 +1773,7 @@ class TestJobSharingEndpoints:
         test_user2_db: User,
         test_api_key_db: tuple[APIKey, str],
         test_job_db: Job,
-    ):
+    ) -> None:
         """List shares for a job."""
 
         from fastapi import FastAPI
@@ -1825,7 +1832,7 @@ class TestJobSharingEndpoints:
         test_user_db: User,
         test_user2_db: User,
         test_api_key_db: tuple[APIKey, str],
-    ):
+    ) -> None:
         """Non-owner cannot list shares for a job."""
         from fastapi import FastAPI
 
@@ -1882,7 +1889,7 @@ class TestJobSharingEndpoints:
         test_user2_db: User,
         test_api_key_db: tuple[APIKey, str],
         test_job_db: Job,
-    ):
+    ) -> None:
         """Revoke a job share."""
         from fastapi import FastAPI
 
@@ -1936,7 +1943,7 @@ class TestJobSharingEndpoints:
         test_user_db: User,
         test_user2_db: User,
         test_api_key_db: tuple[APIKey, str],
-    ):
+    ) -> None:
         """Non-owner cannot revoke a share."""
         from fastapi import FastAPI
 
@@ -1999,7 +2006,7 @@ class TestJobSharingEndpoints:
         db_session: AsyncSession,
         test_user_db: User,
         test_api_key_db: tuple[APIKey, str],
-    ):
+    ) -> None:
         """Malformed share IDs should return client errors, not 500s."""
         from fastapi import FastAPI
 
@@ -2043,7 +2050,7 @@ class TestAuthenticationFlow:
     async def test_invalid_api_key_format(
         self,
         db_session: AsyncSession,
-    ):
+    ) -> None:
         """Invalid API key format returns 401."""
         from fastapi import FastAPI
 
@@ -2074,7 +2081,7 @@ class TestAuthenticationFlow:
     async def test_nonexistent_api_key(
         self,
         db_session: AsyncSession,
-    ):
+    ) -> None:
         """Non-existent API key returns 401."""
         from fastapi import FastAPI
 

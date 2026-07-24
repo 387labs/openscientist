@@ -2,9 +2,11 @@
 
 import threading
 import time
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID, uuid4
 
@@ -91,7 +93,7 @@ class TestJobInfo:
         assert info.llm_model == "claude-sonnet-4-5-20250929"
 
 
-def _write_config(jobs_dir: Path, job_id: str, **overrides) -> dict:
+def _write_config(jobs_dir: Path, job_id: str, **overrides: Any) -> dict:
     """Helper: create a minimal job directory scaffold."""
     job_dir = jobs_dir / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
@@ -111,7 +113,7 @@ def _make_db_job(
     status: str,
     created_at: str,
     job_id: str | None = None,
-    **overrides,
+    **overrides: Any,
 ) -> SimpleNamespace:
     """Helper: create a fake DB job model."""
     job_uuid = UUID(job_id) if job_id else uuid4()
@@ -135,11 +137,13 @@ def _make_db_job(
     return SimpleNamespace(**defaults)
 
 
-def _db_get_job_side_effect(models: list[SimpleNamespace]):
+def _db_get_job_side_effect(
+    models: list[SimpleNamespace],
+) -> Callable[[str, str | None], Awaitable[SimpleNamespace | None]]:
     """Build side-effect that returns models by UUID id."""
     by_id = {m.id: m for m in models}
 
-    async def _inner(job_id: str, user_id=None):
+    async def _inner(job_id: str, user_id: str | None = None) -> SimpleNamespace | None:
         _ = user_id
         try:
             return by_id.get(UUID(job_id))
@@ -223,7 +227,7 @@ class TestJobManagerListAndGet:
         ]
 
     @pytest.fixture
-    def manager(self, tmp_path) -> JobManager:
+    def manager(self, tmp_path: Path) -> JobManager:
         return _new_manager(tmp_path)
 
     def test_list_all_jobs(self, manager, db_jobs):
@@ -288,7 +292,7 @@ class TestJobManagerRegenerateReport:
             yield
 
     @pytest.fixture
-    def manager(self, tmp_path) -> JobManager:
+    def manager(self, tmp_path: Path) -> JobManager:
         return _new_manager(tmp_path)
 
     def test_missing_job_raises(self, manager):
@@ -447,6 +451,7 @@ class TestJobManagerStatusUpdate:
             manager._update_job_status(job_id, JobStatus.RUNNING)
 
         mock_update.assert_awaited_once()
+        assert mock_update.await_args is not None
         assert mock_update.await_args.args[0] == job_id
         assert mock_update.await_args.args[1] == JobStatus.RUNNING
 
@@ -462,6 +467,7 @@ class TestJobManagerStatusUpdate:
         ) as mock_update:
             manager._update_job_status(job_id, JobStatus.COMPLETED)
 
+        assert mock_update.await_args is not None
         assert mock_update.await_args.args[1] == JobStatus.COMPLETED
 
     def test_failed_passes_status_to_database(self, tmp_path):
@@ -476,6 +482,7 @@ class TestJobManagerStatusUpdate:
         ) as mock_update:
             manager._update_job_status(job_id, JobStatus.FAILED)
 
+        assert mock_update.await_args is not None
         assert mock_update.await_args.args[1] == JobStatus.FAILED
 
 
@@ -1147,10 +1154,23 @@ class TestJobManagerCancelSummaryCoverage:
             assert manager._list_operational_jobs() == []
 
     def test_get_job_summary_counts_and_cost(self, tmp_path):
+        import json
+        from datetime import UTC, datetime
+
+        from openscientist.providers.base import CostInfo
+
         manager = _new_manager(tmp_path)
         jobs = [self._job(JobStatus.COMPLETED, "a"), self._job(JobStatus.FAILED, "b")]
+        cost_info = CostInfo(
+            provider_name="stub",
+            total_spend_usd=10.0,
+            recent_spend_usd=2.5,
+            recent_period_hours=24,
+            last_updated=datetime(2026, 1, 15, 12, 0, 0, tzinfo=UTC),
+            metadata={"source": "test"},
+        )
         provider = MagicMock()
-        provider.get_cost_info.return_value = "cost"
+        provider.get_cost_info.return_value = cost_info
         provider.evaluate_budget.return_value = "budget"
         with (
             patch.object(manager, "list_jobs", return_value=jobs),
@@ -1160,8 +1180,15 @@ class TestJobManagerCancelSummaryCoverage:
         assert summary["total_jobs"] == 2
         assert summary["status_counts"]["completed"] == 1
         assert summary["status_counts"]["failed"] == 1
-        assert summary["cost_info"] == "cost"
+        assert isinstance(summary["cost_info"], dict)
+        assert summary["cost_info"]["provider_name"] == "stub"
+        assert summary["cost_info"]["total_spend_usd"] == 10.0
+        assert summary["cost_info"]["recent_spend_usd"] == 2.5
+        assert summary["cost_info"]["last_updated"] == "2026-01-15T12:00:00+00:00"
+        assert summary["cost_info"]["metadata"] == {"source": "test"}
         assert summary["budget_check"] == "budget"
+        # Regression: summary must be JSON-serializable with a real CostInfo
+        json.dumps(summary)
 
     def test_get_job_summary_handles_provider_error(self, tmp_path):
         from openscientist.exceptions import ProviderError
@@ -1178,3 +1205,177 @@ class TestJobManagerCancelSummaryCoverage:
         assert summary["total_jobs"] == 0
         assert summary["cost_info"] is None
         assert summary["budget_check"] is None
+
+
+class TestRunJobInContainer:
+    """Cover container poll/failure/cleanup paths in _run_job_in_container."""
+
+    def _running_info(self, job_id: str) -> JobInfo:
+        return JobInfo(
+            job_id=job_id,
+            research_question="Q?",
+            status=JobStatus.RUNNING,
+            created_at="2026-01-01T00:00:00+00:00",
+        )
+
+    def test_reaches_terminal_status_and_cleans_up(self, tmp_path: Path) -> None:
+        manager = _new_manager(tmp_path)
+        job_id = str(uuid4())
+        (tmp_path / job_id).mkdir()
+        manager._running_jobs[job_id] = MagicMock()
+
+        runner = MagicMock()
+        runner.get_exit_code.return_value = None
+        completed = JobInfo(
+            job_id=job_id,
+            research_question="Q?",
+            status=JobStatus.COMPLETED,
+            created_at="2026-01-01T00:00:00+00:00",
+        )
+
+        with (
+            patch("openscientist.job_container.JobContainerRunner", return_value=runner),
+            patch.object(manager, "_update_job_status"),
+            patch.object(manager, "_load_job_info", return_value=completed),
+            patch.object(manager, "_start_next_queued_job") as mock_next,
+            patch("openscientist.job_manager.time.sleep"),
+            patch(
+                "openscientist.settings.get_settings",
+                return_value=SimpleNamespace(container=SimpleNamespace(agent_timeout=30)),
+            ),
+        ):
+            manager._run_job_in_container(job_id)
+
+        runner.launch.assert_called_once()
+        runner.cleanup.assert_called_once()
+        assert job_id not in manager._running_jobs
+        mock_next.assert_called_once()
+
+    def test_nonzero_container_exit_marks_failed(self, tmp_path: Path) -> None:
+        manager = _new_manager(tmp_path)
+        job_id = str(uuid4())
+        (tmp_path / job_id).mkdir()
+        manager._running_jobs[job_id] = MagicMock()
+
+        runner = MagicMock()
+        runner.get_exit_code.return_value = 7
+
+        with (
+            patch("openscientist.job_container.JobContainerRunner", return_value=runner),
+            patch.object(manager, "_update_job_status") as mock_update,
+            patch.object(manager, "_load_job_info", return_value=self._running_info(job_id)),
+            patch.object(manager, "_start_next_queued_job"),
+            patch("openscientist.job_manager.time.sleep"),
+            patch(
+                "openscientist.settings.get_settings",
+                return_value=SimpleNamespace(container=SimpleNamespace(agent_timeout=30)),
+            ),
+        ):
+            manager._run_job_in_container(job_id)
+
+        failed_calls = [
+            c
+            for c in mock_update.call_args_list
+            if len(c.args) >= 2 and c.args[1] == JobStatus.FAILED
+        ]
+        assert failed_calls
+        assert "exited with code 7" in failed_calls[0].kwargs.get("error_message", "")
+        runner.cleanup.assert_called_once()
+
+    def test_timeout_marks_failed(self, tmp_path: Path) -> None:
+        manager = _new_manager(tmp_path)
+        job_id = str(uuid4())
+        (tmp_path / job_id).mkdir()
+        manager._running_jobs[job_id] = MagicMock()
+
+        runner = MagicMock()
+        runner.get_exit_code.return_value = None
+
+        with (
+            patch("openscientist.job_container.JobContainerRunner", return_value=runner),
+            patch.object(manager, "_update_job_status") as mock_update,
+            patch.object(manager, "_load_job_info", return_value=self._running_info(job_id)),
+            patch.object(manager, "_start_next_queued_job"),
+            patch("openscientist.job_manager.time.sleep"),
+            patch(
+                "openscientist.settings.get_settings",
+                return_value=SimpleNamespace(container=SimpleNamespace(agent_timeout=5)),
+            ),
+        ):
+            # poll_interval is 5; after one sleep elapsed >= timeout
+            manager._run_job_in_container(job_id)
+
+        failed_calls = [
+            c
+            for c in mock_update.call_args_list
+            if len(c.args) >= 2 and c.args[1] == JobStatus.FAILED
+        ]
+        assert any("timed out" in (c.kwargs.get("error_message") or "") for c in failed_calls)
+        runner.cleanup.assert_called_once()
+
+    def test_launch_exception_marks_failed_and_cleans_up(self, tmp_path: Path) -> None:
+        manager = _new_manager(tmp_path)
+        job_id = str(uuid4())
+        (tmp_path / job_id).mkdir()
+        manager._running_jobs[job_id] = MagicMock()
+
+        runner = MagicMock()
+        runner.launch.side_effect = RuntimeError("docker down")
+
+        with (
+            patch("openscientist.job_container.JobContainerRunner", return_value=runner),
+            patch.object(manager, "_update_job_status") as mock_update,
+            patch.object(manager, "_start_next_queued_job"),
+        ):
+            manager._run_job_in_container(job_id)
+
+        failed_calls = [
+            c
+            for c in mock_update.call_args_list
+            if len(c.args) >= 2 and c.args[1] == JobStatus.FAILED
+        ]
+        assert failed_calls
+        assert "docker down" in failed_calls[0].kwargs.get("error_message", "")
+        runner.cleanup.assert_called_once()
+        assert job_id not in manager._running_jobs
+
+    def test_start_job_not_found_and_already_running(self, tmp_path: Path) -> None:
+        manager = _new_manager(tmp_path)
+        with patch.object(manager, "get_job", return_value=None):
+            with pytest.raises(ValueError, match="not found"):
+                manager.start_job("missing")
+
+        job_id = str(uuid4())
+        manager._running_jobs[job_id] = MagicMock()
+        with patch.object(
+            manager,
+            "get_job",
+            return_value=JobInfo(
+                job_id=job_id,
+                research_question="Q?",
+                status=JobStatus.PENDING,
+                created_at="2026-01-01T00:00:00+00:00",
+            ),
+        ):
+            with pytest.raises(ValueError, match="already running"):
+                manager.start_job(job_id)
+
+    def test_start_job_queues_when_at_capacity(self, tmp_path: Path) -> None:
+        manager = _new_manager(tmp_path)
+        job_id = str(uuid4())
+        with (
+            patch.object(
+                manager,
+                "get_job",
+                return_value=JobInfo(
+                    job_id=job_id,
+                    research_question="Q?",
+                    status=JobStatus.PENDING,
+                    created_at="2026-01-01T00:00:00+00:00",
+                ),
+            ),
+            patch.object(manager, "_get_active_job_count", return_value=manager.max_concurrent),
+            patch.object(manager, "_update_job_status") as mock_update,
+        ):
+            manager.start_job(job_id)
+        mock_update.assert_called_with(job_id, JobStatus.QUEUED)

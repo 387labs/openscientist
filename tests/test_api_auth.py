@@ -24,7 +24,9 @@ class _FakeResult:
 
 
 @pytest.mark.asyncio
-async def test_api_key_authentication_queries_by_secret_hash(monkeypatch: pytest.MonkeyPatch):
+async def test_api_key_authentication_queries_by_secret_hash(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Authentication query should key off hashed secret, not ambiguous key names."""
     user = User(email="u2@example.com", name="User 2")
     user.id = uuid4()
@@ -61,7 +63,9 @@ async def test_api_key_authentication_queries_by_secret_hash(monkeypatch: pytest
 
 
 @pytest.mark.asyncio
-async def test_api_key_authentication_rejects_name_mismatch(monkeypatch: pytest.MonkeyPatch):
+async def test_api_key_authentication_rejects_name_mismatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Name and secret components must belong to the same key record."""
     api_key = APIKey(
         user_id=uuid4(), name="expected-name", key_hash="hashed-secret", is_active=True

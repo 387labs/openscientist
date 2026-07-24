@@ -114,7 +114,7 @@ All PRs must pass:
 ```bash
 uv run ruff check src/ tests/   # lint
 uv run mypy src/openscientist/ tests/  # types
-uv run pytest                   # tests (67% coverage minimum, see pyproject.toml)
+uv run pytest                   # tests (75% coverage minimum)
 ```
 
 CI (`.github/workflows/ci.yml`) also runs on every PR and blocks merging on:

@@ -303,6 +303,29 @@ class JobContainerRunner:
             logger.warning("Failed to get exit code for job %s: %s", job_id, error)
         return None
 
+    def get_logs(self, job_id: str, *, tail: int = 50) -> str | None:
+        """
+        Return the most recent log lines from the agent container, or None.
+
+        Surfaces the real failure reason when a container exits non-zero before
+        writing a terminal status: the entrypoint logs its traceback to stderr,
+        which the parent would otherwise discard. Returns None when the
+        container is missing or its logs cannot be read.
+        """
+        container = self._find_container(job_id)
+        if container is None:
+            return None
+        try:
+            raw = container.logs(stdout=True, stderr=True, tail=tail)
+        except docker_errors.APIError as error:
+            if self._is_not_found_error(error):
+                return None
+            logger.warning("Failed to get logs for job %s: %s", job_id, error)
+            return None
+        if not isinstance(raw, bytes):
+            return None
+        return raw.decode("utf-8", errors="replace")
+
     def _find_container(self, job_id: str) -> Any | None:
         """Find the agent container for a job by labels."""
         try:
