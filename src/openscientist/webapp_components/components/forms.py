@@ -12,7 +12,7 @@ from nicegui import ui
 
 def render_dialog_actions(
     on_confirm: Callable[[], None | Awaitable[None]],
-    on_cancel: Callable[[], None],
+    on_cancel: Callable[[], object],
     confirm_label: str = "Confirm",
     cancel_label: str = "Cancel",
     confirm_props: str = "color=primary",
