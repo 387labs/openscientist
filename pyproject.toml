@@ -48,7 +48,7 @@ dependencies = [
     "mcp[cli]>=1.0.0",
 
     # Environment & config
-    "python-dotenv>=1.0.0",
+    "python-dotenv>=1.2.2",
     "pydantic-settings>=2.0.0",
 
     # Authentication (OAuth)
