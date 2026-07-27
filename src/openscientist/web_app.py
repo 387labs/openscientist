@@ -32,52 +32,6 @@ BUILTIN_SKILLS_DIR = Path(__file__).parent.parent.parent / "skills"
 JOBS_DIR_ENV = "OPENSCIENTIST_JOBS_DIR"
 
 
-# ── NiceGUI patch: silence "parent slot deleted" timer errors ──────────────
-# When a container (e.g. feedback_container) is .clear()-ed, child timers
-# lose their parent slot but keep firing until on_disconnect cleanup runs.
-# The base timer's inner try/except only covers the *callback*, not the
-# `with self._get_context():` call at line 90 of timer.py, so the error
-# propagates to the background task handler and fills the log.
-# Patch: return nullcontext() and deactivate the timer instead of raising.
-#
-# Validated against nicegui==3.7.1. Remove once upstream fixes the underlying
-# issue, or revalidate against timer.py after any NiceGUI upgrade.
-_NICEGUI_PATCH_VALIDATED_VERSION = "3.7.1"
-
-
-def _patch_nicegui_timer() -> None:
-    import warnings
-    from contextlib import nullcontext
-
-    import nicegui
-    from nicegui.elements.timer import Timer as _NiceGUITimer
-
-    if nicegui.__version__ != _NICEGUI_PATCH_VALIDATED_VERSION:
-        warnings.warn(
-            f"NiceGUI timer patch was validated against nicegui=="
-            f"{_NICEGUI_PATCH_VALIDATED_VERSION}, but installed version is "
-            f"{nicegui.__version__}. Verify the patch in _patch_nicegui_timer() "
-            "still applies to nicegui.elements.timer.Timer._get_context "
-            "before relying on it.",
-            UserWarning,
-            stacklevel=2,
-        )
-
-    _orig = _NiceGUITimer._get_context
-
-    def _safe_get_context(self):  # type: ignore[no-untyped-def]
-        try:
-            return _orig(self)
-        except RuntimeError:
-            self.deactivate()
-            return nullcontext()
-
-    _NiceGUITimer._get_context = _safe_get_context  # type: ignore[method-assign]
-
-
-_patch_nicegui_timer()
-# ─────────────────────────────────────────────────────────────────────────────
-
 # Load environment variables from .env file
 # Try Docker path first, fall back to local path
 # Use override=False so Docker/system env vars take precedence over .env
