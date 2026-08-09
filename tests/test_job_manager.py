@@ -1121,24 +1121,92 @@ class TestJobManagerCancelSummaryCoverage:
             with pytest.raises(ValueError, match="not found"):
                 manager.cancel_job(str(uuid4()))
 
-    def test_cancel_completed_raises(self, tmp_path):
+    @pytest.mark.parametrize(
+        "status",
+        [
+            JobStatus.COMPLETED,
+            JobStatus.FAILED,
+            JobStatus.CANCELLED,
+            JobStatus.AWAITING_FEEDBACK,
+            JobStatus.GENERATING_REPORT,
+        ],
+    )
+    def test_cancel_rejects_non_cancellable_status(
+        self, tmp_path: Path, status: JobStatus
+    ) -> None:
+        """cancel_job only accepts pending/queued/running; other statuses raise."""
         manager = _new_manager(tmp_path)
-        with patch.object(manager, "get_job", return_value=self._job(JobStatus.COMPLETED)):
+        mock_runner = MagicMock()
+        with (
+            patch.object(manager, "get_job", return_value=self._job(status)),
+            patch.object(manager, "_update_job_status") as mock_update,
+            patch("openscientist.job_container.JobContainerRunner", return_value=mock_runner),
+        ):
             with pytest.raises(ValueError, match="not pending, running, or queued"):
                 manager.cancel_job("j1")
+
+        mock_update.assert_not_called()
+        mock_runner.stop.assert_not_called()
 
     def test_cancel_pending_untracks_without_container_stop(self, tmp_path):
         manager = _new_manager(tmp_path)
         job_id = str(uuid4())
         manager._running_jobs[job_id] = MagicMock()
+        mock_runner = MagicMock()
         with (
             patch.object(manager, "get_job", return_value=self._job(JobStatus.PENDING, job_id)),
             patch.object(manager, "_update_job_status") as mock_update,
-            patch.object(manager, "_start_next_queued_job"),
+            patch.object(manager, "_start_next_queued_job") as mock_start_next,
+            patch("openscientist.job_container.JobContainerRunner", return_value=mock_runner),
         ):
             manager.cancel_job(job_id)
         assert mock_update.call_args.args[1] == JobStatus.CANCELLED
+        assert mock_update.call_args.kwargs["cancellation_reason"] == "Cancelled by user"
         assert job_id not in manager._running_jobs
+        mock_runner.stop.assert_not_called()
+        mock_start_next.assert_called_once_with()
+
+    def test_cancel_queued_untracks_without_container_stop(self, tmp_path):
+        """Queued cancel marks cancelled, untracks the slot, and does not stop a container."""
+        manager = _new_manager(tmp_path)
+        job_id = str(uuid4())
+        manager._running_jobs[job_id] = MagicMock()
+        mock_runner = MagicMock()
+        with (
+            patch.object(manager, "get_job", return_value=self._job(JobStatus.QUEUED, job_id)),
+            patch.object(manager, "_update_job_status") as mock_update,
+            patch.object(manager, "_start_next_queued_job") as mock_start_next,
+            patch("openscientist.job_container.JobContainerRunner", return_value=mock_runner),
+        ):
+            manager.cancel_job(job_id)
+        assert mock_update.call_args.args[1] == JobStatus.CANCELLED
+        assert mock_update.call_args.kwargs["cancellation_reason"] == "Cancelled by user"
+        assert job_id not in manager._running_jobs
+        mock_runner.stop.assert_not_called()
+        mock_start_next.assert_called_once_with()
+
+    def test_cancel_running_invokes_container_stop(self, tmp_path):
+        """Running cancel keeps thread accounting and immediately stops the agent container."""
+        manager = _new_manager(tmp_path)
+        job_id = str(uuid4())
+        manager._running_jobs[job_id] = MagicMock()
+        mock_runner = MagicMock()
+        with (
+            patch.object(manager, "get_job", return_value=self._job(JobStatus.RUNNING, job_id)),
+            patch.object(manager, "_update_job_status") as mock_update,
+            patch.object(manager, "_start_next_queued_job") as mock_start_next,
+            patch("openscientist.job_container.JobContainerRunner", return_value=mock_runner),
+        ):
+            manager.cancel_job(job_id)
+
+        mock_update.assert_called_once_with(
+            job_id,
+            JobStatus.CANCELLED,
+            cancellation_reason="Cancelled by user",
+        )
+        assert job_id in manager._running_jobs
+        mock_runner.stop.assert_called_once_with(job_id)
+        mock_start_next.assert_called_once_with()
 
     def test_active_job_count_zero_when_none_running(self, tmp_path):
         manager = _new_manager(tmp_path)

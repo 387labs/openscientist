@@ -377,6 +377,90 @@ class TestJobContainerRunner:
             runner = JobContainerRunner()
             assert runner.get_logs("job-123") is None
 
+    def test_stop_calls_container_stop_with_timeout(self):
+        """stop() gracefully stops the labeled agent container with the default timeout."""
+        mock_client = MagicMock()
+        mock_container = MagicMock()
+        mock_client.containers.list.return_value = [mock_container]
+
+        with patch("openscientist.job_container.runner.docker.from_env", return_value=mock_client):
+            runner = JobContainerRunner()
+            runner.stop("job-123")
+
+        mock_container.stop.assert_called_once_with(timeout=10)
+
+    def test_stop_handles_not_found_safely(self):
+        """stop() treats a vanished container as a no-op instead of raising."""
+        mock_client = MagicMock()
+        mock_container = MagicMock()
+        mock_container.stop.side_effect = docker_errors.NotFound("gone")
+        mock_client.containers.list.return_value = [mock_container]
+
+        with (
+            patch("openscientist.job_container.runner.docker.from_env", return_value=mock_client),
+            patch("openscientist.job_container.runner.logger.warning") as mock_warning,
+        ):
+            runner = JobContainerRunner()
+            runner.stop("job-123")
+
+        mock_warning.assert_not_called()
+
+    def test_stop_noop_when_container_missing(self):
+        """stop() is a no-op when no agent container matches the job labels."""
+        mock_client = MagicMock()
+        mock_client.containers.list.return_value = []
+
+        with patch("openscientist.job_container.runner.docker.from_env", return_value=mock_client):
+            runner = JobContainerRunner()
+            runner.stop("job-123")
+
+    def test_cleanup_removes_container_with_force(self):
+        """cleanup() force-removes the agent container."""
+        mock_client = MagicMock()
+        mock_container = MagicMock()
+        mock_client.containers.list.return_value = [mock_container]
+
+        with patch("openscientist.job_container.runner.docker.from_env", return_value=mock_client):
+            runner = JobContainerRunner()
+            runner.cleanup("job-123")
+
+        mock_container.remove.assert_called_once_with(force=True)
+        mock_container.logs.assert_not_called()
+
+    def test_cleanup_writes_logs_when_log_dir_provided(self, tmp_path: Path) -> None:
+        """cleanup() persists container logs before removing the container."""
+        mock_client = MagicMock()
+        mock_container = MagicMock()
+        mock_container.logs.return_value = b"agent finished\n"
+        mock_client.containers.list.return_value = [mock_container]
+
+        with patch("openscientist.job_container.runner.docker.from_env", return_value=mock_client):
+            runner = JobContainerRunner()
+            runner.cleanup("job-123", log_dir=tmp_path)
+
+        log_file = tmp_path / "agent-container.log"
+        assert log_file.read_text(encoding="utf-8") == "agent finished\n"
+        mock_container.logs.assert_called_once_with(stdout=True, stderr=True)
+        mock_container.remove.assert_called_once_with(force=True)
+
+    def test_cleanup_removes_container_when_log_retrieval_fails(self, tmp_path: Path) -> None:
+        """cleanup() still force-removes the container if log capture fails."""
+        mock_client = MagicMock()
+        mock_container = MagicMock()
+        mock_container.logs.side_effect = docker_errors.APIError("log read failed")
+        mock_client.containers.list.return_value = [mock_container]
+
+        with (
+            patch("openscientist.job_container.runner.docker.from_env", return_value=mock_client),
+            patch("openscientist.job_container.runner.logger.warning") as mock_warning,
+        ):
+            runner = JobContainerRunner()
+            runner.cleanup("job-123", log_dir=tmp_path)
+
+        assert not (tmp_path / "agent-container.log").exists()
+        mock_container.remove.assert_called_once_with(force=True)
+        mock_warning.assert_called_once()
+
 
 class TestPhenixMount:
     """Tests for Phenix volume mount in agent containers."""
