@@ -401,6 +401,59 @@ class TestAPIKeyEndpoints:
         assert response.status_code == 409
         assert "already exists" in response.json()["detail"]
 
+    @pytest.mark.asyncio
+    async def test_create_api_key_returns_429_at_max_keys(
+        self,
+        db_session: AsyncSession,
+        test_user_db: User,
+        test_api_key_db: tuple[APIKey, str],
+    ) -> None:
+        """Creating an 11th API key is rejected once the per-user limit is reached."""
+        from fastapi import FastAPI
+
+        from openscientist.api.auth import get_current_user_from_api_key
+        from openscientist.api.router import api_router as router
+        from openscientist.database.session import get_session
+
+        _, full_key = test_api_key_db
+
+        # Fixture already created one key; seed nine more for a total of 10.
+        for index in range(9):
+            db_session.add(
+                APIKey(
+                    user_id=test_user_db.id,
+                    name=f"seed-key-{index}",
+                    key_hash=hash_secret(f"seed-secret-{index}"),
+                    is_active=True,
+                )
+            )
+        await db_session.commit()
+
+        app = FastAPI()
+
+        async def override_get_session():
+            yield db_session
+
+        async def override_get_user():
+            return test_user_db
+
+        app.dependency_overrides[get_session] = override_get_session
+        app.dependency_overrides[get_current_user_from_api_key] = override_get_user
+        app.include_router(router)
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://test",
+        ) as client:
+            response = await client.post(
+                "/api/v1/keys",
+                json={"name": "eleventh-key"},
+                headers={"Authorization": f"Bearer {full_key}"},
+            )
+
+        assert response.status_code == 429
+        assert response.json()["detail"] == "Maximum of 10 API keys per user"
+
 
 class TestJobEndpoints:
     """Tests for job management endpoints."""
@@ -743,6 +796,94 @@ class TestJobEndpoints:
 
         # RLS should block access
         assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_sharee_can_get_shared_job(
+        self,
+        db_session: AsyncSession,
+        test_user_db: User,
+        test_user2_db: User,
+        test_api_key_db: tuple[APIKey, str],
+        test_job_db: Job,
+    ) -> None:
+        """A user with a share can GET the shared job via the jobs API."""
+        from openscientist.database.models import JobShare
+
+        _, full_key = test_api_key_db
+
+        db_session.add(
+            JobShare(
+                job_id=test_job_db.id,
+                shared_with_user_id=test_user2_db.id,
+                permission_level="view",
+            )
+        )
+        await db_session.commit()
+
+        # Enable RLS before setting user context (superuser bypasses RLS)
+        await enable_rls(db_session)
+
+        app = _build_authenticated_app(db_session, test_user2_db)
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://test",
+        ) as client:
+            response = await client.get(
+                f"/api/v1/jobs/{test_job_db.id}",
+                headers={"Authorization": f"Bearer {full_key}"},
+            )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["id"] == str(test_job_db.id)
+        assert data["research_question"] == test_job_db.research_question
+
+    @pytest.mark.asyncio
+    async def test_sharee_cannot_cancel_shared_job(
+        self,
+        db_session: AsyncSession,
+        test_user_db: User,
+        test_user2_db: User,
+        test_api_key_db: tuple[APIKey, str],
+        test_job_db: Job,
+    ) -> None:
+        """Share access allows read but cancel remains owner-only."""
+        from openscientist.database.models import JobShare
+
+        _, full_key = test_api_key_db
+
+        db_session.add(
+            JobShare(
+                job_id=test_job_db.id,
+                shared_with_user_id=test_user2_db.id,
+                permission_level="view",
+            )
+        )
+        await db_session.commit()
+
+        # Enable RLS before setting user context (superuser bypasses RLS)
+        await enable_rls(db_session)
+
+        app = _build_authenticated_app(db_session, test_user2_db)
+        mock_job_manager = MagicMock()
+        mock_job_manager.cancel_job = MagicMock()
+
+        with patch(
+            "openscientist.api.endpoints.jobs._get_job_manager", return_value=mock_job_manager
+        ):
+            async with AsyncClient(
+                transport=ASGITransport(app=app),
+                base_url="http://test",
+            ) as client:
+                response = await client.post(
+                    f"/api/v1/jobs/{test_job_db.id}/cancel",
+                    headers={"Authorization": f"Bearer {full_key}"},
+                )
+
+        assert response.status_code == 403
+        assert response.json()["detail"] == "Only the job owner can cancel a job"
+        mock_job_manager.cancel_job.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_cancel_job(
@@ -1643,6 +1784,69 @@ class TestJobSharingEndpoints:
         data = response.json()
         assert data["job_id"] == str(test_job_db.id)
         assert data["permission_level"] == "view"
+
+    @pytest.mark.asyncio
+    async def test_share_job_with_self_returns_400(
+        self,
+        db_session: AsyncSession,
+        test_user_db: User,
+        test_api_key_db: tuple[APIKey, str],
+        test_job_db: Job,
+    ) -> None:
+        """Owners cannot create a share targeting their own email."""
+        from contextlib import asynccontextmanager
+        from unittest.mock import patch
+
+        from fastapi import FastAPI
+        from sqlalchemy import select
+
+        from openscientist.api.auth import get_current_user_from_api_key
+        from openscientist.api.router import api_router as router
+        from openscientist.database.models import JobShare
+        from openscientist.database.rls import set_current_user
+        from openscientist.database.session import get_session
+
+        _, full_key = test_api_key_db
+
+        app = FastAPI()
+
+        async def override_get_session():
+            await set_current_user(db_session, test_user_db.id)
+            yield db_session
+
+        async def override_get_user():
+            return test_user_db
+
+        @asynccontextmanager
+        async def mock_get_admin_session():
+            yield db_session
+
+        app.dependency_overrides[get_session] = override_get_session
+        app.dependency_overrides[get_current_user_from_api_key] = override_get_user
+        app.include_router(router)
+
+        with patch("openscientist.api.endpoints.shares.get_admin_session", mock_get_admin_session):
+            async with AsyncClient(
+                transport=ASGITransport(app=app),
+                base_url="http://test",
+            ) as client:
+                response = await client.post(
+                    "/api/v1/shares",
+                    json={
+                        "job_id": str(test_job_db.id),
+                        "shared_with_email": test_user_db.email,
+                        "permission_level": "view",
+                    },
+                    headers={"Authorization": f"Bearer {full_key}"},
+                )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "Cannot share job with yourself"
+
+        share_result = await db_session.execute(
+            select(JobShare).where(JobShare.job_id == test_job_db.id)
+        )
+        assert share_result.scalar_one_or_none() is None
 
     @pytest.mark.asyncio
     async def test_search_users_for_sharing(
