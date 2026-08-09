@@ -1131,9 +1131,7 @@ class TestJobManagerCancelSummaryCoverage:
             JobStatus.GENERATING_REPORT,
         ],
     )
-    def test_cancel_rejects_non_cancellable_status(
-        self, tmp_path: Path, status: JobStatus
-    ) -> None:
+    def test_cancel_rejects_non_cancellable_status(self, tmp_path: Path, status: JobStatus) -> None:
         """cancel_job only accepts pending/queued/running; other statuses raise."""
         manager = _new_manager(tmp_path)
         mock_runner = MagicMock()
