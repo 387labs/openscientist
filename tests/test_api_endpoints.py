@@ -360,6 +360,60 @@ class TestAPIKeyEndpoints:
         assert key_to_revoke.is_active is False
 
     @pytest.mark.asyncio
+    async def test_revoke_api_key_cross_user_returns_404(
+        self,
+        db_session: AsyncSession,
+        test_user_db: User,
+        test_user2_db: User,
+        test_api_key_db: tuple[APIKey, str],
+    ) -> None:
+        """Users cannot revoke another user's API key (IDOR guard)."""
+        from fastapi import FastAPI
+
+        from openscientist.api.auth import get_current_user_from_api_key
+        from openscientist.api.router import api_router as router
+        from openscientist.database.session import get_session
+
+        _, full_key = test_api_key_db
+
+        other_user_key = APIKey(
+            user_id=test_user2_db.id,
+            name="other-user-key",
+            key_hash=hash_secret("other-user-secret"),
+            is_active=True,
+        )
+        db_session.add(other_user_key)
+        await db_session.commit()
+        await db_session.refresh(other_user_key)
+
+        app = FastAPI()
+
+        async def override_get_session():
+            yield db_session
+
+        async def override_get_user():
+            return test_user_db
+
+        app.dependency_overrides[get_session] = override_get_session
+        app.dependency_overrides[get_current_user_from_api_key] = override_get_user
+        app.include_router(router)
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://test",
+        ) as client:
+            response = await client.delete(
+                f"/api/v1/keys/{other_user_key.id}",
+                headers={"Authorization": f"Bearer {full_key}"},
+            )
+
+        assert response.status_code == 404
+        assert response.json()["detail"] == "API key not found"
+
+        await db_session.refresh(other_user_key)
+        assert other_user_key.is_active is True
+
+    @pytest.mark.asyncio
     async def test_duplicate_key_name_rejected(
         self,
         db_session: AsyncSession,
@@ -1469,6 +1523,53 @@ class TestJobEndpoints:
         assert response.status_code == 404
 
     @pytest.mark.asyncio
+    async def test_get_job_artifacts_other_user_returns_404(
+        self,
+        db_session: AsyncSession,
+        test_user_db: User,
+        test_user2_db: User,
+        test_api_key_db: tuple[APIKey, str],
+        tmp_path: Path,
+    ) -> None:
+        """Artifacts for another user's job are denied even when files exist on disk."""
+        _, full_key = test_api_key_db
+
+        other_job = Job(
+            owner_id=test_user2_db.id,
+            research_question="Other User Artifacts Job",
+            description="Belongs to user2",
+            status="completed",
+        )
+        db_session.add(other_job)
+        await db_session.commit()
+        await db_session.refresh(other_job)
+
+        job_dir = tmp_path / "jobs" / str(other_job.id)
+        job_dir.mkdir(parents=True)
+        (job_dir / "plot.png").write_bytes(b"fake png data")
+
+        # Enable RLS before setting user context (superuser bypasses RLS)
+        await enable_rls(db_session)
+
+        app = _build_authenticated_app(db_session, test_user_db)
+
+        with patch(
+            "openscientist.api.endpoints.jobs._get_jobs_dir", return_value=tmp_path / "jobs"
+        ):
+            async with AsyncClient(
+                transport=ASGITransport(app=app),
+                base_url="http://test",
+            ) as client:
+                response = await client.get(
+                    f"/api/v1/jobs/{other_job.id}/artifacts",
+                    headers={"Authorization": f"Bearer {full_key}"},
+                )
+
+        assert response.status_code == 404
+        assert response.json()["detail"] == "Job not found or access denied"
+        assert "application/zip" not in response.headers.get("content-type", "")
+
+    @pytest.mark.asyncio
     async def test_get_job_artifacts_success(
         self,
         db_session: AsyncSession,
@@ -1762,6 +1863,95 @@ class TestJobSharingEndpoints:
 
         share_result = await db_session.execute(
             select(JobShare).where(JobShare.job_id == test_job_db.id)
+        )
+        assert share_result.scalar_one_or_none() is None
+
+    @pytest.mark.asyncio
+    async def test_sharee_cannot_create_share_returns_403(
+        self,
+        db_session: AsyncSession,
+        test_user_db: User,
+        test_user2_db: User,
+        test_api_key_db: tuple[APIKey, str],
+        test_job_db: Job,
+    ) -> None:
+        """A sharee can see a shared job but cannot create shares for it."""
+        from contextlib import asynccontextmanager
+        from unittest.mock import patch
+
+        from fastapi import FastAPI
+        from sqlalchemy import select
+
+        from openscientist.api.auth import get_current_user_from_api_key
+        from openscientist.api.router import api_router as router
+        from openscientist.database.models import JobShare
+        from openscientist.database.rls import set_current_user
+        from openscientist.database.session import get_session
+
+        _, full_key = test_api_key_db
+
+        third_user = User(
+            email="share-target@example.com",
+            name="Share Target",
+            is_approved=True,
+            is_active=True,
+        )
+        db_session.add(third_user)
+        await db_session.commit()
+        await db_session.refresh(third_user)
+
+        db_session.add(
+            JobShare(
+                job_id=test_job_db.id,
+                shared_with_user_id=test_user2_db.id,
+                permission_level="view",
+            )
+        )
+        await db_session.commit()
+
+        # Enable RLS so the sharee can see the job (ownership check still forbids create).
+        await enable_rls(db_session)
+
+        app = FastAPI()
+
+        async def override_get_session():
+            await set_current_user(db_session, test_user2_db.id)
+            yield db_session
+
+        async def override_get_user():
+            return test_user2_db
+
+        @asynccontextmanager
+        async def mock_get_admin_session():
+            yield db_session
+
+        app.dependency_overrides[get_session] = override_get_session
+        app.dependency_overrides[get_current_user_from_api_key] = override_get_user
+        app.include_router(router)
+
+        with patch("openscientist.api.endpoints.shares.get_admin_session", mock_get_admin_session):
+            async with AsyncClient(
+                transport=ASGITransport(app=app),
+                base_url="http://test",
+            ) as client:
+                response = await client.post(
+                    "/api/v1/shares",
+                    json={
+                        "job_id": str(test_job_db.id),
+                        "shared_with_email": third_user.email,
+                        "permission_level": "view",
+                    },
+                    headers={"Authorization": f"Bearer {full_key}"},
+                )
+
+        assert response.status_code == 403
+        assert response.json()["detail"] == "You can only manage shares for jobs you own"
+
+        share_result = await db_session.execute(
+            select(JobShare).where(
+                JobShare.job_id == test_job_db.id,
+                JobShare.shared_with_user_id == third_user.id,
+            )
         )
         assert share_result.scalar_one_or_none() is None
 

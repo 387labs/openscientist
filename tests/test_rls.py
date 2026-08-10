@@ -192,6 +192,58 @@ async def test_job_sharing_view_permission(db_session: AsyncSession) -> None:
 
 
 @pytest.mark.asyncio
+async def test_job_sharing_view_permission_denies_update(db_session: AsyncSession) -> None:
+    """View sharees can read a job but updates must not persist under RLS."""
+    from sqlalchemy import update
+    from sqlalchemy.engine import CursorResult
+
+    owner = User(email="view-deny-owner@example.com", name="View Deny Owner")
+    viewer = User(email="view-deny-viewer@example.com", name="View Deny Viewer")
+    db_session.add_all([owner, viewer])
+    await db_session.commit()
+
+    job = Job(
+        owner_id=owner.id,
+        research_question="Shared Job Read Only",
+        description="View share must not allow mutation",
+    )
+    db_session.add(job)
+    await db_session.commit()
+    job_id = job.id
+
+    share = JobShare(
+        job_id=job.id,
+        shared_with_user_id=viewer.id,
+        permission_level="view",
+    )
+    db_session.add(share)
+    await db_session.commit()
+
+    await enable_rls(db_session)
+
+    await set_current_user(db_session, viewer.id)
+    result = await db_session.execute(select(Job).where(Job.id == job_id))
+    viewed_job = result.scalar_one_or_none()
+    assert viewed_job is not None
+    assert viewed_job.research_question == "Shared Job Read Only"
+
+    # Use a Core UPDATE so denial is observed as rowcount=0 (ORM flush raises
+    # StaleDataError when RLS matches zero rows, which obscures the assertion).
+    update_result = await db_session.execute(
+        update(Job).where(Job.id == job_id).values(research_question="Should Not Persist")
+    )
+    await db_session.commit()
+    assert isinstance(update_result, CursorResult)
+    assert update_result.rowcount == 0
+
+    # Expire ORM state so the assertion reflects the database, not identity map.
+    db_session.expire_all()
+    result = await db_session.execute(select(Job).where(Job.id == job_id))
+    job_check = result.scalar_one()
+    assert job_check.research_question == "Shared Job Read Only"
+
+
+@pytest.mark.asyncio
 async def test_job_sharing_edit_permission(db_session: AsyncSession) -> None:
     """Test that edit permission grants full access."""
     # Create two users and a job
