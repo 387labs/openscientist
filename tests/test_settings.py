@@ -1,5 +1,7 @@
 """Tests for centralized settings module."""
 
+import hashlib
+import hmac
 import logging
 from pathlib import Path
 from unittest.mock import patch
@@ -214,6 +216,18 @@ class TestProviderIdEnvVar:
         monkeypatch.setenv("OPENSCIENTIST_PROVIDER", "anthropic")
         monkeypatch.setenv("CLAUDE_PROVIDER", "anthropic")
         with pytest.raises(ValueError, match="CLAUDE_PROVIDER has been renamed"):
+            ProviderSettings()
+
+    def test_unset_provider_raises_clear_error(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """An unset OPENSCIENTIST_PROVIDER fails closed with no vendor default."""
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("OPENSCIENTIST_PROVIDER", raising=False)
+        monkeypatch.delenv("CLAUDE_PROVIDER", raising=False)
+        with pytest.raises(ValueError, match="OPENSCIENTIST_PROVIDER is not set"):
             ProviderSettings()
 
 
@@ -581,6 +595,36 @@ class TestSettingsAdminDatabaseUrl:
             if record.levelname == "WARNING" and "ADMIN_DATABASE_URL" in record.message
         ]
         assert admin_warnings == []
+
+
+class TestSettingsDeriveSecrets:
+    """Tests for HMAC derivation of auth secrets from the master key."""
+
+    def test_derive_secrets_from_master_secret_key(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """Auth secrets are deterministic HMAC-SHA256 digests of the master key."""
+        monkeypatch.chdir(tmp_path)
+        master_secret = "fixed-master-secret-for-hmac-test"
+        monkeypatch.setenv("OPENSCIENTIST_SECRET_KEY", master_secret)
+        monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://app:pass@host:5432/db")
+        monkeypatch.setenv("ADMIN_DATABASE_URL", "postgresql+asyncpg://admin:pass@host:5432/db")
+        monkeypatch.setenv("OPENSCIENTIST_PROVIDER", "anthropic")
+        monkeypatch.delenv("CLAUDE_PROVIDER", raising=False)
+
+        settings = Settings()
+
+        key = master_secret.encode()
+        assert (
+            settings.auth.storage_secret
+            == hmac.new(key, b"storage_secret", hashlib.sha256).hexdigest()
+        )
+        assert (
+            settings.auth.token_encryption_key
+            == hmac.new(key, b"token_encryption_key", hashlib.sha256).hexdigest()
+        )
 
 
 class TestSettingsDevModeNotInProduction:
