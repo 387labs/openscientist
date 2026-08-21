@@ -346,6 +346,46 @@ class TestJobManagerRegenerateReport:
         assert kwargs["args"] == (job_id,)
         assert kwargs["kwargs"] == {"run_mode": RunMode.REPORT_ONLY}
 
+    def test_regenerate_report_rejects_at_capacity(self, manager):
+        """At max concurrency, regenerate must hard-fail and not queue or spawn."""
+        db_job = _make_db_job("completed", "2026-02-01T00:00:00")
+        job_id = str(db_job.id)
+
+        with (
+            patch(
+                "openscientist.job_manager._db_get_job",
+                new_callable=AsyncMock,
+                return_value=db_job,
+            ),
+            patch.object(manager, "_get_active_job_count", return_value=manager.max_concurrent),
+            patch("openscientist.job_manager.threading.Thread") as mock_thread,
+        ):
+            with pytest.raises(ValueError, match="maximum concurrent"):
+                manager.regenerate_report(job_id)
+
+        assert job_id not in manager._running_jobs
+        mock_thread.assert_not_called()
+
+    def test_regenerate_report_rejects_when_shutting_down(self, manager):
+        """Shutdown drain must reject regenerate without registering a worker."""
+        db_job = _make_db_job("completed", "2026-02-01T00:00:00")
+        job_id = str(db_job.id)
+        manager._shutting_down = True
+
+        with (
+            patch(
+                "openscientist.job_manager._db_get_job",
+                new_callable=AsyncMock,
+                return_value=db_job,
+            ),
+            patch("openscientist.job_manager.threading.Thread") as mock_thread,
+        ):
+            with pytest.raises(ValueError, match="shutting down"):
+                manager.regenerate_report(job_id)
+
+        assert job_id not in manager._running_jobs
+        mock_thread.assert_not_called()
+
 
 class TestJobManagerDelete:
     """Tests for job deletion."""
