@@ -1,5 +1,6 @@
 """Tests for Azure Foundry provider."""
 
+import os
 import sys
 import types
 from types import SimpleNamespace
@@ -189,6 +190,55 @@ def _mock_settings(
     mock_settings.provider.anthropic_foundry_api_key = api_key
     mock_settings.provider.model = model
     return mock_settings
+
+
+class TestFoundrySetupEnvironment:
+    """Tests for FoundryProvider.setup_environment() env cleanup."""
+
+    def test_sets_foundry_flag(self) -> None:
+        with (
+            patch("openscientist.providers.foundry.get_settings", return_value=_mock_settings()),
+            patch.dict(os.environ, {}, clear=True),
+        ):
+            FoundryProvider().setup_environment()
+            assert os.environ.get("CLAUDE_CODE_USE_FOUNDRY") == "1"
+
+    def test_clears_conflicting_provider_and_auth_vars(self) -> None:
+        seeded = {
+            "CLAUDE_CODE_USE_VERTEX": "1",
+            "CLAUDE_CODE_USE_BEDROCK": "1",
+            "ANTHROPIC_VERTEX_PROJECT_ID": "proj",
+            "VERTEX_REGION_CLAUDE_4_5_SONNET": "us-east5",
+            "VERTEX_REGION_CLAUDE_4_5_HAIKU": "us-east5",
+            "AWS_BEARER_TOKEN_BEDROCK": "bearer-tok",
+            "ANTHROPIC_API_KEY": "sk-test",
+            "ANTHROPIC_AUTH_TOKEN": "auth-tok",
+        }
+        with (
+            patch("openscientist.providers.foundry.get_settings", return_value=_mock_settings()),
+            patch.dict(os.environ, seeded, clear=True),
+        ):
+            FoundryProvider().setup_environment()
+            assert os.environ.get("CLAUDE_CODE_USE_FOUNDRY") == "1"
+            for var in seeded:
+                assert var not in os.environ
+
+    def test_clears_empty_auth_stubs(self) -> None:
+        seeded = {
+            "ANTHROPIC_API_KEY": "",
+            "ANTHROPIC_AUTH_TOKEN": "",
+            "ANTHROPIC_BASE_URL": "",
+            "AWS_PROFILE": "",
+            "AWS_SESSION_TOKEN": "",
+        }
+        with (
+            patch("openscientist.providers.foundry.get_settings", return_value=_mock_settings()),
+            patch.dict(os.environ, seeded, clear=True),
+        ):
+            FoundryProvider().setup_environment()
+            assert os.environ.get("CLAUDE_CODE_USE_FOUNDRY") == "1"
+            for var in seeded:
+                assert var not in os.environ
 
 
 class TestFoundryClaudeCompatible:
