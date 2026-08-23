@@ -100,19 +100,21 @@ class JobContainerRunner:
         job_mount: str,
     ) -> dict[str, dict[str, str]]:
         """Build the bind mounts for the agent container."""
+        # Use as_posix() so Docker volume keys stay forward-slash on Windows
+        # (str(Path(...)) would otherwise produce backslash keys).
         volumes: dict[str, dict[str, str]] = {
-            str(job_dir_host): {"bind": job_mount, "mode": "rw"},
+            job_dir_host.as_posix(): {"bind": job_mount, "mode": "rw"},
         }
         gcp_path = settings.provider.google_application_credentials
         if gcp_path:
             gcp_host_path = settings.provider.gcp_credentials_host_path or gcp_path
-            volumes[str(gcp_host_path)] = {
+            volumes[Path(gcp_host_path).as_posix()] = {
                 "bind": "/agent/gcp-credentials.json",
                 "mode": "ro",
             }
         phenix_host = settings.phenix.phenix_host_path
         if phenix_host:
-            volumes[str(Path(phenix_host).expanduser().resolve())] = {
+            volumes[Path(phenix_host).expanduser().resolve().as_posix()] = {
                 "bind": "/opt/phenix",
                 "mode": "ro",
             }
@@ -302,6 +304,29 @@ class JobContainerRunner:
                 return None
             logger.warning("Failed to get exit code for job %s: %s", job_id, error)
         return None
+
+    def get_logs(self, job_id: str, *, tail: int = 50) -> str | None:
+        """
+        Return the most recent log lines from the agent container, or None.
+
+        Surfaces the real failure reason when a container exits non-zero before
+        writing a terminal status: the entrypoint logs its traceback to stderr,
+        which the parent would otherwise discard. Returns None when the
+        container is missing or its logs cannot be read.
+        """
+        container = self._find_container(job_id)
+        if container is None:
+            return None
+        try:
+            raw = container.logs(stdout=True, stderr=True, tail=tail)
+        except docker_errors.APIError as error:
+            if self._is_not_found_error(error):
+                return None
+            logger.warning("Failed to get logs for job %s: %s", job_id, error)
+            return None
+        if not isinstance(raw, bytes):
+            return None
+        return raw.decode("utf-8", errors="replace")
 
     def _find_container(self, job_id: str) -> Any | None:
         """Find the agent container for a job by labels."""

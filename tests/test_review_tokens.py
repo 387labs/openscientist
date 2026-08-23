@@ -1,7 +1,8 @@
 """Tests for review token redemption routes."""
 
 import re
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Callable
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
@@ -27,11 +28,13 @@ def _make_app() -> FastAPI:
     return test_app
 
 
-def _mock_admin_session(db_session: AsyncSession):
+def _mock_admin_session(
+    db_session: AsyncSession,
+) -> Callable[[], AbstractAsyncContextManager[AsyncSession]]:
     """Build a mock get_admin_session that yields the test db session."""
 
     @asynccontextmanager
-    async def _ctx():
+    async def _ctx() -> AsyncIterator[AsyncSession]:
         yield db_session
 
     return _ctx
@@ -64,7 +67,7 @@ async def _create_review_token(
 async def test_redeem_review_token(
     db_session: AsyncSession,
     test_admin_user: User,
-):
+) -> None:
     """First redemption creates an anonymous user, sets cookie, redirects to /."""
     plaintext, token = await _create_review_token(db_session, test_admin_user)
     app = _make_app()
@@ -94,7 +97,7 @@ async def test_redeem_review_token(
 async def test_redeem_sets_redeemed_by(
     db_session: AsyncSession,
     test_admin_user: User,
-):
+) -> None:
     """redeemed_by_id points to the created anonymous user."""
     plaintext, token = await _create_review_token(db_session, test_admin_user)
     app = _make_app()
@@ -125,7 +128,7 @@ async def test_redeem_sets_redeemed_by(
 async def test_re_redeem_logs_into_same_user(
     db_session: AsyncSession,
     test_admin_user: User,
-):
+) -> None:
     """Second click reuses the same anonymous user, creates new session."""
     plaintext, token = await _create_review_token(db_session, test_admin_user)
     app = _make_app()
@@ -161,7 +164,7 @@ async def test_re_redeem_logs_into_same_user(
 async def test_redeem_expired_token(
     db_session: AsyncSession,
     test_admin_user: User,
-):
+) -> None:
     """Expired token redirects to login with error."""
     plaintext, _ = await _create_review_token(
         db_session,
@@ -189,7 +192,7 @@ async def test_redeem_expired_token(
 async def test_redeem_revoked_token(
     db_session: AsyncSession,
     test_admin_user: User,
-):
+) -> None:
     """Revoked token redirects to login with error."""
     plaintext, _ = await _create_review_token(
         db_session,
@@ -216,7 +219,7 @@ async def test_redeem_revoked_token(
 @pytest.mark.asyncio
 async def test_redeem_invalid_token(
     db_session: AsyncSession,
-):
+) -> None:
     """Unknown token redirects to login with error."""
     app = _make_app()
 
@@ -239,7 +242,7 @@ async def test_redeem_invalid_token(
 async def test_reviewer_is_approved(
     db_session: AsyncSession,
     test_admin_user: User,
-):
+) -> None:
     """Anonymous user created with is_approved=True."""
     plaintext, token = await _create_review_token(db_session, test_admin_user)
     app = _make_app()
@@ -267,7 +270,7 @@ async def test_reviewer_is_approved(
 async def test_anonymous_email_format(
     db_session: AsyncSession,
     test_admin_user: User,
-):
+) -> None:
     """Email matches reviewer-{hex}@review.local pattern."""
     plaintext, token = await _create_review_token(db_session, test_admin_user)
     app = _make_app()
@@ -295,7 +298,7 @@ async def test_anonymous_email_format(
 async def test_multiple_tokens_create_distinct_users(
     db_session: AsyncSession,
     test_admin_user: User,
-):
+) -> None:
     """Two different tokens create two different anonymous users."""
     plaintext1, token1 = await _create_review_token(db_session, test_admin_user, label="Reviewer A")
     plaintext2, token2 = await _create_review_token(db_session, test_admin_user, label="Reviewer B")
@@ -324,7 +327,7 @@ async def test_multiple_tokens_create_distinct_users(
 async def test_revoke_review_token(
     db_session: AsyncSession,
     test_admin_user: User,
-):
+) -> None:
     """Setting is_active=False revokes the token."""
     _, token = await _create_review_token(db_session, test_admin_user)
     assert token.is_active is True

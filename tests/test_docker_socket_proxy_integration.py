@@ -13,6 +13,7 @@ adds value where Docker cooperates without ever making CI flaky.
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from contextlib import suppress
 
 import pytest
@@ -52,7 +53,7 @@ PROXY_ENV = {
 }
 
 
-def _connect_ready(base_url: str, timeout: float = 45.0):
+def _connect_ready(base_url: str, timeout: float = 45.0) -> docker.DockerClient:
     """Return a Docker client once the proxy answers /version, else skip.
 
     The client is (re)created inside the loop because DockerClient negotiates
@@ -162,7 +163,7 @@ class TestDockerSocketProxy:
         _assert_forbidden(lambda: proxied_client.networks.create("r6-denied"))
 
 
-def _assert_forbidden(call) -> None:
+def _assert_forbidden(call: Callable[[], object]) -> None:
     with pytest.raises(docker.errors.APIError) as exc:
         call()
     assert exc.value.response is not None

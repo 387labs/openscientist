@@ -11,6 +11,7 @@ import pytest
 from docker import errors as docker_errors
 from openscientist.job.types import RunMode
 from openscientist.job_container.runner import AGENT_APP_DIR, JobContainerRunner
+from openscientist.settings import Settings
 
 
 class TestJobContainerRunner:
@@ -92,6 +93,33 @@ class TestJobContainerRunner:
         assert environment["OPENSCIENTIST_HOST_PROJECT_DIR"] == "/host/project"
         assert environment["OPENSCIENTIST_CONTAINER_APP_DIR"] == AGENT_APP_DIR
         assert run_kwargs["volumes"]["/host/project/jobs/job-123"]["bind"] == environment["JOB_DIR"]
+
+    def test_build_container_volumes_uses_posix_host_keys(self):
+        """Docker volume host keys use forward slashes on all platforms."""
+        settings = self._make_settings(host_project_dir="/host/project")
+        settings.provider.google_application_credentials = "C:/creds/gcp.json"
+        settings.provider.gcp_credentials_host_path = "C:/creds/gcp.json"
+        settings.phenix = SimpleNamespace(phenix_host_path="/opt/host-phenix")
+
+        job_dir_host = Path("/host/project/jobs/job-123")
+        with patch.object(Path, "resolve", lambda self: self):
+            volumes = JobContainerRunner._build_container_volumes(
+                cast(Settings, settings),
+                job_dir_host=job_dir_host,
+                job_mount=f"{AGENT_APP_DIR}/jobs/job-123",
+            )
+
+        assert volumes["/host/project/jobs/job-123"] == {
+            "bind": f"{AGENT_APP_DIR}/jobs/job-123",
+            "mode": "rw",
+        }
+        assert volumes["C:/creds/gcp.json"] == {
+            "bind": "/agent/gcp-credentials.json",
+            "mode": "ro",
+        }
+        assert volumes["/opt/host-phenix"] == {"bind": "/opt/phenix", "mode": "ro"}
+        for host_key in volumes:
+            assert "\\" not in host_key
 
     def test_launch_uses_agent_image_from_settings(self):
         """Launch passes the configured agent_image to containers.run.
@@ -325,6 +353,114 @@ class TestJobContainerRunner:
         assert exit_code is None
         mock_warning.assert_not_called()
 
+    def test_get_logs_returns_decoded_tail(self):
+        """get_logs returns the decoded tail of the agent container's logs."""
+        mock_client = MagicMock()
+        mock_container = MagicMock()
+        mock_container.logs.return_value = b"FileNotFoundError: boom\n"
+        mock_client.containers.list.return_value = [mock_container]
+
+        with patch("openscientist.job_container.runner.docker.from_env", return_value=mock_client):
+            runner = JobContainerRunner()
+            logs = runner.get_logs("job-123")
+
+        assert logs is not None
+        assert "FileNotFoundError" in logs
+        mock_container.logs.assert_called_once_with(stdout=True, stderr=True, tail=50)
+
+    def test_get_logs_returns_none_when_container_missing(self):
+        """get_logs returns None when the agent container cannot be found."""
+        mock_client = MagicMock()
+        mock_client.containers.list.return_value = []
+
+        with patch("openscientist.job_container.runner.docker.from_env", return_value=mock_client):
+            runner = JobContainerRunner()
+            assert runner.get_logs("job-123") is None
+
+    def test_stop_calls_container_stop_with_timeout(self):
+        """stop() gracefully stops the labeled agent container with the default timeout."""
+        mock_client = MagicMock()
+        mock_container = MagicMock()
+        mock_client.containers.list.return_value = [mock_container]
+
+        with patch("openscientist.job_container.runner.docker.from_env", return_value=mock_client):
+            runner = JobContainerRunner()
+            runner.stop("job-123")
+
+        mock_container.stop.assert_called_once_with(timeout=10)
+
+    def test_stop_handles_not_found_safely(self):
+        """stop() treats a vanished container as a no-op instead of raising."""
+        mock_client = MagicMock()
+        mock_container = MagicMock()
+        mock_container.stop.side_effect = docker_errors.NotFound("gone")
+        mock_client.containers.list.return_value = [mock_container]
+
+        with (
+            patch("openscientist.job_container.runner.docker.from_env", return_value=mock_client),
+            patch("openscientist.job_container.runner.logger.warning") as mock_warning,
+        ):
+            runner = JobContainerRunner()
+            runner.stop("job-123")
+
+        mock_warning.assert_not_called()
+
+    def test_stop_noop_when_container_missing(self):
+        """stop() is a no-op when no agent container matches the job labels."""
+        mock_client = MagicMock()
+        mock_client.containers.list.return_value = []
+
+        with patch("openscientist.job_container.runner.docker.from_env", return_value=mock_client):
+            runner = JobContainerRunner()
+            runner.stop("job-123")
+
+    def test_cleanup_removes_container_with_force(self):
+        """cleanup() force-removes the agent container."""
+        mock_client = MagicMock()
+        mock_container = MagicMock()
+        mock_client.containers.list.return_value = [mock_container]
+
+        with patch("openscientist.job_container.runner.docker.from_env", return_value=mock_client):
+            runner = JobContainerRunner()
+            runner.cleanup("job-123")
+
+        mock_container.remove.assert_called_once_with(force=True)
+        mock_container.logs.assert_not_called()
+
+    def test_cleanup_writes_logs_when_log_dir_provided(self, tmp_path: Path) -> None:
+        """cleanup() persists container logs before removing the container."""
+        mock_client = MagicMock()
+        mock_container = MagicMock()
+        mock_container.logs.return_value = b"agent finished\n"
+        mock_client.containers.list.return_value = [mock_container]
+
+        with patch("openscientist.job_container.runner.docker.from_env", return_value=mock_client):
+            runner = JobContainerRunner()
+            runner.cleanup("job-123", log_dir=tmp_path)
+
+        log_file = tmp_path / "agent-container.log"
+        assert log_file.read_text(encoding="utf-8") == "agent finished\n"
+        mock_container.logs.assert_called_once_with(stdout=True, stderr=True)
+        mock_container.remove.assert_called_once_with(force=True)
+
+    def test_cleanup_removes_container_when_log_retrieval_fails(self, tmp_path: Path) -> None:
+        """cleanup() still force-removes the container if log capture fails."""
+        mock_client = MagicMock()
+        mock_container = MagicMock()
+        mock_container.logs.side_effect = docker_errors.APIError("log read failed")
+        mock_client.containers.list.return_value = [mock_container]
+
+        with (
+            patch("openscientist.job_container.runner.docker.from_env", return_value=mock_client),
+            patch("openscientist.job_container.runner.logger.warning") as mock_warning,
+        ):
+            runner = JobContainerRunner()
+            runner.cleanup("job-123", log_dir=tmp_path)
+
+        assert not (tmp_path / "agent-container.log").exists()
+        mock_container.remove.assert_called_once_with(force=True)
+        mock_warning.assert_called_once()
+
 
 class TestPhenixMount:
     """Tests for Phenix volume mount in agent containers."""
@@ -362,12 +498,10 @@ class TestPhenixMount:
 
         return settings
 
-    @patch("openscientist.job_container.runner.os.stat")
     @patch("openscientist.job_container.runner.resolve_docker_network", return_value="bridge")
     @patch("openscientist.job_container.runner.get_settings")
-    def test_phenix_mounted_when_available(self, mock_get_settings, _net, mock_stat):
+    def test_phenix_mounted_when_available(self, mock_get_settings, _net):
         """The configured Linux Phenix path is mounted into the agent container."""
-        mock_stat.return_value = MagicMock(st_gid=999)
         settings = self._mock_settings(
             phenix_available=True,
             phenix_path="/opt/phenix",
@@ -377,16 +511,32 @@ class TestPhenixMount:
 
         runner, mock_client = self._make_runner()
         job_dir = Path("/app/jobs/test-job-id")
+        phenix_host = Path("/Applications/phenix-1.21.2")
+        expected_host = phenix_host.expanduser().resolve()
+        original_exists = Path.exists
 
-        with patch.object(Path, "exists", return_value=True):
+        def fake_exists(path: Path) -> bool:
+            if path == Path("/var/run/docker.sock"):
+                return False
+            if path == phenix_host or path == expected_host:
+                return True
+            return cast(bool, original_exists(path))
+
+        with patch.object(Path, "exists", autospec=True, side_effect=fake_exists):
             runner.launch("test-job-id", job_dir)
 
         call_kwargs = cast(MagicMock, mock_client.containers.run).call_args
         volumes = call_kwargs.kwargs.get("volumes") or call_kwargs[1].get("volumes")
         env = call_kwargs.kwargs.get("environment") or call_kwargs[1].get("environment")
 
-        assert "/Applications/phenix-1.21.2" in volumes
-        assert volumes["/Applications/phenix-1.21.2"] == {"bind": "/opt/phenix", "mode": "ro"}
+        phenix_key = Path("/Applications/phenix-1.21.2").expanduser().resolve().as_posix()
+        assert phenix_key in volumes
+        assert volumes[phenix_key] == {"bind": "/opt/phenix", "mode": "ro"}
+        assert "\\" not in phenix_key
+        # Match host key via Path equality: resolve()/str() formatting differs by OS.
+        phenix_mounts = [spec for host, spec in volumes.items() if Path(host) == expected_host]
+        assert len(phenix_mounts) == 1
+        assert phenix_mounts[0] == {"bind": "/opt/phenix", "mode": "ro"}
         assert env["PHENIX_PATH"] == "/opt/phenix"
 
     @patch("openscientist.job_container.runner.os.stat")
@@ -463,8 +613,9 @@ class TestCodexAuthProvisioning:
 
         dest = job_dir / ".codex" / "auth.json"
         assert dest.read_text() == '{"tokens": {}}'
-        assert (dest.stat().st_mode & 0o777) == 0o644  # agent (uid 1001) can read
-        assert (dest.parent.stat().st_mode & 0o777) == 0o777  # agent can write config.toml
+        if os.name == "posix":
+            assert (dest.stat().st_mode & 0o777) == 0o644  # agent (uid 1001) can read
+            assert (dest.parent.stat().st_mode & 0o777) == 0o777  # agent can write config.toml
 
     def test_noop_when_unset(self, tmp_path: Path) -> None:
         from openscientist.agent.codex_agent import CodexAgent
