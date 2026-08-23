@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import abc
 import logging
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
@@ -48,6 +48,12 @@ class CostInfo:
     # Provider-specific extras
     key_expires: str | None = None  # CBORG only
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return a JSON-serializable dictionary representation."""
+        d = asdict(self)
+        d["last_updated"] = self.last_updated.isoformat()
+        return d
 
 
 class Provider(abc.ABC):

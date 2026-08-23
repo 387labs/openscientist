@@ -5,6 +5,7 @@ Tests all skills endpoints: list, get by id, get by slug, match, categories,
 and source management.
 """
 
+from collections.abc import AsyncIterator, Iterator
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
@@ -13,7 +14,7 @@ from fastapi import FastAPI
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.requests import Request
-from starlette.routing import Match
+from starlette.routing import Match, Route
 
 from openscientist.api.endpoints.skills import router
 from openscientist.api.rate_limits import limiter, wire_rate_limiter
@@ -56,6 +57,7 @@ def test_sources_route_is_not_shadowed_by_skill_id_route():
     for route in router.routes:
         match, _ = route.matches(scope)
         if match == Match.FULL:
+            assert isinstance(route, Route)
             full_matches.append(route.path)
 
     assert full_matches
@@ -63,7 +65,7 @@ def test_sources_route_is_not_shadowed_by_skill_id_route():
 
 
 @pytest.fixture
-def mock_auth_user(test_user: User):
+def mock_auth_user(test_user: User) -> Iterator[User]:
     """Mock the authentication dependency."""
     with patch(
         "openscientist.api.endpoints.skills.get_current_user_from_api_key",
@@ -73,10 +75,10 @@ def mock_auth_user(test_user: User):
 
 
 @pytest.fixture
-def mock_session(db_session: AsyncSession):
+def mock_session(db_session: AsyncSession) -> Iterator[AsyncSession]:
     """Mock the session dependency."""
 
-    async def get_mock_session():
+    async def get_mock_session() -> AsyncIterator[AsyncSession]:
         yield db_session
 
     with patch("openscientist.api.endpoints.skills.get_session", get_mock_session):
@@ -132,7 +134,7 @@ class TestSkillsListEndpoint:
         self,
         db_session: AsyncSession,
         test_user: User,
-    ):
+    ) -> None:
         """Test listing skills when none exist."""
         from openscientist.api.endpoints.skills import list_skills
         from openscientist.database.rls import set_current_user
@@ -159,7 +161,7 @@ class TestSkillsListEndpoint:
         test_user: User,
         test_skill: Skill,
         test_skill2: Skill,
-    ):
+    ) -> None:
         """Test listing skills returns all skills."""
         _ = (test_skill, test_skill2)
         from openscientist.api.endpoints.skills import list_skills
@@ -190,7 +192,7 @@ class TestSkillsListEndpoint:
         test_user: User,
         test_skill: Skill,
         test_skill2: Skill,
-    ):
+    ) -> None:
         """Test searching skills."""
         _ = (test_skill, test_skill2)
         from openscientist.api.endpoints.skills import list_skills
@@ -217,7 +219,7 @@ class TestSkillsListEndpoint:
         db_session: AsyncSession,
         test_user: User,
         test_skill_source: SkillSource,
-    ):
+    ) -> None:
         """Test search mode honors pagination offset and limit."""
         from openscientist.api.endpoints.skills import list_skills
         from openscientist.database.rls import set_current_user
@@ -268,7 +270,7 @@ class TestSkillsListEndpoint:
         db_session: AsyncSession,
         test_user: User,
         test_skill_source: SkillSource,
-    ):
+    ) -> None:
         """Test search mode total reports full match count, not page size."""
         from openscientist.api.endpoints.skills import list_skills
         from openscientist.database.rls import set_current_user
@@ -313,7 +315,7 @@ class TestSkillsListEndpoint:
         db_session: AsyncSession,
         test_user: User,
         test_skill_source: SkillSource,
-    ):
+    ) -> None:
         """Test search mode returns empty page with correct total when offset is past end."""
         from openscientist.api.endpoints.skills import list_skills
         from openscientist.database.rls import set_current_user
@@ -356,7 +358,7 @@ class TestSkillsGetEndpoint:
         db_session: AsyncSession,
         test_user: User,
         test_skill: Skill,
-    ):
+    ) -> None:
         """Test getting a skill by ID."""
         from openscientist.api.endpoints.skills import get_skill
         from openscientist.database.rls import set_current_user
@@ -378,7 +380,7 @@ class TestSkillsGetEndpoint:
         self,
         db_session: AsyncSession,
         test_user: User,
-    ):
+    ) -> None:
         """Test getting a non-existent skill."""
         from fastapi import HTTPException
 
@@ -401,7 +403,7 @@ class TestSkillsGetEndpoint:
         self,
         db_session: AsyncSession,
         test_user: User,
-    ):
+    ) -> None:
         """Test getting a skill with invalid ID format."""
         from fastapi import HTTPException
 
@@ -430,7 +432,7 @@ class TestSkillsBySlugEndpoint:
         db_session: AsyncSession,
         test_user: User,
         test_skill: Skill,
-    ):
+    ) -> None:
         """Test getting a skill by category and slug."""
         from openscientist.api.endpoints.skills import get_skill_by_slug
         from openscientist.database.rls import set_current_user
@@ -453,7 +455,7 @@ class TestSkillsBySlugEndpoint:
         self,
         db_session: AsyncSession,
         test_user: User,
-    ):
+    ) -> None:
         """Test getting a non-existent skill by slug."""
         from fastapi import HTTPException
 
@@ -483,7 +485,7 @@ class TestSkillsCategoriesEndpoint:
         test_user: User,
         test_skill: Skill,
         test_skill2: Skill,
-    ):
+    ) -> None:
         """Test listing all categories."""
         _ = (test_skill, test_skill2)
         from openscientist.api.endpoints.skills import list_categories
@@ -509,7 +511,7 @@ class TestSkillSourcesEndpoints:
         db_session: AsyncSession,
         test_admin_user: User,
         test_skill_source: SkillSource,
-    ):
+    ) -> None:
         """Test listing skill sources (requires admin)."""
         _ = test_skill_source
         from openscientist.api.endpoints.skills import list_skill_sources
@@ -532,7 +534,7 @@ class TestSkillSourcesEndpoints:
         db_session: AsyncSession,
         test_admin_user: User,
         rate_limit_request: Request,
-    ):
+    ) -> None:
         """Test creating a skill source (requires admin)."""
         from openscientist.api.endpoints.skills import SkillSourceCreate, create_skill_source
         from openscientist.database.rls import set_current_user
@@ -564,7 +566,7 @@ class TestSkillSourcesEndpoints:
         db_session: AsyncSession,
         test_admin_user: User,
         rate_limit_request: Request,
-    ):
+    ) -> None:
         """Test creating a GitHub source without URL fails (requires admin)."""
         from fastapi import HTTPException
 
@@ -596,7 +598,7 @@ class TestSkillSourcesEndpoints:
         db_session: AsyncSession,
         test_admin_user: User,
         rate_limit_request: Request,
-    ):
+    ) -> None:
         """Test deleting a skill source (requires admin)."""
         from sqlalchemy import select
 
@@ -647,7 +649,7 @@ class TestSkillSourcesEndpoints:
         test_admin_user: User,
         test_skill_source: SkillSource,
         rate_limit_request: Request,
-    ):
+    ) -> None:
         """Test triggering a sync for a source (requires admin)."""
         from openscientist.api.endpoints.skills import sync_skill_source_endpoint
         from openscientist.database.rls import set_current_user
@@ -688,7 +690,7 @@ class TestSkillSourcesEndpoints:
         db_session: AsyncSession,
         test_user: User,
         test_skill_source: SkillSource,
-    ):
+    ) -> None:
         """Test that non-admin users get empty list when listing sources."""
         _ = test_skill_source
         from openscientist.api.endpoints.skills import list_skill_sources
@@ -716,7 +718,7 @@ class TestSkillSourcesEndpoints:
         test_user: User,
         test_skill_source: SkillSource,
         rate_limit_request: Request,
-    ):
+    ) -> None:
         """Test that non-admin users get 404 when deleting a source."""
         from fastapi import HTTPException
 
@@ -747,7 +749,7 @@ class TestSkillSourcesEndpoints:
         test_user: User,
         test_skill_source: SkillSource,
         rate_limit_request: Request,
-    ):
+    ) -> None:
         """Test that non-admin users get 404 when syncing a source."""
         from fastapi import HTTPException
 

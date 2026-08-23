@@ -85,7 +85,7 @@ class TestChatTemplateContainerIntegration:
         except docker.errors.BuildError as exc:
             log_tail = "\n".join(
                 str(entry.get("stream", "")).rstrip()
-                for entry in exc.build_log[-20:]
+                for entry in list(exc.build_log)[-20:]
                 if isinstance(entry, dict)
             )
             pytest.fail(f"Failed to build test web image {tag}:\n{log_tail}")
