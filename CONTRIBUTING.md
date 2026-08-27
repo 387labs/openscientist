@@ -70,6 +70,18 @@ Create feature branches from `main` using these prefixes:
 
 Use lowercase, hyphenated, descriptive names (`fix/job-status-display`, not `fix/bug`), max ~50 characters.
 
+## Environment Branches and Promotion
+
+Three long-lived branches map to deployed environments, each with its own workflow in `.github/workflows/`:
+
+| Branch | Deploys to |
+|---|---|
+| `development` | Development environment |
+| `staging` | Staging environment |
+| `main` | **Production** |
+
+Promotion runs `development → staging → main (production)`. There is no `production` branch — **merging to `main` deploys to production**, so treat `main` accordingly. Full mapping and the known caveats (staging has no dedicated `AppEnvironment` value; deploy workflows do not run migrations) are in [docs/ENVIRONMENTS.md](docs/ENVIRONMENTS.md).
+
 ## Commit Conventions
 
 - Make atomic, logical commits while you work.
@@ -85,7 +97,9 @@ Use lowercase, hyphenated, descriptive names (`fix/job-status-display`, not `fix
 5. Address feedback with new commits; don't force-push over review history mid-review.
 6. Once approved and CI is green, a maintainer merges.
 
-You cannot approve your own PR. Reviewers aim to respond within 48 hours (24 for promotion PRs). Changes to protected paths (database, security, deployment config, CI) should get sign-off from the relevant `CODEOWNERS` owner (once owners are defined).
+You cannot approve your own PR. Reviewers aim to respond within 48 hours (24 for promotion PRs). Changes to protected paths (database, security, deployment config, CI) should get sign-off from the relevant `CODEOWNERS` owner (once owners are defined — `.github/CODEOWNERS` is currently empty, so this is applied manually by reviewers).
+
+The full review process, including promotion-PR requirements and how breaking changes are handled, is in [docs/code-review-governance.md](docs/code-review-governance.md).
 
 ## Reporting Bugs / Requesting Features
 
@@ -98,7 +112,8 @@ All PRs must pass:
 ```bash
 uv run ruff check src/ tests/   # lint
 uv run mypy src/openscientist/ tests/  # types
-uv run pytest                   # tests (75% coverage minimum)
+uv run ruff format --check src/ tests/  # formatting
+uv run pytest                   # tests (75% coverage floor, `fail_under = 75`)
 ```
 
 CI (`.github/workflows/ci.yml`) also runs on every PR and blocks merging on:
@@ -108,7 +123,9 @@ CI (`.github/workflows/ci.yml`) also runs on every PR and blocks merging on:
 - **Docker build validation** — hadolint on all Dockerfiles, plus full builds of `Dockerfile.base` and `Dockerfile.executor` when Docker-relevant files change. `Dockerfile` and `Dockerfile.agent` are lint-only (see comments in `ci.yml`) — the former needs a private registry credential CI shouldn't have, and the latter's dependency tree (1,300+ crates) isn't a viable full build on a standard runner
 - **Coverage delta** — fails if this branch's coverage drops more than 0.5 points below `main`'s
 
-Coverage reports (XML, JSON, HTML) are uploaded as a workflow artifact on every run.
+Coverage reports (XML, JSON, HTML) are uploaded as a workflow artifact on every run, retained 30 days.
+
+For the full CI job list see [docs/CICD.md](docs/CICD.md); for the testing approach and coverage policy see [docs/QA.md](docs/QA.md).
 
 ## Git Hooks
 
@@ -180,7 +197,7 @@ The remote server must have the repo cloned and a `.env` file configured (see `.
 
 Once upstream sync resumes:
 - Changes flowing **from the private fork to public upstream** are reviewed by a Maintainer specifically for secrets, internal infrastructure references, and proprietary content before being published.
-- Changes flowing **from public upstream into the private fork** are isolated on a `sync/upstream-<date>` branch and go through the standard PR/review process before touching `main` — they are never merged directly into `staging` or `production`.
+- Changes flowing **from public upstream into the private fork** are isolated on a `sync/upstream-<date>` branch and go through the standard PR/review process before touching `main` — they are never merged directly into `staging` or `main`.
 
 ## Secrets & Confidentiality
 
