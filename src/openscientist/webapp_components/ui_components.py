@@ -1351,7 +1351,7 @@ def render_loading_spinner(message: str = "Loading...") -> ui.element:
 
 def render_dialog_actions(
     on_confirm: Callable[[], None | Awaitable[None]],
-    on_cancel: Callable[[], object],
+    on_cancel: Callable[[], None | Awaitable[None]],
     confirm_label: str = "Confirm",
     cancel_label: str = "Cancel",
     confirm_props: str = "color=primary",
