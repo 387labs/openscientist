@@ -12,6 +12,18 @@ def _noop(*_args, **_kwargs) -> None:
     pass
 
 
+def _skip_page_module_import(monkeypatch) -> None:
+    # nicegui.ui imports its attributes lazily, so only web_app's own call may be neutralised.
+    real = web_app.importlib.import_module
+    monkeypatch.setattr(
+        web_app.importlib,
+        "import_module",
+        lambda name, package=None: (
+            None if name == "openscientist.webapp_components.pages" else real(name, package)
+        ),
+    )
+
+
 def test_create_app_builds_host_app_once(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(web_app, "_state", web_app._AppState())
     monkeypatch.setattr(web_app, "_register_openapi_docs", _noop)
@@ -23,7 +35,7 @@ def test_create_app_builds_host_app_once(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(web_app, "_initialize_job_manager_runtime", _noop)
     monkeypatch.setattr(web_app, "_register_nicegui_static_files", _noop)
     monkeypatch.setattr(web_app, "_register_pwa_metadata", _noop)
-    monkeypatch.setattr(web_app.importlib, "import_module", lambda _name: None)
+    _skip_page_module_import(monkeypatch)
 
     run_with_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
     monkeypatch.setattr(
@@ -182,8 +194,8 @@ def test_configure_host_app_registers_badge_and_thinking_status_head_html_once(
     monkeypatch.setattr(web_app, "_initialize_job_manager_runtime", _noop)
     monkeypatch.setattr(web_app, "_register_nicegui_static_files", _noop)
     monkeypatch.setattr(web_app, "_register_pwa_metadata", _noop)
-    monkeypatch.setattr(web_app.importlib, "import_module", lambda _name: None)
     monkeypatch.setattr(web_app.ui, "run_with", _noop)
+    _skip_page_module_import(monkeypatch)
 
     badge_calls: list[None] = []
     thinking_calls: list[None] = []
