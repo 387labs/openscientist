@@ -24,9 +24,7 @@ class StubClaudeProvider(ClaudeCompatible):
     def id(self) -> str:
         return "stub"
 
-    @property
-    def display_name(self) -> str:
-        return "Stub"
+    display_name = "Stub"
 
     def validate_required_config(self) -> list[str]:
         return []
@@ -48,6 +46,9 @@ class StubClaudeProvider(ClaudeCompatible):
     def claude_model_name(self) -> str:
         return "stub-model"
 
+    def harness_env(self, *, proxy: str | None) -> dict[str, str]:
+        return {}
+
 
 class StubCodexProvider(CodexCompatible):
     """Minimal concrete `CodexCompatible` for tests that need a Codex-family
@@ -58,9 +59,7 @@ class StubCodexProvider(CodexCompatible):
     def id(self) -> str:
         return "stub-codex"
 
-    @property
-    def display_name(self) -> str:
-        return "Stub Codex"
+    display_name = "Stub Codex"
 
     def validate_required_config(self) -> list[str]:
         return []

@@ -337,6 +337,11 @@ async def test_cost_record_creation(db_session: AsyncSession, test_job: Job) -> 
     assert cost.input_tokens == 1000
     assert cost.output_tokens == 500
     assert cost.cost_usd == 0.015
+    # Inserted with only the two original buckets, so the three added columns
+    # must read back as 0 rather than NULL. Nothing else pins that default.
+    assert cost.cache_read_tokens == 0
+    assert cost.cache_write_tokens == 0
+    assert cost.reasoning_tokens == 0
 
 
 @pytest.mark.asyncio

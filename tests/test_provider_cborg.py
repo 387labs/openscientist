@@ -211,17 +211,12 @@ class TestCborgClaudeCompatible:
         assert not isinstance(provider, CodexCompatible)
 
     def test_validate_required_config_ok(self) -> None:
-        with patch("openscientist.providers.cborg.get_settings", return_value=_mock_settings()):
-            assert CborgProvider().validate_required_config() == []
+        assert CborgProvider.required_config_errors(_mock_settings().provider) == []
 
     def test_validate_required_config_errors_when_both_missing(self) -> None:
-        with patch("openscientist.providers.cborg.get_settings", return_value=_mock_settings()):
-            provider = CborgProvider()
-        with patch(
-            "openscientist.providers.cborg.get_settings",
-            return_value=_mock_settings(token=None, base_url=None),
-        ):
-            errors = provider.validate_required_config()
+        errors = CborgProvider.required_config_errors(
+            _mock_settings(token=None, base_url=None).provider
+        )
         assert len(errors) == 2
         assert any("ANTHROPIC_AUTH_TOKEN" in e for e in errors)
         assert any("ANTHROPIC_BASE_URL" in e for e in errors)

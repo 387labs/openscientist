@@ -8,6 +8,7 @@ Claude and Codex variants share one body. See `prompts.claude` /
 `prompts.codex` for the concrete fragments and public entry points.
 """
 
+import re
 from dataclasses import dataclass
 from importlib import resources
 from typing import Any
@@ -42,10 +43,79 @@ class BackendFragments:
     """The 'discover additional skills' note. Present for Claude, empty for
     codex."""
 
+    mcp_tool_prefix: str
+    """Prepended to every ``openscientist-tools`` tool name the prompts mention,
+    so the prompts name tools exactly as the backend exposes them. Empty for
+    Claude and codex, which expose the bare names. omp namespaces MCP tools as
+    ``mcp__<server>_<tool>``, so it sets the prefix."""
+
+
+#: Every tool the ``openscientist-tools`` MCP server can expose. The prompt
+#: bodies name these in backticks, so a backend that namespaces MCP tools
+#: rewrites the mentions through ``mcp_tool_prefix``. Kept explicit rather than
+#: introspected: prompts are built without a running server, and a stale name
+#: here only means one un-rewritten mention.
+MCP_TOOL_NAMES: tuple[str, ...] = (
+    "execute_code",
+    "read_document",
+    "search_pubmed",
+    "update_knowledge_state",
+    "save_iteration_summary",
+    "set_consensus_answer",
+    "set_job_title",
+    "set_status",
+    "add_hypothesis",
+    "update_hypothesis",
+    "run_phenix_tool",
+    "compare_structures",
+    "parse_alphafold_confidence",
+)
+
+# The three ways a prompt marks a name as a tool to call: backticked, bold, or
+# an actual call. A name already carrying the prefix is preceded by a word
+# character and cannot match.
+_MCP_TOOL_MENTION = re.compile(
+    r"(?<!\w)(?:`(?P<tick>{names})`|\*\*(?P<bold>{names})\*\*|(?P<call>{names})(?=[ \t]*\())".format(
+        names="|".join(MCP_TOOL_NAMES)
+    )
+)
+
+
+def _prefixed_mention(match: re.Match[str], prefix: str) -> str:
+    if name := match.group("tick"):
+        return f"`{prefix}{name}`"
+    if name := match.group("bold"):
+        return f"**{prefix}{name}**"
+    return f"{prefix}{match.group('call')}"
+
+
+def namespace_tool_mentions(doc: str, prefix: str) -> str:
+    """Rewrite MCP tool names in ``doc`` into the backend's callable name.
+
+    Covers every form the prompts use to mark a tool as callable, because the
+    skills write ``search_pubmed("...")`` and the shared doc writes
+    ``**execute_code**``, and a form left bare teaches a name the backend
+    cannot resolve. An empty prefix is the identity, so Claude and codex
+    bodies are unchanged.
+
+    Pass only text this repository authored. A turn prompt also carries the
+    scientist's question, description and feedback, and rewriting a tool name
+    inside those puts a question to the model that nobody asked, so callers
+    namespace their own instructions before interpolating anyone else's words.
+    """
+    if not prefix:
+        return doc
+    return _MCP_TOOL_MENTION.sub(lambda m: _prefixed_mention(m, prefix), doc)
+
+
+def apply_mcp_tool_prefix(doc: str, frags: BackendFragments) -> str:
+    """Rewrite MCP tool names in text this repository authored end to end."""
+    return namespace_tool_mentions(doc, frags.mcp_tool_prefix)
+
 
 def build_system_prompt(frags: BackendFragments) -> str:
     """Backend-agnostic system prompt body, with backend fragments inserted."""
-    return f"""You are an autonomous scientific discovery agent. Your goal is to discover mechanistic insights from scientific data through iterative hypothesis testing.
+    body = f"""You are an autonomous scientific discovery agent. Your goal is to discover mechanistic insights from scientific data through iterative hypothesis testing.
 
 **Your Capabilities:**
 
@@ -81,6 +151,7 @@ Domain-specific analysis skills are in {frags.skills_location}. Read ALL workflo
 - Don't repeat failed hypotheses
 
 Think step by step. Be rigorous. Be creative."""
+    return apply_mcp_tool_prefix(body, frags)
 
 
 def build_discovery_prompt(
@@ -301,7 +372,7 @@ You are running in an **autonomous discovery loop**. Each iteration, you will:
 - `query`: Search terms (e.g., `"hypothermia neuroprotection metabolomics"`)
 - Returns: titles, full abstracts, PMIDs
 - Full abstracts are returned so you can extract exact quotes for citations
-
+{{AIRGAP_SEARCH_NOTE}}
 {{SEARCH_SKILLS_DOC}}**update_knowledge_state** - Record a confirmed finding
 
 - `title`: Concise finding title
@@ -561,6 +632,25 @@ Then call `set_consensus_answer` with a 1–3 sentence direct answer.
     return substitute_fragments(doc, frags)
 
 
+def _airgap_search_note() -> str:
+    """The air-gapped search_pubmed guidance, or empty when online.
+
+    The local mirror ANDs every term over a title and abstract index, so long
+    queries that live PubMed answers via MeSH expansion match nothing locally.
+    """
+    from openscientist.settings import get_settings
+
+    if not get_settings().airgap.enabled:
+        return ""
+    return (
+        "- This run is air-gapped: search goes to a local MEDLINE mirror, not live PubMed.\n"
+        "  Every term is required (AND), and only titles and abstracts are indexed -- there is\n"
+        "  no MeSH expansion or synonym matching. Long queries therefore often return nothing.\n"
+        "  Use 2-4 specific terms. If a search returns no papers, retry with fewer terms rather\n"
+        "  than concluding the literature does not exist.\n"
+    )
+
+
 def substitute_fragments(doc: str, frags: BackendFragments) -> str:
     """Swap the backend-divergent phrases in a Claude-authored doc.
 
@@ -572,12 +662,13 @@ def substitute_fragments(doc: str, frags: BackendFragments) -> str:
     Shared by the discovery job doc and the chat context so they cannot
     diverge.
     """
+    doc = doc.replace("{{AIRGAP_SEARCH_NOTE}}", _airgap_search_note())
     doc = doc.replace("{{SEARCH_SKILLS_DOC}}", frags.search_skills_doc)
     doc = doc.replace("{{SKILLS_DISCOVERY_NOTE}}", frags.skills_discovery_note)
     doc = doc.replace("`.claude/skills/`", frags.skills_location)
     doc = doc.replace("Claude's built-in `Read` tool", frags.builtin_read_tool)
     doc = doc.replace("Claude's `Read` tool", frags.builtin_read_tool_short)
-    return doc
+    return apply_mcp_tool_prefix(doc, frags)
 
 
 def read_chat_template() -> str:

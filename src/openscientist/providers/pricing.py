@@ -14,6 +14,23 @@ _LITELLM_PRICING_URL = (
 )
 _CACHE_TTL_SECONDS = 86_400  # 24 hours
 
+# About 70% of litellm's priced entries carry no cache-specific rate, so these
+# ratios are the common path rather than a rare fallback. All three are Anthropic's
+# published ratios (checked across Opus, Sonnet and Haiku), and 0.1 is also the
+# modal read/input ratio among the litellm entries that do carry one. A cache write
+# costs more the longer it lives, which is why the two write tiers differ.
+_CACHE_READ_RATE_RATIO = 0.1
+_CACHE_WRITE_RATE_RATIO = 1.25
+_CACHE_WRITE_1H_RATE_RATIO = 2.0
+
+# Rate keys in priority order. litellm publishes the cache-read rate under a second
+# name for the DeepSeek family, which carries no `cache_read_input_token_cost`, so
+# looking only at the first name sends those entries to the ratio above even though
+# an exact rate is present.
+_CACHE_READ_KEYS = ("cache_read_input_token_cost", "input_cost_per_token_cache_hit")
+_CACHE_WRITE_KEYS = ("cache_creation_input_token_cost",)
+_CACHE_WRITE_1H_KEYS = ("cache_creation_input_token_cost_above_1hr",)
+
 _cache: dict[str, Any] = {}
 _cache_fetched_at: float = 0.0
 
@@ -54,27 +71,119 @@ def normalize_model_name(model: str) -> str:
     return model
 
 
-def estimate_cost_usd(model: str, input_tokens: int, output_tokens: int) -> float:
+def _published_rate(entry: dict[str, Any], keys: tuple[str, ...], derived: float) -> float:
+    """First rate published under ``keys``, else ``derived``.
+
+    Tests presence rather than truthiness: a published 0.0 is a real rate (litellm
+    prices cache reads free on 15 entries and cache writes free on 29), so it has to
+    win over the derived ratio instead of being treated as missing.
+    """
+    for key in keys:
+        rate = entry.get(key)
+        if isinstance(rate, (int, float)):
+            return float(rate)
+    return derived
+
+
+def estimate_cost_usd(
+    model: str,
+    input_tokens: int,
+    output_tokens: int,
+    *,
+    cache_read_tokens: int = 0,
+    cache_write_tokens: int = 0,
+    cache_write_1h_tokens: int = 0,
+    reasoning_tokens: int = 0,
+) -> float:
     """
     Estimate cost in USD using the litellm pricing database.
 
-    Tries exact key first, then the normalised model name.
-    Returns 0.0 if no pricing entry is found.
+    Prices every billed bucket, not just input and output. Cached reads dominate
+    agentic runs -- each turn resends the conversation -- so omitting them
+    understates cost badly, and the caller cannot tell because the total is still
+    a plausible number. Reasoning tokens are billed as output where a provider
+    reports them separately.
+
+    Cache rates come from the first key the entry publishes them under. Where it
+    publishes none, which is the common case, the rate is derived from the input rate
+    by the ratios above. Charging the full input rate for a cached read overstates it
+    roughly tenfold.
+
+    Cache writes are split by how long the entry lives because the rates differ:
+    ``cache_write_tokens`` is the short-lived tier, ``cache_write_1h_tokens`` the
+    one-hour tier at twice the input rate.
+
+    The buckets are keyword-only. They are easy to transpose (``TokenUsage`` declares
+    cache_write before cache_read, this takes read first) and each is priced
+    differently, so a positional call would misprice silently.
+
+    Tries exact key first, then the normalised model name. Returns 0.0 and warns
+    if no pricing entry is found, so a silent zero is at least visible in logs.
     """
     pricing = _get_litellm_pricing()
     entry = pricing.get(model) or pricing.get(normalize_model_name(model))
     if not entry:
+        logger.warning(
+            "No pricing entry for model %r (normalised %r); reporting $0.00. "
+            "Cost tracking for this model is not meaningful until a rate is added.",
+            model,
+            normalize_model_name(model),
+        )
         return 0.0
     in_rate = float(entry.get("input_cost_per_token", 0.0))
     out_rate = float(entry.get("output_cost_per_token", 0.0))
-    return in_rate * input_tokens + out_rate * output_tokens
+    read_rate = _published_rate(entry, _CACHE_READ_KEYS, in_rate * _CACHE_READ_RATE_RATIO)
+    write_rate = _published_rate(entry, _CACHE_WRITE_KEYS, in_rate * _CACHE_WRITE_RATE_RATIO)
+    write_1h_rate = _published_rate(
+        entry, _CACHE_WRITE_1H_KEYS, in_rate * _CACHE_WRITE_1H_RATE_RATIO
+    )
+    return (
+        in_rate * input_tokens
+        + out_rate * output_tokens
+        + read_rate * cache_read_tokens
+        + write_rate * cache_write_tokens
+        + write_1h_rate * cache_write_1h_tokens
+        + out_rate * reasoning_tokens
+    )
 
 
-# Fallback used only when the remote fetch fails and the cache is empty.
+# Fallback used only when the remote fetch fails and the cache is empty. Every rate
+# matches the live litellm table, which the `network`-marked parity test checks, since
+# a hand-maintained table drifts silently otherwise.
 _FALLBACK_PRICING: dict[str, Any] = {
-    "claude-opus-4-6": {"input_cost_per_token": 15e-6, "output_cost_per_token": 75e-6},
-    "claude-sonnet-4-6": {"input_cost_per_token": 3e-6, "output_cost_per_token": 15e-6},
-    "claude-sonnet-4-5": {"input_cost_per_token": 3e-6, "output_cost_per_token": 15e-6},
-    "claude-sonnet-4-20250514": {"input_cost_per_token": 3e-6, "output_cost_per_token": 15e-6},
-    "claude-haiku-4-5": {"input_cost_per_token": 0.8e-6, "output_cost_per_token": 4e-6},
+    "claude-opus-4-6": {
+        "input_cost_per_token": 5e-6,
+        "output_cost_per_token": 25e-6,
+        "cache_read_input_token_cost": 0.5e-6,
+        "cache_creation_input_token_cost": 6.25e-6,
+        "cache_creation_input_token_cost_above_1hr": 10e-6,
+    },
+    "claude-sonnet-4-6": {
+        "input_cost_per_token": 3e-6,
+        "output_cost_per_token": 15e-6,
+        "cache_read_input_token_cost": 0.3e-6,
+        "cache_creation_input_token_cost": 3.75e-6,
+        "cache_creation_input_token_cost_above_1hr": 6e-6,
+    },
+    "claude-sonnet-4-5": {
+        "input_cost_per_token": 3e-6,
+        "output_cost_per_token": 15e-6,
+        "cache_read_input_token_cost": 0.3e-6,
+        "cache_creation_input_token_cost": 3.75e-6,
+        "cache_creation_input_token_cost_above_1hr": 6e-6,
+    },
+    "claude-sonnet-4-20250514": {
+        "input_cost_per_token": 3e-6,
+        "output_cost_per_token": 15e-6,
+        "cache_read_input_token_cost": 0.3e-6,
+        "cache_creation_input_token_cost": 3.75e-6,
+        "cache_creation_input_token_cost_above_1hr": 6e-6,
+    },
+    "claude-haiku-4-5": {
+        "input_cost_per_token": 1e-6,
+        "output_cost_per_token": 5e-6,
+        "cache_read_input_token_cost": 0.1e-6,
+        "cache_creation_input_token_cost": 1.25e-6,
+        "cache_creation_input_token_cost_above_1hr": 2e-6,
+    },
 }

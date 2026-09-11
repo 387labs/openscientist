@@ -38,9 +38,7 @@ class StubProvider(Provider):
     def id(self) -> str:
         return "stub"
 
-    @property
-    def display_name(self) -> str:
-        return "StubProvider"
+    display_name = "StubProvider"
 
     def validate_required_config(self) -> list[str]:
         return self._required_errors
@@ -53,6 +51,9 @@ class StubProvider(Provider):
         if self._cost_info is None:
             raise ProviderError("No cost info configured")
         return self._cost_info
+
+    def harness_env(self, *, proxy: str | None) -> dict[str, str]:
+        return {}
 
 
 # ─── Tests ────────────────────────────────────────────────────────────
@@ -128,6 +129,10 @@ class TestAgentBackendForProvider:
         assert backend_for_provider_id("openai") is AgentBackend.CODEX
         assert backend_for_provider_id("azure-openai") is AgentBackend.CODEX
         assert backend_for_provider_id("ollama") is AgentBackend.CODEX
+        # vLLM is OpenAI-wire but not a Codex backend, so omp is its only harness.
+        assert backend_for_provider_id("vllm") is AgentBackend.OMP
+        # llama.cpp is likewise OpenAI-wire but not a Codex backend.
+        assert backend_for_provider_id("llamacpp") is AgentBackend.OMP
 
     def test_claude_compatible_providers_map_to_claude_code(self):
         from openscientist.agent.base import AgentBackend
@@ -240,6 +245,7 @@ class TestCheckBudgetLimits:
                 "MAX_PROJECT_SPEND_24H_USD": "100",
             },
         ):
+            clear_settings_cache()
             result = provider.check_budget_limits()
         assert result["can_proceed"] is True
         assert result["errors"] == []
@@ -247,6 +253,7 @@ class TestCheckBudgetLimits:
     def test_total_spend_exceeded_blocks(self):
         provider = self._make_provider(total_spend_usd=1001.0, recent_spend_usd=5.0)
         with patch.dict(os.environ, {"MAX_PROJECT_SPEND_TOTAL_USD": "1000"}):
+            clear_settings_cache()
             result = provider.check_budget_limits()
         assert result["can_proceed"] is False
         assert any("Total spend" in e for e in result["errors"])
@@ -254,6 +261,7 @@ class TestCheckBudgetLimits:
     def test_recent_spend_exceeded_blocks(self):
         provider = self._make_provider(total_spend_usd=10.0, recent_spend_usd=200.0)
         with patch.dict(os.environ, {"MAX_PROJECT_SPEND_24H_USD": "100"}):
+            clear_settings_cache()
             result = provider.check_budget_limits()
         assert result["can_proceed"] is False
         assert any("Last 24h" in e for e in result["errors"])
@@ -557,3 +565,17 @@ class TestProviderEnvironmentSwitching:
             assert "CLAUDE_CODE_USE_FOUNDRY" not in os.environ
             if expects_bedrock_flag:
                 assert os.environ.get("CLAUDE_CODE_USE_BEDROCK") == "1"
+
+
+def test_base_provider_does_not_resolve_context_window_app_side() -> None:
+    """Only self-hosted providers probe a live server, so the base (and hosted
+    providers) inject no window at launch."""
+    from types import SimpleNamespace
+
+    stub = StubProvider()
+    assert stub.probe_context_window() is None
+    with patch(
+        "openscientist.providers.base.get_settings",
+        return_value=SimpleNamespace(provider=SimpleNamespace(model_context_tokens=None)),
+    ):
+        assert stub.prelaunch_model_context_env() == {}

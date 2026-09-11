@@ -428,12 +428,11 @@ class TestRenderJobIdBadge:
     """Tests for render_job_id_badge function."""
 
     @patch("openscientist.webapp_components.components.badges.ui")
-    def test_injects_styles_and_renders_html(self, mock_ui):
-        """Test that the badge injects head styles and renders inline HTML."""
+    def test_renders_html_without_injecting_styles(self, mock_ui):
+        """Renders inline HTML; styles are registered once at bootstrap, not here."""
         render_job_id_badge("12345678-1234-1234-1234-1234567890ab")
 
-        mock_ui.add_head_html.assert_called_once()
-        assert mock_ui.add_head_html.call_args.kwargs.get("shared") is True
+        mock_ui.add_head_html.assert_not_called()
 
         mock_ui.html.assert_called_once()
         rendered_html = mock_ui.html.call_args.args[0]
@@ -444,12 +443,11 @@ class TestRenderPmidBadge:
     """Tests for render_pmid_badge function."""
 
     @patch("openscientist.webapp_components.components.badges.ui")
-    def test_injects_styles_and_renders_html(self, mock_ui):
-        """Test that the badge injects head styles and renders inline HTML."""
+    def test_renders_html_without_injecting_styles(self, mock_ui):
+        """Renders inline HTML; styles are registered once at bootstrap, not here."""
         render_pmid_badge("12345678")
 
-        mock_ui.add_head_html.assert_called_once()
-        assert mock_ui.add_head_html.call_args.kwargs.get("shared") is True
+        mock_ui.add_head_html.assert_not_called()
 
         mock_ui.html.assert_called_once()
         rendered_html = mock_ui.html.call_args.args[0]
@@ -464,7 +462,6 @@ class TestBadgeStyleInjectionHelpers:
         """Test that PubMed badge styles are injected as shared head HTML."""
         _inject_pubmed_badge_styles()
         mock_ui.add_head_html.assert_called_once()
-        assert mock_ui.add_head_html.call_args.kwargs.get("shared") is True
 
     @patch("openscientist.webapp_components.components.badges.ui")
     def test_inject_job_id_badge_styles_uses_shared_head_html(self, mock_ui):

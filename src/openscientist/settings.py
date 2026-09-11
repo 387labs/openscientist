@@ -20,6 +20,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
 _SIMPLE_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+$")
+_VALID_HARNESSES = ("auto", "claude_code", "codex", "omp")
 
 
 class AppEnvironment(StrEnum):
@@ -65,9 +66,31 @@ class ProviderSettings(BaseSettings):
         alias="OPENSCIENTIST_PROVIDER",
         description=(
             "Provider id (anthropic, cborg, vertex, bedrock, foundry, openai, "
-            "azure-openai, ollama). Required: there is no default provider."
+            "azure-openai, ollama, vllm, llamacpp). Required: there is no default provider."
         ),
     )
+
+    # Harness (coding-agent runtime), orthogonal to the provider. "auto" derives
+    # from the provider family; "omp" drives any provider; "claude_code"/"codex"
+    # require a matching family (validated in the factory).
+    harness: str = Field(
+        default="auto",
+        alias="OPENSCIENTIST_HARNESS",
+        description=(
+            "Agent harness: auto (default, derived from provider), claude_code, codex, or omp."
+        ),
+    )
+
+    @field_validator("harness")
+    @classmethod
+    def _validate_harness(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in _VALID_HARNESSES:
+            raise ValueError(
+                f"OPENSCIENTIST_HARNESS={value!r} is not valid. "
+                "Choose one of: auto, claude_code, codex, omp."
+            )
+        return normalized
 
     # GitHub token for skill syncing
     github_token: str | None = Field(default=None, alias="GITHUB_TOKEN")
@@ -102,7 +125,20 @@ class ProviderSettings(BaseSettings):
     # Ollama's OpenAI-compatible Responses endpoint). Local and keyless, so
     # codex is told the provider needs no OpenAI auth.
     ollama_base_url: str = Field(default="http://localhost:11434/v1", alias="OLLAMA_BASE_URL")
-    ollama_model: str = Field(default="gpt-oss:20b", alias="OLLAMA_MODEL")
+
+    # vLLM (omp-driven, open-weight models served by a self-hosted vLLM server
+    # on its OpenAI-compatible wire). The served model is named by
+    # OPENSCIENTIST_MODEL. Auth is optional: only a server launched with
+    # --api-key needs VLLM_API_KEY.
+    vllm_base_url: str = Field(default="http://localhost:8000/v1", alias="VLLM_BASE_URL")
+    vllm_api_key: str | None = Field(default=None, alias="VLLM_API_KEY")
+
+    # llama.cpp (omp-driven, open-weight models served by a self-hosted
+    # llama-server on its OpenAI-compatible wire). The served model is named by
+    # OPENSCIENTIST_MODEL. Auth is optional: only a server launched with
+    # --api-key needs LLAMACPP_API_KEY.
+    llamacpp_base_url: str = Field(default="http://localhost:8080/v1", alias="LLAMACPP_BASE_URL")
+    llamacpp_api_key: str | None = Field(default=None, alias="LLAMACPP_API_KEY")
 
     # Model settings
     model: str | None = Field(default=None, alias="OPENSCIENTIST_MODEL")
@@ -111,8 +147,8 @@ class ProviderSettings(BaseSettings):
         alias="OPENSCIENTIST_MODEL_CONTEXT_TOKENS",
         description=(
             "Override the model's usable context window (tokens) used to budget "
-            "prompt size. When unset, the window is probed (Ollama) or looked up "
-            "for known API models, falling back to a conservative default."
+            "prompt size. When unset, the window is probed (Ollama, vLLM, llama.cpp) or "
+            "looked up for known API models, falling back to a conservative default."
         ),
     )
     anthropic_chat_model: str | None = Field(
@@ -156,6 +192,9 @@ class ProviderSettings(BaseSettings):
     # per-job CODEX_HOME so the Codex backend can authenticate via ChatGPT
     # login when no API key is set.
     codex_auth_host_path: str | None = Field(default=None, alias="CODEX_AUTH_HOST_PATH")
+    # Host omp coding-agent dir (the agent.db vault). Provisioned into each job
+    # so the omp harness can use omp's stored logins (e.g. a ChatGPT subscription).
+    omp_auth_host_path: str | None = Field(default=None, alias="OMP_AUTH_HOST_PATH")
     gcp_billing_account_id: str | None = Field(default=None, alias="GCP_BILLING_ACCOUNT_ID")
     cloud_ml_region: str | None = Field(default=None, alias="CLOUD_ML_REGION")
     vertex_region_claude_4_5_sonnet: str | None = Field(
@@ -176,92 +215,6 @@ class ProviderSettings(BaseSettings):
     azure_tenant_id: str | None = Field(default=None, alias="AZURE_TENANT_ID")
     azure_client_id: str | None = Field(default=None, alias="AZURE_CLIENT_ID")
     azure_client_secret: str | None = Field(default=None, alias="AZURE_CLIENT_SECRET")
-
-    @staticmethod
-    def _warn_if_missing(value: str | None, message: str, warnings: list[str]) -> None:
-        if not value:
-            warnings.append(message)
-
-    def _anthropic_warnings(self) -> list[str]:
-        warnings: list[str] = []
-        if not self.anthropic_api_key and not self.claude_code_oauth_token:
-            warnings.append(
-                "ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN is required "
-                "when OPENSCIENTIST_PROVIDER=anthropic. "
-                "Get your API key from https://console.anthropic.com "
-                "or run 'claude login' for OAuth."
-            )
-        return warnings
-
-    def _cborg_warnings(self) -> list[str]:
-        warnings: list[str] = []
-        self._warn_if_missing(
-            self.anthropic_auth_token,
-            "ANTHROPIC_AUTH_TOKEN is required when OPENSCIENTIST_PROVIDER=cborg",
-            warnings,
-        )
-        self._warn_if_missing(
-            self.anthropic_base_url,
-            "ANTHROPIC_BASE_URL is required when OPENSCIENTIST_PROVIDER=cborg "
-            "(should be https://api.cborg.lbl.gov)",
-            warnings,
-        )
-        return warnings
-
-    def _vertex_warnings(self) -> list[str]:
-        warnings: list[str] = []
-        self._warn_if_missing(
-            self.anthropic_vertex_project_id,
-            "ANTHROPIC_VERTEX_PROJECT_ID is required for Vertex AI",
-            warnings,
-        )
-        if not self.google_application_credentials:
-            warnings.append(
-                "GOOGLE_APPLICATION_CREDENTIALS is required for Vertex AI "
-                "(path to service account JSON)"
-            )
-        elif not os.path.exists(os.path.expanduser(self.google_application_credentials)):
-            warnings.append(
-                f"GOOGLE_APPLICATION_CREDENTIALS file not found: "
-                f"{self.google_application_credentials}"
-            )
-        self._warn_if_missing(
-            self.gcp_billing_account_id,
-            "GCP_BILLING_ACCOUNT_ID is required for Vertex AI cost tracking",
-            warnings,
-        )
-        self._warn_if_missing(
-            self.cloud_ml_region,
-            "CLOUD_ML_REGION is required for Vertex AI (e.g., us-east5)",
-            warnings,
-        )
-        return warnings
-
-    def _bedrock_warnings(self) -> list[str]:
-        warnings: list[str] = []
-        self._warn_if_missing(
-            self.aws_region,
-            "AWS_REGION is required for Bedrock (e.g., us-east-1)",
-            warnings,
-        )
-        has_access_key = self.aws_access_key_id and self.aws_secret_access_key
-        has_profile = bool(self.aws_profile)
-        has_bearer = bool(self.aws_bearer_token_bedrock)
-        if not (has_access_key or has_profile or has_bearer):
-            warnings.append(
-                "AWS credentials required for Bedrock. Set one of: "
-                "AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY, AWS_PROFILE, "
-                "or AWS_BEARER_TOKEN_BEDROCK"
-            )
-        return warnings
-
-    @staticmethod
-    def _unknown_provider_warnings(provider: str) -> list[str]:
-        return [
-            f"Unknown provider '{provider}'. "
-            "Valid options: anthropic, cborg, vertex, bedrock, foundry, openai, "
-            "azure-openai, ollama"
-        ]
 
     _LEGACY_ENV_VAR_RENAMES = (
         ("CLAUDE_PROVIDER", "OPENSCIENTIST_PROVIDER"),
@@ -295,84 +248,35 @@ class ProviderSettings(BaseSettings):
             raise ValueError(
                 "OPENSCIENTIST_PROVIDER is not set and there is no default "
                 "provider. Set OPENSCIENTIST_PROVIDER to one of: anthropic, "
-                "cborg, vertex, bedrock, foundry, openai, azure-openai, ollama."
+                "cborg, vertex, bedrock, foundry, openai, azure-openai, ollama, vllm, llamacpp."
             )
         return self
 
-    # Per-provider model-name format. Mismatches raise at settings load so
-    # users cannot pair a model with a provider that would reject it at runtime.
-    _MODEL_FORMAT_BY_PROVIDER: dict[str, tuple[re.Pattern[str], str]] = {
-        "anthropic": (
-            re.compile(r"^claude-"),
-            "an Anthropic model name (expected to start with 'claude-')",
-        ),
-        "cborg": (
-            re.compile(r"^claude-"),
-            "an Anthropic model name on CBORG (expected to start with 'claude-')",
-        ),
-        "vertex": (
-            re.compile(r"^claude-.+@\d{8}$"),
-            "a Vertex Anthropic model id ('claude-<name>@<YYYYMMDD>')",
-        ),
-        "bedrock": (
-            re.compile(r"^([a-z]+\.anthropic\.claude-.+-v\d+:\d+|arn:aws:bedrock:)"),
-            "a Bedrock model id ('<region>.anthropic.claude-<name>-v<n>:<n>' or an inference-profile ARN)",
-        ),
-    }
-
-    def _validate_model_format(self) -> str | None:
-        """Return an error message when the configured model does not match
-        the provider's expected naming convention. Returns None when no
-        model is set or when the provider has no enforced pattern.
-        """
-        if not self.model:
-            return None
-        spec = self._MODEL_FORMAT_BY_PROVIDER.get(self.provider_id.lower())
-        if spec is None:
-            return None
-        pattern, description = spec
-        if pattern.match(self.model):
-            return None
-        return (
-            f"OPENSCIENTIST_MODEL={self.model!r} does not look like {description}. "
-            f"Either change the model id or change OPENSCIENTIST_PROVIDER."
-        )
-
     @model_validator(mode="after")
     def validate_provider_requirements(self) -> "ProviderSettings":
-        """Validate provider config: warn on missing credentials, raise on
-        model-name mismatches.
-
-        Credential checks remain warn-only so that settings can always be
-        constructed (e.g. during testing or when only a subset of env vars
-        is available); the authoritative credential validation lives in each
-        provider's ``validate_required_config``. Model-name mismatches do
-        raise here because a wrong-family model id is a hard incompatibility
-        the user must fix before any agent call can succeed.
+        """Delegate config validation to the active provider: warn on missing
+        credentials (warn-only so settings always construct) and raise on a
+        model-name/provider mismatch. ``provider_class`` is imported lazily to
+        avoid a settings -> providers import cycle.
         """
-        from collections.abc import Callable
+        from openscientist.providers import provider_class
 
-        provider = self.provider_id.lower()
-        warning_builders: dict[str, Callable[[], list[str]]] = {
-            "anthropic": self._anthropic_warnings,
-            "cborg": self._cborg_warnings,
-            "vertex": self._vertex_warnings,
-            "bedrock": self._bedrock_warnings,
-            "foundry": lambda: [],
-            "openai": lambda: [],
-            "azure-openai": lambda: [],
-            "ollama": lambda: [],
-        }
-        warnings = warning_builders.get(
-            provider, lambda: self._unknown_provider_warnings(provider)
-        )()
-        for warning in warnings:
+        try:
+            provider_cls = provider_class(self.provider_id)
+        except ValueError:
+            logger.warning(
+                "Provider config: Unknown provider %r. Valid options: anthropic, "
+                "cborg, vertex, bedrock, foundry, openai, azure-openai, ollama, vllm, llamacpp.",
+                self.provider_id,
+            )
+            return self
+
+        for warning in provider_cls.required_config_errors(self):
             logger.warning("Provider config: %s", warning)
 
-        model_error = self._validate_model_format()
+        model_error = provider_cls.validate_model_format(self.model)
         if model_error:
             raise ValueError(model_error)
-
         return self
 
     @staticmethod
@@ -395,111 +299,34 @@ class ProviderSettings(BaseSettings):
             env_vars, "ANTHROPIC_DEFAULT_OPUS_MODEL", self.anthropic_default_opus_model
         )
 
-    def _apply_auth_env_vars(self, env_vars: dict[str, str]) -> None:
-        self._set_env_if_present(env_vars, "ANTHROPIC_API_KEY", self.anthropic_api_key)
-        self._set_env_if_present(env_vars, "ANTHROPIC_AUTH_TOKEN", self.anthropic_auth_token)
-        self._set_env_if_present(env_vars, "CLAUDE_CODE_OAUTH_TOKEN", self.claude_code_oauth_token)
-        self._set_env_if_present(env_vars, "ANTHROPIC_BASE_URL", self.anthropic_base_url)
-
-    def _apply_openai_env_vars(self, env_vars: dict[str, str]) -> None:
-        self._set_env_if_present(env_vars, "OPENAI_API_KEY", self.openai_api_key)
-        # Signal to the agent container that codex auth was provisioned into the
-        # per-job CODEX_HOME (the runner copies the file in). The container does
-        # not read the host path itself, only its presence, so the provider's
-        # config validation passes.
-        self._set_env_if_present(env_vars, "CODEX_AUTH_HOST_PATH", self.codex_auth_host_path)
-
-    def _apply_azure_openai_env_vars(self, env_vars: dict[str, str]) -> None:
-        self._set_env_if_present(env_vars, "AZURE_OPENAI_API_KEY", self.azure_openai_api_key)
-        self._set_env_if_present(env_vars, "AZURE_OPENAI_RESOURCE", self.azure_openai_resource)
-        self._set_env_if_present(env_vars, "AZURE_OPENAI_DEPLOYMENT", self.azure_openai_deployment)
-        self._set_env_if_present(
-            env_vars, "AZURE_OPENAI_API_VERSION", self.azure_openai_api_version
-        )
-        self._set_env_if_present(
-            env_vars, "AZURE_OPENAI_STREAM_MAX_RETRIES", str(self.azure_openai_stream_max_retries)
-        )
-
-    def _apply_ollama_env_vars(self, env_vars: dict[str, str]) -> None:
-        # Both have defaults, so they are always forwarded. The base URL must be
-        # reachable from inside the agent container (e.g. host.docker.internal
-        # rather than localhost when Ollama runs on the host).
-        env_vars["OLLAMA_BASE_URL"] = self.ollama_base_url
-        env_vars["OLLAMA_MODEL"] = self.ollama_model
-
-    def _apply_vertex_env_vars(
-        self,
-        env_vars: dict[str, str],
-        gcp_credentials_container_path: str | None,
-    ) -> None:
-        if self.provider_id.lower() == "vertex":
-            env_vars["CLAUDE_CODE_USE_VERTEX"] = "1"
-        self._set_env_if_present(
-            env_vars, "ANTHROPIC_VERTEX_PROJECT_ID", self.anthropic_vertex_project_id
-        )
-        self._set_env_if_present(env_vars, "GCP_BILLING_ACCOUNT_ID", self.gcp_billing_account_id)
-        self._set_env_if_present(env_vars, "CLOUD_ML_REGION", self.cloud_ml_region)
-        self._set_env_if_present(
-            env_vars, "VERTEX_REGION_CLAUDE_4_5_SONNET", self.vertex_region_claude_4_5_sonnet
-        )
-        self._set_env_if_present(
-            env_vars, "VERTEX_REGION_CLAUDE_4_5_HAIKU", self.vertex_region_claude_4_5_haiku
-        )
-        if self.google_application_credentials:
-            env_vars["GOOGLE_APPLICATION_CREDENTIALS"] = (
-                gcp_credentials_container_path or self.google_application_credentials
-            )
-
-    def _apply_bedrock_env_vars(self, env_vars: dict[str, str]) -> None:
-        if self.provider_id.lower() == "bedrock":
-            env_vars["CLAUDE_CODE_USE_BEDROCK"] = "1"
-        self._set_env_if_present(env_vars, "AWS_REGION", self.aws_region)
-        self._set_env_if_present(env_vars, "AWS_ACCESS_KEY_ID", self.aws_access_key_id)
-        self._set_env_if_present(env_vars, "AWS_SECRET_ACCESS_KEY", self.aws_secret_access_key)
-        self._set_env_if_present(env_vars, "AWS_PROFILE", self.aws_profile)
-        self._set_env_if_present(
-            env_vars, "AWS_BEARER_TOKEN_BEDROCK", self.aws_bearer_token_bedrock
-        )
-
-    def _apply_foundry_env_vars(self, env_vars: dict[str, str]) -> None:
-        if self.provider_id.lower() == "foundry":
-            env_vars["CLAUDE_CODE_USE_FOUNDRY"] = "1"
-
-        self._set_env_if_present(
-            env_vars, "ANTHROPIC_FOUNDRY_RESOURCE", self.anthropic_foundry_resource
-        )
-        # Claude Code treats resource/base_url as mutually exclusive.
-        if not self.anthropic_foundry_resource:
-            self._set_env_if_present(
-                env_vars, "ANTHROPIC_FOUNDRY_BASE_URL", self.anthropic_foundry_base_url
-            )
-        self._set_env_if_present(
-            env_vars, "ANTHROPIC_FOUNDRY_API_KEY", self.anthropic_foundry_api_key
-        )
-
     def get_container_env_vars(
         self,
         gcp_credentials_container_path: str | None = None,
     ) -> dict[str, str]:
-        """
-        Get environment variables to pass to agent containers.
+        """Environment variables for the agent container: backend-agnostic keys
+        plus the active provider's own env (auth + routing flags).
 
-        Args:
-            gcp_credentials_container_path: Container path for GCP credentials file.
-
-        Returns:
-            Dict of env var names to values (only includes set values).
+        The provider builds its own contribution via ``Provider.container_env``,
+        resolved by class (no instantiation, so this stays usable with partial
+        config). ``provider_class`` is imported lazily to avoid a settings ->
+        providers import cycle.
         """
-        env_vars: dict[str, str] = {"OPENSCIENTIST_PROVIDER": self.provider_id}
+        from openscientist.providers import provider_class
+
+        env_vars: dict[str, str] = {
+            "OPENSCIENTIST_PROVIDER": self.provider_id,
+            "OPENSCIENTIST_HARNESS": self.harness,
+        }
         self._apply_model_env_vars(env_vars)
-        self._apply_auth_env_vars(env_vars)
-        self._apply_openai_env_vars(env_vars)
-        self._apply_azure_openai_env_vars(env_vars)
-        self._apply_ollama_env_vars(env_vars)
-        self._apply_vertex_env_vars(env_vars, gcp_credentials_container_path)
-        self._apply_bedrock_env_vars(env_vars)
-        self._apply_foundry_env_vars(env_vars)
-        self._set_env_if_present(env_vars, "GITHUB_TOKEN", self.github_token)
+        try:
+            provider_cls = provider_class(self.provider_id)
+        except ValueError:
+            return env_vars
+        env_vars.update(
+            provider_cls.container_env(
+                self, gcp_credentials_container_path=gcp_credentials_container_path
+            )
+        )
         return env_vars
 
 
@@ -861,6 +688,22 @@ class AgentSettings(BaseSettings):
         return v
 
 
+class AirgapSettings(BaseSettings):
+    """Master switch for air-gapped features."""
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
+
+    enabled: bool = Field(
+        default=False,
+        alias="OPENSCIENTIST_AIRGAPPED",
+        description="Enable air-gapped mode: local corpus, offline executor, and egress firewall.",
+    )
+
+
 # Section name -> the BaseSettings subclass that validates it. Consulted by
 # ``Settings._load_environment_once`` so each section is constructed from a
 # single shared environment snapshot instead of independently re-reading
@@ -876,6 +719,7 @@ _SECTION_CLASSES: dict[str, type[BaseSettings]] = {
     "phenix": PhenixSettings,
     "berkeley_lab": BerkeleyLabSettings,
     "agent": AgentSettings,
+    "airgap": AirgapSettings,
 }
 
 
@@ -910,6 +754,7 @@ class Settings(BaseSettings):
     phenix: PhenixSettings = Field(default_factory=PhenixSettings)
     berkeley_lab: BerkeleyLabSettings = Field(default_factory=BerkeleyLabSettings)
     agent: AgentSettings = Field(default_factory=AgentSettings)
+    airgap: AirgapSettings = Field(default_factory=AirgapSettings)
 
     @model_validator(mode="before")
     @classmethod

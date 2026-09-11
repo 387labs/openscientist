@@ -216,6 +216,99 @@ async def test_bootstrap_creates_job_and_syncs_modern_knowledge_state(
 
 
 @pytest.mark.asyncio
+async def test_bootstrap_preserves_version_info_from_knowledge_state(
+    db_session: AsyncSession,
+    temp_jobs_dir,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(
+        "openscientist.bootstrap.get_admin_session",
+        fake_admin_session(db_session),
+    )
+
+    job_id = str(uuid4())
+    job_dir = temp_jobs_dir / job_id
+    _write_json(
+        job_dir / "config.json",
+        {
+            "job_id": job_id,
+            "research_question": "Version provenance test",
+            "status": "completed",
+            "max_iterations": 5,
+            "created_at": "2026-02-01T10:00:00",
+            "owner_id": None,
+        },
+    )
+    version_info = {"claude_code_version": "1.0.24", "openscientist_commit": "abc1234"}
+    _write_json(
+        job_dir / "knowledge_state.json",
+        {
+            "config": {
+                "job_id": job_id,
+                "research_question": "Version provenance test",
+                "max_iterations": 5,
+                "version_info": version_info,
+            },
+            "iteration": 1,
+        },
+    )
+
+    result = await bootstrap_jobs_from_filesystem(jobs_dir=temp_jobs_dir)
+
+    assert result.errors == []
+    assert result.synced_knowledge_state == 1
+
+    job = (await db_session.execute(select(Job).where(Job.id == UUID(job_id)))).scalar_one()
+    assert job.version_info == version_info
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_ignores_non_dict_version_info(
+    db_session: AsyncSession,
+    temp_jobs_dir,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(
+        "openscientist.bootstrap.get_admin_session",
+        fake_admin_session(db_session),
+    )
+
+    job_id = str(uuid4())
+    job_dir = temp_jobs_dir / job_id
+    _write_json(
+        job_dir / "config.json",
+        {
+            "job_id": job_id,
+            "research_question": "Version provenance test",
+            "status": "completed",
+            "max_iterations": 5,
+            "created_at": "2026-02-01T10:00:00",
+            "owner_id": None,
+        },
+    )
+    _write_json(
+        job_dir / "knowledge_state.json",
+        {
+            "config": {
+                "job_id": job_id,
+                "research_question": "Version provenance test",
+                "max_iterations": 5,
+                "version_info": "2.0.14",
+            },
+            "iteration": 1,
+        },
+    )
+
+    result = await bootstrap_jobs_from_filesystem(jobs_dir=temp_jobs_dir)
+
+    assert result.errors == []
+    assert result.synced_knowledge_state == 1
+
+    job = (await db_session.execute(select(Job).where(Job.id == UUID(job_id)))).scalar_one()
+    assert job.version_info is None
+
+
+@pytest.mark.asyncio
 async def test_bootstrap_migrates_legacy_knowledge_state_format(
     db_session: AsyncSession,
     temp_jobs_dir: Path,

@@ -729,7 +729,7 @@ def _normalize_ks_config(
     """
     raw_config_obj = raw_ks.get("config")
     raw_config: dict[str, Any] = raw_config_obj if isinstance(raw_config_obj, dict) else {}
-    return {
+    config: dict[str, Any] = {
         "job_id": job_id,
         "research_question": _to_string(raw_config.get("research_question")) or research_question,
         "max_iterations": _coerce_int(
@@ -740,6 +740,10 @@ def _normalize_ks_config(
         "use_skills": bool(raw_config.get("use_skills", True)),
         "started_at": _to_optional_string(raw_config.get("started_at")),
     }
+    version_info = raw_config.get("version_info")
+    if isinstance(version_info, dict):
+        config["version_info"] = version_info
+    return config
 
 
 def _normalize_hypotheses(raw_ks: dict[str, Any]) -> list[dict[str, Any]]:

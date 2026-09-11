@@ -1,5 +1,6 @@
 """Tests for prompts module."""
 
+from types import SimpleNamespace
 from typing import Any
 
 from openscientist.agent.claude_code_agent import ClaudeCodeAgent
@@ -99,6 +100,43 @@ class TestBackendJobDocs:
         without_h = CodexAgent.job_doc(use_hypotheses=False)
         assert "add_hypothesis" in with_h
         assert "add_hypothesis" not in without_h
+
+
+class TestAirgapSearchNote:
+    """The search_pubmed doc gains AND-semantics guidance only when air-gapped,
+    and never leaks the raw placeholder."""
+
+    @staticmethod
+    def _set_airgap(monkeypatch, enabled):
+        monkeypatch.setattr(
+            "openscientist.settings.get_settings",
+            lambda: SimpleNamespace(airgap=SimpleNamespace(enabled=enabled)),
+        )
+
+    def test_online_docs_omit_note_and_placeholder(self, monkeypatch):
+        self._set_airgap(monkeypatch, False)
+        for doc in (
+            generate_job_claude_md(use_hypotheses=True, phenix_available=True),
+            CodexAgent.job_doc(use_hypotheses=True, phenix_available=True),
+        ):
+            assert "{{AIRGAP_SEARCH_NOTE}}" not in doc
+            assert "This run is air-gapped" not in doc
+            assert "Every term is required (AND)" not in doc
+
+    def test_airgap_docs_add_note_to_both_backends(self, monkeypatch):
+        self._set_airgap(monkeypatch, True)
+        for doc in (
+            generate_job_claude_md(use_hypotheses=True, phenix_available=True),
+            CodexAgent.job_doc(use_hypotheses=True, phenix_available=True),
+        ):
+            assert "{{AIRGAP_SEARCH_NOTE}}" not in doc
+            assert "This run is air-gapped" in doc
+            assert "Every term is required (AND)" in doc
+            assert (
+                doc.index("**search_pubmed**")
+                < doc.index("This run is air-gapped")
+                < doc.index("**update_knowledge_state**")
+            )
 
 
 class TestRenderChatContext:

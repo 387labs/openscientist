@@ -8,14 +8,15 @@ import logging
 import os
 from typing import Any
 
-from openscientist.settings import get_settings
+from openscientist.settings import ProviderSettings, get_settings
 
 from ._anthropic_common import (
+    anthropic_container_env,
     send_anthropic_message,
     send_anthropic_message_with_tools,
 )
 from ._env_cleanup import VERTEX_PROVIDER_ENV_VARS, clear_env_vars, clear_provider_mode_flags
-from .base import ClaudeCompatible, CostInfo
+from .base import ClaudeCompatible, CostInfo, LlmUpstream
 
 logger = logging.getLogger(__name__)
 
@@ -32,26 +33,26 @@ class AnthropicProvider(ClaudeCompatible):
     def id(self) -> str:
         return "anthropic"
 
-    @property
-    def display_name(self) -> str:
-        return "Anthropic"
+    display_name = "Anthropic"
+
+    @classmethod
+    def validate_model_format(cls, model: str | None) -> str | None:
+        return cls.model_format_error(
+            model, r"^claude-", "an Anthropic model name (expected to start with 'claude-')"
+        )
 
     def validate_required_config(self) -> list[str]:
-        """Check required Anthropic configuration."""
-        errors = []
-        settings = get_settings()
+        return self.required_config_errors(get_settings().provider)
 
-        if (
-            not settings.provider.anthropic_api_key
-            and not settings.provider.claude_code_oauth_token
-        ):
-            errors.append(
+    @classmethod
+    def required_config_errors(cls, provider: ProviderSettings) -> list[str]:
+        if not provider.anthropic_api_key and not provider.claude_code_oauth_token:
+            return [
                 "ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN not set. "
                 "Get your API key from https://console.anthropic.com "
                 "or run 'claude login' for OAuth."
-            )
-
-        return errors
+            ]
+        return []
 
     def claude_sdk_env(self) -> dict[str, str]:
         """Auth env vars the claude-agent-sdk CLI must see."""
@@ -61,6 +62,53 @@ class AnthropicProvider(ClaudeCompatible):
         if settings.provider.anthropic_api_key:
             return {"ANTHROPIC_API_KEY": settings.provider.anthropic_api_key}
         return {}
+
+    @classmethod
+    def container_env(
+        cls, provider: ProviderSettings, *, gcp_credentials_container_path: str | None = None
+    ) -> dict[str, str]:
+        return anthropic_container_env(provider)
+
+    def llm_upstream(self) -> LlmUpstream | None:
+        p = get_settings().provider
+        if p.anthropic_api_key:
+            return LlmUpstream("https://api.anthropic.com", {"x-api-key": p.anthropic_api_key})
+        if p.claude_code_oauth_token:
+            return LlmUpstream(
+                "https://api.anthropic.com",
+                {"authorization": f"Bearer {p.claude_code_oauth_token}"},
+            )
+        return None
+
+    def proxy_env_overrides(self, *, proxy_base_url: str, placeholder: str) -> dict[str, str]:
+        p = get_settings().provider
+        if p.anthropic_api_key:
+            return {"ANTHROPIC_BASE_URL": proxy_base_url, "ANTHROPIC_API_KEY": placeholder}
+        if p.claude_code_oauth_token:
+            return {"ANTHROPIC_BASE_URL": proxy_base_url, "CLAUDE_CODE_OAUTH_TOKEN": placeholder}
+        return {}
+
+    def harness_env(self, *, proxy: str | None) -> dict[str, str]:
+        """Route omp at Anthropic.
+
+        ``ANTHROPIC_BASE_URL`` is spelled the same as Claude Code uses, so the
+        endpoint needs no translation, but the subscription token does: omp reads
+        ``ANTHROPIC_OAUTH_TOKEN`` where Claude Code reads
+        ``CLAUDE_CODE_OAUTH_TOKEN``. Both the real token and the proxy placeholder
+        are published under the Claude Code name, so without this omp sees no
+        credential at all on the OAuth path.
+        """
+        p = get_settings().provider
+        env = {}
+        if proxy:
+            env["ANTHROPIC_BASE_URL"] = proxy
+        # Under the proxy the runner has replaced the token with the job
+        # placeholder in the container env, so read it from there rather than
+        # from settings, which still holds the real one.
+        oauth = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN") if proxy else p.claude_code_oauth_token
+        if oauth and not p.anthropic_api_key:
+            env["ANTHROPIC_OAUTH_TOKEN"] = oauth
+        return env
 
     def claude_model_name(self) -> str:
         """Model name for ClaudeAgentOptions.model."""

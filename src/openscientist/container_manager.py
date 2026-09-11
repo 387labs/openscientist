@@ -337,6 +337,12 @@ class ContainerManager:
             self.cpu_limit,
         )
 
+        # Upstream attaches the compose network here unless airgap is enabled.
+        # We deliberately do not: _build_executor_run_kwargs pins
+        # network_mode="none" unconditionally, so the executor never gets a
+        # network regardless of airgap. See 16d97c9 "security: harden executor
+        # container isolation". Do not reintroduce conditional networking here
+        # without revisiting that decision.
         try:
             result = self.client.containers.run(
                 **self._build_executor_run_kwargs(

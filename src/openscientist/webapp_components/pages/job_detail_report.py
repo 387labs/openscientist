@@ -12,13 +12,11 @@ from pathlib import Path
 
 from nicegui import ui
 
-from openscientist.artifact_packager import create_artifacts_zip
 from openscientist.auth import is_current_user_admin
 from openscientist.job.types import JobStatus
 from openscientist.pdf_generator import markdown_to_pdf
 from openscientist.webapp_components.pages.job_detail_context import _JobDetailContext
 from openscientist.webapp_components.ui_components import (
-    _inject_pubmed_badge_styles,
     render_thinking_status,
     transform_pmid_references,
 )
@@ -26,13 +24,10 @@ from openscientist.webapp_components.ui_components import (
 logger = logging.getLogger(__name__)
 
 
-def _download_artifacts_zip(job_dir: Path, job_id: str) -> None:
-    try:
-        zip_buffer = create_artifacts_zip(job_dir, job_id)
-        ui.download(zip_buffer.getvalue(), filename=f"{job_id}_artifacts.zip")
-    except Exception as exc:
-        logger.error("Failed to create artifacts ZIP: %s", exc, exc_info=True)
-        ui.notify("Failed to create ZIP. Please try again.", type="negative")
+def _download_artifacts_zip(job_id: str) -> None:
+    # Served by the streaming route in artifact_routes (prefix /web/jobs) so a
+    # large archive is neither buffered in memory nor blocks the event loop.
+    ui.download(f"/web/jobs/{job_id}/artifacts.zip")
 
 
 def _download_pdf_report(report_path: Path, pdf_path: Path, job_id: str) -> None:
@@ -128,7 +123,7 @@ def _render_report_actions(context: _JobDetailContext, report_path: Path, pdf_pa
 
         ui.button(
             "Download All Artifacts",
-            on_click=lambda: _download_artifacts_zip(context.job_dir, context.job_id),
+            on_click=lambda: _download_artifacts_zip(context.job_id),
             icon="folder_zip",
         ).props("color=accent outline")
 
@@ -194,7 +189,6 @@ document.addEventListener('click', function(e) {
 def _render_report_markdown(report_path: Path) -> None:
     with open(report_path, encoding="utf-8") as report_file:
         report_content = report_file.read()
-    _inject_pubmed_badge_styles()
     ui.markdown(transform_pmid_references(report_content)).classes("w-full")
 
 

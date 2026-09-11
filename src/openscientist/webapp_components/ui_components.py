@@ -37,9 +37,12 @@ from openscientist.webapp_components.components.badges import (  # noqa: F401
     CATEGORY_COLORS,
     STATUS_COLORS,
     STATUS_ICONS,
+    _get_job_id_badge_html,
+    _get_pubmed_badge_html,
     _inject_pubmed_badge_styles,
     get_category_color,
     get_status_badge_props,
+    register_badge_head_html,
     render_container_status_badge,
     render_job_id_badge,
     render_job_id_slot,
@@ -967,7 +970,6 @@ def render_thinking_status(status_text: str = "Thinking...") -> ui.element:
         status.classes(remove="hidden")  # Show
         status.classes(add="hidden")  # Hide
     """
-    _inject_thinking_status_styles()
 
     with ui.row().classes(
         "items-center gap-3 py-3 px-4 bg-cyan-50 rounded-lg border border-cyan-200"

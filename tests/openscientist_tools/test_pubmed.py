@@ -129,6 +129,26 @@ def test_empty_results(
     assert last_log["results_count"] == 0
 
 
+def test_parse_pubmed_xml_title_with_inline_markup() -> None:
+    from openscientist.literature import _parse_pubmed_xml
+
+    xml = (
+        "<PubmedArticleSet><PubmedArticle><MedlineCitation><PMID>1</PMID>"
+        "<Article><ArticleTitle><i>LAMA5</i> links matrix to a niche.</ArticleTitle>"
+        "<Abstract><AbstractText>Plain abstract.</AbstractText></Abstract>"
+        "</Article></MedlineCitation></PubmedArticle></PubmedArticleSet>"
+    )
+    papers = _parse_pubmed_xml(xml, ["1"])
+    assert papers[0]["title"] == "LAMA5 links matrix to a niche."
+
+
+# Opt-in: this is the only test here that calls NCBI for real, and NCBI rate
+# limits by IP. From a shared CI runner the search returns zero results and the
+# assertions below fail for reasons unrelated to the code. The search_pubmed
+# formatting, persistence and empty-result paths are covered with mocks above,
+# so deselecting this in CI costs only the live contract and the stdio
+# subprocess smoke. Run it with: pytest -m network
+@pytest.mark.network
 async def test_subprocess_smoke_real_ncbi(
     tmp_path: Path,
     server_env: Callable[..., dict[str, str]],

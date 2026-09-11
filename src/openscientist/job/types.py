@@ -36,6 +36,9 @@ class RunMode(StrEnum):
     REPORT_ONLY = "report_only"
     """Re-run just the report-generation phase against persisted findings."""
 
+    CHAT = "chat"
+    """Single chat turn against an already-completed job."""
+
 
 @dataclass
 class JobStatusUpdateResult:

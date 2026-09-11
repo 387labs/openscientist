@@ -1112,7 +1112,7 @@ class TestEffectiveModel:
         assert _effective_model(self._settings(anthropic_default="claude-x")) == "claude-x"
 
     def test_codex_provider_model_resolved_when_unset(self) -> None:
-        """Codex providers carry the model in provider config (e.g. OLLAMA_MODEL),
+        """Codex providers carry the model in provider config or a provider default,
         so it is resolved from the provider rather than OPENSCIENTIST_MODEL."""
         from openscientist.job_manager import _effective_model
         from tests.helpers import StubCodexProvider

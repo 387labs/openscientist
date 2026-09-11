@@ -191,7 +191,7 @@ Helper scripts in `tools/`:
 | ---------------------- | -------- | ----------------------------------- |
 | `DATABASE_URL`         | Yes      | PostgreSQL connection string        |
 | `OPENSCIENTIST_SECRET_KEY`    | Yes      | Master secret (derives all auth keys)|
-| `OPENSCIENTIST_PROVIDER` | Yes    | Provider name (anthropic, cborg, vertex, bedrock, foundry, openai, azure-openai, ollama). There is no default: an unset value raises at startup. The previous name `CLAUDE_PROVIDER` is no longer accepted and raises at startup if set. |
+| `OPENSCIENTIST_PROVIDER` | Yes    | Provider name (anthropic, cborg, vertex, bedrock, foundry, openai, azure-openai, ollama, vllm, llamacpp). There is no default: an unset value raises at startup. The previous name `CLAUDE_PROVIDER` is no longer accepted and raises at startup if set. |
 | `OPENSCIENTIST_MODEL`  | No       | Model id for the selected provider. The previous name `ANTHROPIC_MODEL` is no longer accepted and raises at startup if set. |
 | `ANTHROPIC_API_KEY`    | Depends  | Required if using Anthropic         |
 | `ADMIN_DATABASE_URL`   | Unless `OPENSCIENTIST_DEV_MODE=true` | Connects as `openscientist_admin` (BYPASSRLS) for admin/background operations. Startup fails if unset while dev mode is off; the gate is `OPENSCIENTIST_DEV_MODE`, not `OPENSCIENTIST_ENVIRONMENT`. |
