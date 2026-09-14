@@ -9,7 +9,7 @@ import asyncio
 import importlib
 import logging
 import os
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -122,6 +122,67 @@ class _AppState:
 
 
 _state = _AppState()
+
+
+def _log_startup_posture(env: Mapping[str, str] | None = None) -> None:
+    """Log the security-relevant configuration the app actually resolved.
+
+    A guard you cannot see firing is indistinguishable from no guard. The
+    check that rejects dev mode in production reads OPENSCIENTIST_ENVIRONMENT,
+    but the deployed .env files set a bare ENVIRONMENT, so for seven weeks it
+    silently never ran and prod served the mock-auth routes -- including one
+    that grants admin -- on a public address. Nothing in the logs said so.
+
+    Printing what was resolved, rather than what was configured, makes that
+    class of mismatch visible in the first few lines instead of never.
+    """
+    from openscientist.settings import AppEnvironment, get_settings
+
+    environ = os.environ if env is None else env
+    settings = get_settings()
+    dev_mode = settings.dev.dev_mode
+    environment = settings.dev.environment
+
+    logger.info("Environment:   %s", environment.value)
+    logger.info(
+        "Dev mode:      %s (mock auth routes %s)",
+        "ENABLED" if dev_mode else "disabled",
+        "REACHABLE" if dev_mode else "return 404",
+    )
+    logger.info(
+        "OAuth:         %s",
+        "configured" if settings.auth.is_oauth_configured else "not configured",
+    )
+
+    # The exact mismatch described above: a bare ENVIRONMENT is set, so the
+    # deployment believes it declared an environment, while the setting that
+    # the production guard reads was never provided and fell back to its
+    # default.
+    stray = environ.get("ENVIRONMENT")
+    if stray and not environ.get("OPENSCIENTIST_ENVIRONMENT"):
+        logger.warning(
+            "ENVIRONMENT=%s is set but OPENSCIENTIST_ENVIRONMENT is not, so the "
+            "environment resolved to %s from the default. The check that rejects "
+            "dev mode in production reads OPENSCIENTIST_ENVIRONMENT and cannot "
+            "see ENVIRONMENT. Set OPENSCIENTIST_ENVIRONMENT to make it effective.",
+            stray,
+            environment.value,
+        )
+
+    if dev_mode and environment is not AppEnvironment.DEVELOPMENT:
+        logger.warning(
+            "Dev mode is enabled outside a development environment. The mock "
+            "auth routes, including /auth/mock/admin-login which grants admin, "
+            "are reachable by anyone who can reach this server."
+        )
+    if dev_mode and str(stray).lower() == "production":
+        logger.warning(
+            "Dev mode is enabled on a deployment labelled production, so "
+            "/auth/mock/login and /auth/mock/admin-login are serving anyone who "
+            "can reach this server, and the latter grants admin. Set "
+            "OPENSCIENTIST_DEV_MODE=false, or OPENSCIENTIST_ENVIRONMENT="
+            "production to make startup refuse this combination outright."
+        )
 
 
 def _register_oauth_routes() -> None:
@@ -596,6 +657,8 @@ def main(
         return  # Exit after running error mode
 
     logger.info("Settings validated successfully")
+
+    _log_startup_posture()
 
     from openscientist.settings import get_settings
 
