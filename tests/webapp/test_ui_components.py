@@ -300,8 +300,13 @@ class TestBadgeStylesRegisteredOnceAtBootstrap:
         """render_thinking_status is refreshed on a 2-second poll timer for any
         actively-watched running job -- this is the call site that produced
         the original leak, so it must never call add_head_html itself."""
-        with patch("openscientist.webapp_components.ui_components.ui.add_head_html") as mock_add:
+        # render_thinking_status builds real elements (`with ui.row()`, `ui.html`),
+        # so patch the module's ui wholesale rather than only add_head_html.
+        # Creating 50 real rows depends on an ambient NiceGUI slot that other
+        # tests can invalidate ("parent element ... has been deleted"), which
+        # made this order-dependent. The assertion below is unchanged.
+        with patch("openscientist.webapp_components.ui_components.ui") as mock_ui:
             for _ in range(50):
                 render_thinking_status("Searching PubMed...")
 
-        mock_add.assert_not_called()
+        mock_ui.add_head_html.assert_not_called()
