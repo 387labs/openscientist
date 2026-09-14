@@ -75,7 +75,10 @@ class TestJobContainerRunner:
                 agent_image=agent_image,
             ),
             provider=provider,
-            database=SimpleNamespace(effective_database_url="postgresql://db"),
+            database=SimpleNamespace(
+                effective_database_url="postgresql://db",
+                effective_admin_database_url="postgresql://admin-db",
+            ),
             phenix=SimpleNamespace(phenix_host_path=None),
             airgap=SimpleNamespace(enabled=False),
             secret_key="secret",
@@ -671,7 +674,10 @@ class TestGcpCredentialsMount:
         return SimpleNamespace(
             container=SimpleNamespace(host_project_dir=None, container_app_dir="/app"),
             provider=provider,
-            database=SimpleNamespace(effective_database_url="postgresql://db"),
+            database=SimpleNamespace(
+                effective_database_url="postgresql://db",
+                effective_admin_database_url="postgresql://admin-db",
+            ),
             phenix=SimpleNamespace(phenix_host_path=None),
             airgap=SimpleNamespace(enabled=False),
             secret_key="master-key",
@@ -805,7 +811,10 @@ class TestJobSecretInjection:
         return SimpleNamespace(
             container=SimpleNamespace(host_project_dir=None, container_app_dir="/app"),
             provider=provider,
-            database=SimpleNamespace(effective_database_url="postgresql://db"),
+            database=SimpleNamespace(
+                effective_database_url="postgresql://db",
+                effective_admin_database_url="postgresql://admin-db",
+            ),
             phenix=SimpleNamespace(phenix_host_path=None),
             airgap=SimpleNamespace(enabled=False),
             secret_key=master,
@@ -820,6 +829,15 @@ class TestJobSecretInjection:
         expected = hmac.new(b"master-key", b"job_secret:job-1", hashlib.sha256).hexdigest()
         assert env["OPENSCIENTIST_SECRET_KEY"] == expected
         assert env["OPENSCIENTIST_SECRET_KEY"] != "master-key"
+
+    def test_env_carries_admin_database_url(self) -> None:
+        """The agent builds Settings on startup, which refuses to construct without
+        ADMIN_DATABASE_URL outside dev mode. Omitting it killed every job at import."""
+        settings = self._settings(master="master-key")
+        env = JobContainerRunner._build_container_environment(
+            cast(Settings, settings), job_id="job-1", job_mount="/agent/jobs/job-1", provider_env={}
+        )
+        assert env["ADMIN_DATABASE_URL"] == "postgresql://admin-db"
 
     def test_distinct_job_ids_yield_distinct_secrets(self) -> None:
         """Two jobs get two different injected secrets, and neither is the master."""
@@ -892,7 +910,8 @@ class TestAirgapFirewallLaunch:
             ),
             provider=provider,
             database=SimpleNamespace(
-                effective_database_url="postgresql+asyncpg://u:p@postgres:5432/db"
+                effective_database_url="postgresql+asyncpg://u:p@postgres:5432/db",
+                effective_admin_database_url="postgresql+asyncpg://a:p@postgres:5432/db",
             ),
             phenix=SimpleNamespace(phenix_host_path=None),
             secret_key="secret",
@@ -991,7 +1010,8 @@ class TestChatTurnLaunch:
             ),
             provider=provider,
             database=SimpleNamespace(
-                effective_database_url="postgresql+asyncpg://u:p@postgres:5432/db"
+                effective_database_url="postgresql+asyncpg://u:p@postgres:5432/db",
+                effective_admin_database_url="postgresql+asyncpg://a:p@postgres:5432/db",
             ),
             phenix=SimpleNamespace(phenix_host_path=None),
             secret_key="master-key",

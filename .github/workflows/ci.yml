@@ -104,7 +104,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        dockerfile: [Dockerfile, Dockerfile.agent, Dockerfile.base, Dockerfile.executor]
+        dockerfile:
+          [Dockerfile, Dockerfile.agent, Dockerfile.base, Dockerfile.codex, Dockerfile.executor]
     steps:
       - uses: actions/checkout@v4
 

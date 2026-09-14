@@ -602,7 +602,10 @@ class TestRunnerInjection:
         settings = SimpleNamespace(
             container=SimpleNamespace(host_project_dir=None),
             provider=SimpleNamespace(google_application_credentials=None),
-            database=SimpleNamespace(effective_database_url="postgresql://db"),
+            database=SimpleNamespace(
+                effective_database_url="postgresql://db",
+                effective_admin_database_url="postgresql://admin-db",
+            ),
             phenix=SimpleNamespace(phenix_host_path=None),
             airgap=SimpleNamespace(enabled=False),
             secret_key="master-key",
