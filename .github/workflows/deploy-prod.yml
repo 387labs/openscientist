@@ -28,8 +28,24 @@ jobs:
       - name: Build base + main image in ACR
         run: |
           ACR=${{ secrets.ACR_NAME }}
-          sed -i "s|^FROM openscientist-base:latest|FROM ${ACR}.azurecr.io/openscientist-base:latest|" Dockerfile Dockerfile.agent Dockerfile.executor
-          az acr build -r $ACR -t openscientist-base:latest -f Dockerfile.base .
+          # Transient registry errors ("failed to get layer ... layer does not
+          # exist") showed up when a dependent build raced the base tag that had
+          # just been overwritten in this same run. Retry rather than fail a deploy
+          # on it; the identical build succeeds on a second attempt.
+          acr_build() {
+            for attempt in 1 2 3; do
+              az acr build -r $ACR "$@" && return 0
+              echo "acr build failed (attempt $attempt), retrying in 30s" >&2
+              sleep 30
+            done
+            return 1
+          }
+          acr_build -t openscientist-base:latest -f Dockerfile.base .
+          # Pin every dependent image to the exact base just built, so they cannot
+          # resolve a half-replicated :latest and cannot drift apart from one
+          # another when the base is rebuilt between steps.
+          BASE_DIGEST=$(az acr repository show -n $ACR --image openscientist-base:latest --query digest -o tsv)
+          sed -i "s|^FROM openscientist-base:latest|FROM ${ACR}.azurecr.io/openscientist-base@${BASE_DIGEST}|" Dockerfile Dockerfile.agent Dockerfile.executor
           # The agent and executor images run the same src/ as the web image but
           # were only ever built by hand, so they froze on a June build while the
           # web image kept shipping. The key-replacement proxy landed after that
@@ -40,10 +56,10 @@ jobs:
           # The tag is per environment, never :latest. All three environments
           # previously shared openscientist-agent:latest, so a dev deploy would
           # have replaced the image prod runs. Each VM's compose pins its own tag.
-          az acr build -r $ACR -t openscientist-agent:prod -f Dockerfile.agent .
-          az acr build -r $ACR -t openscientist-executor:prod -f Dockerfile.executor .
+          acr_build -t openscientist-agent:prod -f Dockerfile.agent .
+          acr_build -t openscientist-executor:prod -f Dockerfile.executor .
           TAG=prod-${{ github.sha }}
-          az acr build -r $ACR -t openscientist:$TAG -f Dockerfile .
+          acr_build -t openscientist:$TAG -f Dockerfile .
           echo "TAG=$TAG" >> "$GITHUB_ENV"
 
       - name: Redeploy on vm-openscientist-prod
