@@ -266,15 +266,11 @@ class TestFoundryClaudeCompatible:
         assert not isinstance(provider, CodexCompatible)
 
     def test_validate_required_config_ok(self) -> None:
-        with patch("openscientist.providers.foundry.get_settings", return_value=_mock_settings()):
-            assert FoundryProvider().validate_required_config() == []
+        assert FoundryProvider.required_config_errors(_mock_settings().provider) == []
 
     def test_validate_required_config_error_when_no_endpoint(self) -> None:
-        with patch("openscientist.providers.foundry.get_settings", return_value=_mock_settings()):
-            provider = FoundryProvider()
         no_endpoint = _mock_settings(resource=None, base_url=None, api_key="key")
-        with patch("openscientist.providers.foundry.get_settings", return_value=no_endpoint):
-            errors = provider.validate_required_config()
+        errors = FoundryProvider.required_config_errors(no_endpoint.provider)
         assert any("ANTHROPIC_FOUNDRY_RESOURCE" in e for e in errors)
 
     def test_claude_sdk_env_resource_mode(self) -> None:

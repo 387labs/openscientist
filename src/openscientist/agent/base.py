@@ -13,16 +13,21 @@ import abc
 import asyncio
 import enum
 import inspect
-from dataclasses import dataclass
+import logging
+import os
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar
 
 from openscientist.agent.mcp_specs import McpServerSpec
+from openscientist.agent.skills import render_skill_md
 from openscientist.models import ModelProfile
 from openscientist.providers.base import Provider
 from openscientist.transcript import TranscriptEntry
 
 if TYPE_CHECKING:
+    from openscientist.database.models import Skill
     from openscientist.prompts.common import BackendFragments
     from openscientist.settings import Settings
 
@@ -35,9 +40,11 @@ __all__ = [
     "TranscriptEntry",
 ]
 
+logger = logging.getLogger(__name__)
+
 
 class AgentBackend(enum.Enum):
-    """The agent runtime that drives a provider family.
+    """The coding-agent runtime (harness) that drives a job.
 
     The single source of truth for backend identity. Each concrete
     ``AbstractAgent`` owns one of these. The string values are stable and
@@ -47,29 +54,18 @@ class AgentBackend(enum.Enum):
 
     CLAUDE_CODE = "claude_code"
     CODEX = "codex"
-
-    @property
-    def display_name(self) -> str:
-        """Human-facing label for the UI."""
-        return {
-            AgentBackend.CLAUDE_CODE: "Claude Code",
-            AgentBackend.CODEX: "Codex",
-        }[self]
+    OMP = "omp"
 
 
 @dataclass
 class TokenUsage:
     """Normalized token usage across all iterations.
 
-    Each token is counted in exactly one category; the categories are
-    additive and non-overlapping. Total token count equals the sum of
-    all five fields. This invariant lets cost functions multiply each
-    field by its per-category rate and sum, without double-counting.
-
-    Backend SDKs that report hierarchical counts (e.g., OpenAI's
-    ``input_tokens`` includes ``cached_input_tokens``) must subtract
-    sub-categories from totals at the agent boundary before populating
-    this dataclass.
+    Categories are non-overlapping and additive: the six fields sum to the
+    total, so cost functions can rate each field without double-counting.
+    Backends whose SDK reports hierarchical counts (e.g. OpenAI folds
+    ``cached_input_tokens`` into ``input_tokens``) must subtract sub-categories
+    before populating this.
     """
 
     input_tokens: int = 0
@@ -79,7 +75,13 @@ class TokenUsage:
     """Visible (non-reasoning) output tokens."""
 
     cache_write_tokens: int = 0
-    """Tokens written to a provider-side prompt cache. Anthropic only."""
+    """Tokens written to a short-lived (five-minute) prompt cache, plus any write
+    the provider does not attribute to a tier. Anthropic only."""
+
+    cache_write_1h_tokens: int = 0
+    """Tokens written to a one-hour prompt cache, which Anthropic bills at twice
+    the input rate against 1.25x for five minutes. Split out because the rates
+    differ, and disjoint from ``cache_write_tokens`` rather than a subset of it."""
 
     cache_read_tokens: int = 0
     """Tokens served from a provider-side prompt cache."""
@@ -92,6 +94,7 @@ class TokenUsage:
             input_tokens=self.input_tokens + other.input_tokens,
             output_tokens=self.output_tokens + other.output_tokens,
             cache_write_tokens=self.cache_write_tokens + other.cache_write_tokens,
+            cache_write_1h_tokens=self.cache_write_1h_tokens + other.cache_write_1h_tokens,
             cache_read_tokens=self.cache_read_tokens + other.cache_read_tokens,
             reasoning_tokens=self.reasoning_tokens + other.reasoning_tokens,
         )
@@ -100,6 +103,7 @@ class TokenUsage:
         self.input_tokens += other.input_tokens
         self.output_tokens += other.output_tokens
         self.cache_write_tokens += other.cache_write_tokens
+        self.cache_write_1h_tokens += other.cache_write_1h_tokens
         self.cache_read_tokens += other.cache_read_tokens
         self.reasoning_tokens += other.reasoning_tokens
         return self
@@ -108,10 +112,10 @@ class TokenUsage:
 class TurnOutcome(enum.Enum):
     """Outcome of one agent turn, for the orchestrator to interpret.
 
-    The agent reports what happened; the loop owns the policy. ``TIMED_OUT`` is a
-    wall-clock cut (any work done before it is already persisted via tools), so
-    the loop may advance rather than fail. Cancellation is not represented here:
-    it propagates as an exception, never as a turn result.
+    The agent reports what happened, the loop owns the policy. ``TIMED_OUT`` is a
+    wall-clock cut (work before it is already persisted via tools), so the loop
+    may advance rather than fail. Cancellation propagates as an exception, never
+    a turn result.
     """
 
     COMPLETED = "completed"
@@ -131,9 +135,8 @@ class IterationResult:
 
     @property
     def success(self) -> bool:
-        """True only for a normally completed turn. Kept so callers that just
-        gate on success keep working; the discovery loop inspects ``outcome``
-        directly to tell a timeout apart from a failure."""
+        """True only for a normally completed turn. The discovery loop inspects
+        ``outcome`` directly to tell a timeout from a failure."""
         return self.outcome is TurnOutcome.COMPLETED
 
 
@@ -151,16 +154,17 @@ class AgentConfig:
     # ANTHROPIC_CHAT_MODEL escape hatch for in-page chat). The codex path
     # sources its model from the provider, so this is ignored there.
     model_override: str | None = None
+    # Per-invocation env for the tools subprocess. Threaded here, not via global
+    # os.environ, so concurrent chats cannot leak one job's exec token.
+    tool_server_env: Mapping[str, str] = field(default_factory=dict)
 
 
 class AbstractAgent[P: Provider](abc.ABC):
     """Agent runtime parameterised over the provider family it accepts.
 
-    Backend-divergent behavior is expressed as members here so that adding a
-    new backend is "subclass and implement the interface": the abstract
-    members below cannot be skipped (a subclass that omits one is not
-    instantiable, and mypy flags it), and ``backend`` is enforced in
-    ``__init_subclass__``.
+    Backend-divergent behavior lives in the abstract members below: a subclass
+    that omits one is not instantiable (mypy flags it), and ``backend`` is
+    enforced in ``__init_subclass__``.
     """
 
     #: The backend identity this agent implements. Concrete subclasses MUST set
@@ -171,6 +175,14 @@ class AbstractAgent[P: Provider](abc.ABC):
     #: for codex, ``"Write"`` for Claude). Named verbatim in report prompts so the
     #: model knows which tool to call. Enforced like ``backend``.
     file_write_tool: ClassVar[str]
+
+    #: Human-facing harness label for the UI (``"Claude Code"``, ``"Codex"``,
+    #: ``"Oh My Pi"``). Enforced like ``backend``.
+    display_name: ClassVar[str]
+
+    #: Job-relative directory this backend materialises skills into (e.g.
+    #: ``".claude/skills"``). None disables skill materialisation.
+    skills_subdir: ClassVar[str | None] = None
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
@@ -188,6 +200,11 @@ class AbstractAgent[P: Provider](abc.ABC):
                 f"{cls.__name__} must set `file_write_tool: ClassVar[str]` "
                 "to the backend's file-writing tool name."
             )
+        if not getattr(cls, "display_name", None) or not isinstance(cls.display_name, str):
+            raise TypeError(
+                f"{cls.__name__} must set `display_name: ClassVar[str]` "
+                "to the backend's human-facing label."
+            )
 
     def __init__(self, config: AgentConfig, provider: P) -> None:
         self._config = config
@@ -196,12 +213,8 @@ class AbstractAgent[P: Provider](abc.ABC):
         self._model_profile: ModelProfile | None = None
 
     async def warm_model_profile(self) -> None:
-        """Resolve and cache this run's model profile off the event loop.
-
-        The context window does not change within a job, so resolve it once at
-        setup. The provider's resolution may do blocking I/O (the Ollama probe),
-        so run it in a thread to keep the event loop responsive.
-        """
+        """Resolve and cache this run's model profile once, in a thread (the
+        provider's resolution may do blocking I/O, e.g. the Ollama probe)."""
         self._model_profile = await asyncio.to_thread(self._provider.model_profile)
 
     @property
@@ -237,11 +250,8 @@ class AbstractAgent[P: Provider](abc.ABC):
     @classmethod
     @abc.abstractmethod
     def prompt_fragments(cls) -> BackendFragments:
-        """The backend-divergent prompt fragments this agent uses.
-
-        Every prompt this backend produces flows through these fragments, so
-        the system prompt, job doc, and chat context cannot diverge.
-        """
+        """Backend-divergent prompt fragments. Every prompt this backend produces
+        flows through them, so its prompts cannot diverge."""
 
     @classmethod
     def system_prompt(cls) -> str:
@@ -282,38 +292,78 @@ class AbstractAgent[P: Provider](abc.ABC):
 
     # ----- per-job side effects (run where the agent instance lives) -----
 
-    @abc.abstractmethod
     async def prepare_job_workspace(self, *, use_hypotheses: bool = False) -> None:
-        """Materialise per-job files in the backend's layout (e.g. skills).
+        """Materialise the per-job workspace (enabled skills in this backend's
+        layout). Backends needing a job doc or MCP config override and call
+        ``super()``."""
+        if self.skills_subdir is None:
+            return
+        from openscientist.database.session import AsyncSessionLocal
+        from openscientist.prompts import get_enabled_skills
 
-        Runs in the agent process for the configured ``job_dir``.
-        """
+        try:
+            async with AsyncSessionLocal(thread_safe=True) as session:
+                skills = await get_enabled_skills(session)
+        except Exception as e:
+            logger.warning("Failed to load enabled skills: %s", e)
+            return
+        if not skills:
+            logger.info("No enabled skills to write")
+            return
+        skills_root = self._config.job_dir / self.skills_subdir
+        try:
+            for skill in skills:
+                self._write_skill(skills_root, skill)
+            logger.info("Wrote %d skill files to %s", len(skills), skills_root)
+        except Exception as e:
+            logger.warning("Failed to write skills to %s: %s", skills_root, e)
+
+    def _write_skill(self, skills_root: Path, skill: Skill) -> None:
+        """Write one skill as ``<skills_root>/<name>/SKILL.md`` (the Agent
+        Skills layout codex and omp discover). Claude overrides for its own."""
+        from openscientist.prompts.common import apply_mcp_tool_prefix
+
+        skill_dir = skills_root / f"{skill.category}--{skill.slug}"
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        # Skill bodies name MCP tools bare like the rest of the prompts, so a
+        # backend that namespaces them needs the same rewrite the system and turn
+        # prompts get. Otherwise a skill teaches a name that will not resolve.
+        # No-op wherever the prefix is empty, which is Claude and codex.
+        body = apply_mcp_tool_prefix(render_skill_md(skill), self.prompt_fragments())
+        (skill_dir / "SKILL.md").write_text(body, encoding="utf-8")
+
+    def _job_env_overlay(self, job_dir: Path) -> dict[str, str]:
+        """Per-job ``OPENSCIENTIST_*`` env for the tools subprocess. Each backend
+        passes its own ``job_dir`` so it controls path resolution."""
+        config = self._config
+        env: dict[str, str] = {
+            "OPENSCIENTIST_JOB_ID": job_dir.name,
+            "OPENSCIENTIST_JOB_DIR": str(job_dir),
+            "OPENSCIENTIST_USE_HYPOTHESES": "1" if config.use_hypotheses else "0",
+        }
+        if config.data_file is not None:
+            env["OPENSCIENTIST_DATA_FILE"] = str(config.data_file)
+        if config.data_files:
+            env["OPENSCIENTIST_DATA_FILES"] = os.pathsep.join(str(p) for p in config.data_files)
+        env.update(config.tool_server_env)
+        return env
 
     def apply_runtime_environment(self) -> None:
-        """Apply any process environment this backend needs before running.
-
-        Default no-op. The Claude backend overrides to set auth/routing flags.
-        """
+        """Process env this backend needs before running. Default no-op (Claude
+        sets auth/routing flags)."""
         return None
 
     @classmethod
     def chat_system_prompt(cls, base_system_prompt: str) -> str:
-        """The in-page-chat system prompt for this backend.
-
-        Default folds the fragment-substituted ``chat_doc`` into the prompt,
-        which is correct for backends (e.g. codex) that read everything from
-        the system prompt. Claude overrides to return the base prompt unchanged
-        and deliver the chat guidance via ``.claude/CLAUDE.md`` (written by
-        ``write_chat_context``). Pure: the side effects live in
-        ``write_chat_context`` so the chat executor can be built once.
-        """
+        """The in-page-chat system prompt. Default folds ``chat_doc`` in, correct
+        for backends that read everything from the system prompt (e.g. codex).
+        Claude overrides to keep the base prompt and deliver guidance via
+        ``.claude/CLAUDE.md`` (written by ``write_chat_context``)."""
         return f"{base_system_prompt}\n\n{cls.chat_doc()}"
 
     def write_chat_context(self) -> None:
-        """Materialise any on-disk in-page-chat context for this backend.
-
-        Default no-op. The Claude backend overrides to write ``.claude/CLAUDE.md``.
-        """
+        """Materialise on-disk chat context. Default no-op (Claude writes
+        ``.claude/CLAUDE.md``)."""
         return None
 
     @classmethod
@@ -323,11 +373,6 @@ class AbstractAgent[P: Provider](abc.ABC):
 
     @classmethod
     def provision_host_prelaunch(cls, settings: Settings, job_dir: Path) -> None:
-        """Host-side, pre-container setup for this backend.
-
-        Runs in the web/orchestrator process (where no agent instance exists)
-        before the agent container is launched, so it is a classmethod keyed
-        by the agent class. Default no-op; a backend that needs file-based
-        auth provisioning overrides it.
-        """
+        """Host-side, pre-container setup, run in the web/orchestrator process
+        before the container launches (hence a classmethod). Default no-op."""
         return None

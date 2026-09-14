@@ -16,7 +16,7 @@ from typing import Any
 
 from nicegui import ui
 
-from openscientist.agent.factory import backend_for_provider_id
+from openscientist.agent.factory import agent_class_for_provider_id
 from openscientist.job.types import JobStatus
 from openscientist.webapp_components.pages.job_detail_context import _JobDetailContext
 from openscientist.webapp_components.ui_components import (
@@ -523,16 +523,14 @@ def _render_timeline_content(timeline_ks: dict[str, Any], latest_job: Any, job_d
             )
 
 
-_PROVIDER_DISPLAY = {
-    "anthropic": "Anthropic",
-    "cborg": "CBORG",
-    "vertex": "Vertex AI",
-    "bedrock": "AWS Bedrock",
-    "foundry": "Azure AI Foundry",
-    "openai": "OpenAI",
-    "azure-openai": "Azure OpenAI",
-    "ollama": "Ollama (local)",
-}
+def _provider_display_name(provider_id: str) -> str:
+    """The provider's own display name, or a titled id for an unknown provider."""
+    from openscientist.providers import provider_class
+
+    try:
+        return provider_class(provider_id).display_name
+    except ValueError:
+        return provider_id.title()
 
 
 def _format_model_name(llm_model: str | None) -> str | None:
@@ -575,11 +573,9 @@ def _stats_badges(latest_job: Any, lit_count: int, hyp_count: int = 0) -> list[A
         badges.append(("Hypotheses", hyp_count, "orange"))
     provider_id = getattr(latest_job, "llm_provider", None)
     if provider_id:
-        backend = backend_for_provider_id(provider_id)
-        badges.append(("Agent", backend.display_name, "indigo"))
-        badges.append(
-            ("Provider", _PROVIDER_DISPLAY.get(provider_id.lower(), provider_id.title()), "teal")
-        )
+        agent_cls = agent_class_for_provider_id(provider_id)
+        badges.append(("Agent", agent_cls.display_name, "indigo"))
+        badges.append(("Provider", _provider_display_name(provider_id), "teal"))
     # Show the model as its own badge when known. This is independent of the
     # provider badge: the provider is where the model is hosted, the model is
     # which one ran. Codex on an account default records no model id, so the

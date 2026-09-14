@@ -7,16 +7,21 @@ calls via asyncio.run().
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import os
+import re
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, text, update
 
 from openscientist.agent.base import (
     AbstractAgent,
+    AgentBackend,
     AgentConfig,
     IterationResult,
     TokenUsage,
@@ -48,6 +53,13 @@ from openscientist.transcript import TranscriptEntry, save_transcript
 from openscientist.version import get_version_string
 
 logger = logging.getLogger(__name__)
+
+# Provenance is a single small update, so anything slower than this is a
+# database in trouble, and the run should carry on without the stamp. The
+# statement bound lives in the database. The deadline covers the rest of the
+# attempt, which the database cannot see.
+_STAMP_TIMEOUT_MS = 10_000
+_STAMP_DEADLINE_SECONDS = 30.0
 
 
 class _DiscoveryCancelledError(RuntimeError):
@@ -145,14 +157,34 @@ def _check_turn_outcome(result: IterationResult, iteration: int) -> None:
         logger.info("Iteration %d completed (tool_calls=%d)", iteration, result.tool_calls)
 
 
-def _sync_version_metadata_if_available(job_id: str) -> None:
-    """Store runtime version metadata in knowledge state when available."""
-    version_info = get_version_metadata()
-    if not version_info:
-        return
-    ks = KnowledgeState.load_from_database_sync(job_id)
-    ks.set_version_info(version_info)
-    ks.save_to_database_sync(job_id)
+async def _sync_version_metadata(job_id: str) -> None:
+    """Record runtime version provenance on the job, best effort.
+
+    Provenance is not a result, so anything that will not take it costs the run
+    its version strings and nothing more. It used to load and save the whole
+    knowledge state through the sync bridge, which turned one slow write into a
+    failed run. Two bounds apply to the write, because neither covers the
+    other: ``statement_timeout`` stops a slow statement inside the database,
+    and the surrounding deadline covers what the database cannot see (name
+    resolution, connecting, acquiring a connection, cleanup). It does not bound
+    metadata collection, whose blocking subprocesses hold the loop and carry
+    their own limits, but a failure there is still caught here.
+    """
+    try:
+        async with asyncio.timeout(_STAMP_DEADLINE_SECONDS):
+            version_info = get_version_metadata()
+            if not version_info:
+                return
+            async with AsyncSessionLocal() as session:
+                await session.execute(text(f"SET LOCAL statement_timeout = {_STAMP_TIMEOUT_MS}"))
+                await session.execute(
+                    update(JobModel)
+                    .where(JobModel.id == UUID(job_id))
+                    .values(version_info=version_info)
+                )
+                await session.commit()
+    except Exception as e:
+        logger.warning("Could not record version provenance for job %s: %s", job_id, e)
 
 
 async def _wait_for_coinvestigate_feedback(
@@ -199,13 +231,14 @@ async def _run_primary_discovery_loop(
         data_files,
         ks,
         description=runtime.get("description"),
+        tool_prefix=executor.prompt_fragments().mcp_tool_prefix,
     )
 
     logger.info("Iteration 1/%d: Starting session", max_iterations)
     result = await executor.run_iteration(initial_prompt, reset_session=True)
     _check_turn_outcome(result, 1)
 
-    _sync_version_metadata_if_available(job_id)
+    await _sync_version_metadata(job_id)
     _append_iteration_artifacts(
         provenance_dir=provenance_dir,
         log_file=log_file,
@@ -245,6 +278,7 @@ async def _run_primary_discovery_loop(
             ks,
             pending_feedback,
             description=runtime.get("description"),
+            tool_prefix=executor.prompt_fragments().mcp_tool_prefix,
         )
         pending_feedback = None
         should_reset = iteration % reset_interval == 1
@@ -471,11 +505,12 @@ async def _set_consensus_answer(
     fabricating one.
     """
     baseline = KnowledgeState.load_from_database_sync(job_dir.name).data.get("consensus_answer")
+    tool_prefix = executor.prompt_fragments().mcp_tool_prefix
     for attempt in range(1, _MAX_CONSENSUS_ATTEMPTS + 1):
         prompt = (
-            build_consensus_prompt(research_question)
+            build_consensus_prompt(research_question, tool_prefix=tool_prefix)
             if attempt == 1
-            else build_consensus_retry_prompt(research_question)
+            else build_consensus_retry_prompt(research_question, tool_prefix=tool_prefix)
         )
         await executor.run_iteration(prompt, reset_session=False)
         current = KnowledgeState.load_from_database_sync(job_dir.name).data.get("consensus_answer")
@@ -572,10 +607,34 @@ async def _load_runtime_context(job_dir: Path) -> dict[str, Any]:
     }
 
 
+def _harness_binary(harness: AgentBackend) -> str:
+    """The binary the harness agent will launch, via the agents' own resolvers
+    so env overrides stay honoured.
+    """
+    if harness is AgentBackend.CODEX:
+        from openscientist.agent.codex_agent import _resolve_codex_bin
+
+        return _resolve_codex_bin() or "codex"
+    from openscientist.agent.omp_agent import _resolve_omp_bin
+
+    return _resolve_omp_bin()
+
+
+def _harness_cli_version(command: str) -> str | None:
+    """Bare version from the first ``<command> --version`` line; None if the CLI is unusable."""
+    try:
+        result = subprocess.run(
+            [command, "--version"], capture_output=True, text=True, timeout=3, check=True
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    first_line = result.stdout.strip().split("\n", 1)[0]
+    match = re.search(r"\d+\.\d+\S*", first_line)
+    return match.group(0) if match else (first_line or None)
+
+
 def get_version_metadata() -> dict[str, str]:
     """Get OpenScientist version metadata for reproducibility."""
-    import os
-
     from openscientist.version import SHORT_COMMIT_LENGTH, get_commit
 
     metadata: dict[str, str] = {}
@@ -597,16 +656,34 @@ def get_version_metadata() -> dict[str, str]:
     except OSError:
         pass
 
+    # The resolved harness driving the job, never the literal "auto". A failure
+    # here also aborts agent build, so best-effort: leave the keys unrecorded.
+    try:
+        harness = agent_class_for_provider_id(get_settings().provider.provider_id).backend
+    except Exception:
+        return metadata
+    metadata["agent_harness"] = harness.value
+
+    if harness is AgentBackend.CLAUDE_CODE:
+        # Private modules of an unpinned SDK; omit each key if its module moves.
+        try:
+            from claude_agent_sdk._cli_version import __cli_version__
+
+            metadata["claude_code_version"] = __cli_version__
+            metadata["agent_harness_version"] = __cli_version__
+        except Exception:
+            pass
+
+        try:
+            from claude_agent_sdk._version import __version__
+
+            metadata["claude_agent_sdk_version"] = __version__
+        except Exception:
+            pass
+    elif version := _harness_cli_version(_harness_binary(harness)):
+        metadata["agent_harness_version"] = version
+
     return metadata
-
-
-_PROVIDER_DEFAULT_MODELS: dict[str, str] = {
-    "Anthropic": "claude-sonnet-4-20250514",
-    "CBORG": "claude-sonnet-4-20250514",
-    "Vertex AI": "claude-sonnet-4-5@20250929",
-    "AWS Bedrock": "us.anthropic.claude-sonnet-4-5-20250929-v1:0",
-    "Azure AI Foundry": "claude-sonnet-4-5",
-}
 
 
 async def _persist_job_cost_record(
@@ -620,7 +697,17 @@ async def _persist_job_cost_record(
     from openscientist.database.models import CostRecord
     from openscientist.providers.pricing import estimate_cost_usd
 
-    cost_usd = estimate_cost_usd(model_name, tokens.input_tokens, tokens.output_tokens)
+    # The pricing buckets are keyword-only, since they are easy to transpose and each
+    # is priced differently.
+    cost_usd = estimate_cost_usd(
+        model_name,
+        input_tokens=tokens.input_tokens,
+        output_tokens=tokens.output_tokens,
+        cache_read_tokens=tokens.cache_read_tokens,
+        cache_write_tokens=tokens.cache_write_tokens,
+        cache_write_1h_tokens=tokens.cache_write_1h_tokens,
+        reasoning_tokens=tokens.reasoning_tokens,
+    )
     async with AsyncSessionLocal(thread_safe=True) as session:
         record = CostRecord(
             job_id=UUID(job_id),
@@ -630,6 +717,11 @@ async def _persist_job_cost_record(
             model=model_name,
             input_tokens=tokens.input_tokens,
             output_tokens=tokens.output_tokens,
+            cache_read_tokens=tokens.cache_read_tokens,
+            # The column holds every cache write. Only the price depends on how long
+            # the entry lives, and `cost_usd` already accounts for that.
+            cache_write_tokens=tokens.cache_write_tokens + tokens.cache_write_1h_tokens,
+            reasoning_tokens=tokens.reasoning_tokens,
             cost_usd=cost_usd,
         )
         session.add(record)
@@ -644,9 +736,14 @@ async def _finalize_executor(executor: AbstractAgent[Provider], job_id: str) -> 
     """
     tokens = executor.total_tokens
     logger.info(
-        "Agent executor completed: %d input tokens, %d output tokens",
+        "Agent executor completed: %d input, %d output, %d cache read, "
+        "%d cache write (%d of them one-hour), %d reasoning tokens",
         tokens.input_tokens,
         tokens.output_tokens,
+        tokens.cache_read_tokens,
+        tokens.cache_write_tokens + tokens.cache_write_1h_tokens,
+        tokens.cache_write_1h_tokens,
+        tokens.reasoning_tokens,
     )
     try:
         settings = get_settings()
@@ -654,7 +751,8 @@ async def _finalize_executor(executor: AbstractAgent[Provider], job_id: str) -> 
         model_name = (
             settings.provider.model
             or settings.provider.anthropic_default_sonnet_model
-            or _PROVIDER_DEFAULT_MODELS.get(provider.display_name, "unknown")
+            or provider.effective_model_name()
+            or "unknown"
         )
         await _persist_job_cost_record(job_id, tokens, provider.display_name, model_name)
     except Exception as cost_err:

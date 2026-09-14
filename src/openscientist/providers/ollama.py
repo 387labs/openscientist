@@ -16,14 +16,27 @@ the host (for example ``http://host.docker.internal:11434/v1``).
 from __future__ import annotations
 
 import logging
+import os
 
 import requests
 
-from openscientist.models import _DEFAULT_CONTEXT_TOKENS, ModelProfile
-from openscientist.providers.base import CodexCompatible, CostInfo
-from openscientist.settings import get_settings
+from openscientist.models import ModelProfile, probed_model_profile
+from openscientist.providers.base import (
+    LLM_PROXY_URL_ENV,
+    CodexCompatible,
+    CostInfo,
+    LlmUpstream,
+    OmpModelCatalog,
+    self_hosted_codex_provider_table,
+    self_hosted_omp_model_catalog,
+)
+from openscientist.settings import ProviderSettings, get_settings
 
 logger = logging.getLogger(__name__)
+
+#: Served when OPENSCIENTIST_MODEL is unset. Ollama can hold several models and
+#: selects one per request, so a default keeps it usable with no configuration.
+_DEFAULT_MODEL = "gpt-oss:20b"
 
 
 def _ollama_http_base(base_url: str) -> str:
@@ -36,13 +49,17 @@ def _ollama_http_base(base_url: str) -> str:
 
 
 def _probe_ollama_context_tokens(base_url: str, model_id: str) -> int | None:
-    """Read the actual runtime context window of a loaded Ollama model.
+    """Read the served context window of a loaded Ollama model, or None.
 
     ``/api/ps`` reports ``context_length`` for currently-loaded models, which
     reflects the deployment's ``num_ctx`` (e.g. ``OLLAMA_CONTEXT_LENGTH``), the
-    number we must budget against. Falls back to ``/api/show`` (the model's
-    trained maximum) when the model is not currently loaded. Returns None on any
-    failure so the caller can fall back further.
+    number we must budget against. A cold model gets None rather than the
+    ``/api/show`` trained maximum: both callers run before the first model call,
+    so the trained figure would be the usual answer rather than a rare fallback,
+    and it over-budgets a server launched smaller (262144 reported against a
+    32768 deployment). ``probed_model_profile`` turns None into a conservative
+    budget plus a warning naming ``OPENSCIENTIST_MODEL_CONTEXT_TOKENS``, which
+    is the number the operator can actually act on.
     """
     root = _ollama_http_base(base_url)
     try:
@@ -55,16 +72,6 @@ def _probe_ollama_context_tokens(base_url: str, model_id: str) -> int | None:
     except (requests.RequestException, ValueError, KeyError) as exc:
         logger.debug("Ollama /api/ps probe failed: %s", exc)
 
-    try:
-        resp = requests.post(f"{root}/api/show", json={"name": model_id}, timeout=5)
-        resp.raise_for_status()
-        info = resp.json().get("model_info", {})
-        for key, value in info.items():
-            if key.endswith("context_length") and value:
-                return int(value)
-    except (requests.RequestException, ValueError, KeyError) as exc:
-        logger.debug("Ollama /api/show probe failed: %s", exc)
-
     return None
 
 
@@ -75,9 +82,21 @@ class OllamaProvider(CodexCompatible):
     def id(self) -> str:
         return "ollama"
 
-    @property
-    def display_name(self) -> str:
-        return "Ollama (local)"
+    display_name = "Ollama (local)"
+
+    @classmethod
+    def container_env(
+        cls, provider: ProviderSettings, *, gcp_credentials_container_path: str | None = None
+    ) -> dict[str, str]:
+        # The model is forwarded generically as OPENSCIENTIST_MODEL.
+        return {"OLLAMA_BASE_URL": provider.ollama_base_url}
+
+    def harness_env(self, *, proxy: str | None) -> dict[str, str]:
+        if proxy:
+            return super().harness_env(proxy=proxy)
+        # Local, keyless: point an OpenAI-family harness straight at Ollama.
+        s = get_settings().provider
+        return {"OPENAI_BASE_URL": s.ollama_base_url, "OPENAI_API_KEY": "ollama"}
 
     def validate_required_config(self) -> list[str]:
         # Local and keyless: the base URL and model both have defaults, so
@@ -96,52 +115,48 @@ class OllamaProvider(CodexCompatible):
             data_lag_note="Local Ollama inference incurs no API cost.",
         )
 
+    def llm_upstream(self) -> LlmUpstream | None:
+        # Keyless: forward to Ollama with no injected auth.
+        return LlmUpstream(get_settings().provider.ollama_base_url, {})
+
+    def proxy_env_overrides(self, *, proxy_base_url: str, placeholder: str) -> dict[str, str]:
+        # Codex sends the placeholder so the proxy authenticates the container.
+        return {"OPENAI_API_KEY": placeholder, LLM_PROXY_URL_ENV: proxy_base_url}
+
     def codex_config_overrides(self) -> list[str]:
-        # The id is "ollama-local", not "ollama", because codex reserves
-        # "ollama" as a built-in provider we cannot override to set our own
-        # base_url (e.g. host.docker.internal from a container). Ollama needs no
-        # auth, and codex only supports wire_api = "responses".
-        return [
-            "[model_providers.ollama-local]",
-            'name = "Ollama (local)"',
-            f'base_url = "{get_settings().provider.ollama_base_url}"',
-            'wire_api = "responses"',
-            "requires_openai_auth = false",
-            # A CPU-offloaded model can stay silent for minutes during prefill
-            # before the first SSE token, tripping codex's default 5-minute idle
-            # timeout. Raise it to 1 hour, with a few reconnects as insurance.
-            "stream_idle_timeout_ms = 3600000",
-            "stream_max_retries = 5",
-        ]
+        proxy = os.environ.get(LLM_PROXY_URL_ENV)
+        return self_hosted_codex_provider_table(
+            provider_id=self.codex_model_provider_id(),
+            name=self.display_name,
+            base_url=proxy or get_settings().provider.ollama_base_url,
+            # Ollama has no credential of its own, so only the proxy keys it.
+            keyed=bool(proxy),
+        )
 
     def codex_model_name(self) -> str | None:
-        # Default to the configured Ollama model unless OPENSCIENTIST_MODEL is set.
-        s = get_settings().provider
-        return s.model or s.ollama_model
+        # Ollama holds several models and picks one per request, so a default
+        # here keeps it zero-config. It lives with the provider rather than as a
+        # second env var that OPENSCIENTIST_MODEL would silently override.
+        return get_settings().provider.model or _DEFAULT_MODEL
 
     def model_profile(self) -> ModelProfile:
         # A self-hosted window is whatever num_ctx the deployment allocates, so
-        # probe the live server. Order: explicit override, live probe, default.
-        # The known-model table is skipped (a trained maximum would over-budget
-        # a deployment served at a smaller num_ctx).
+        # probe the live server rather than trusting the model's trained maximum.
         s = get_settings().provider
-        model_id = self.effective_model_name() or "unknown"
-        if s.model_context_tokens:
-            return ModelProfile(id=model_id, context_window_tokens=int(s.model_context_tokens))
-        probed = _probe_ollama_context_tokens(s.ollama_base_url, model_id)
-        if probed:
-            return ModelProfile(id=model_id, context_window_tokens=probed)
-        # A failed probe is NOT silent: it collapses the prompt budget to the
-        # conservative default, which over-trims the report's literature. Surface
-        # it so an operator can pin the window instead of shipping a thin report.
-        logger.warning(
-            "Could not probe the Ollama context window for %s; falling back to a "
-            "%d-token budget, so the report prompt will be trimmed more than "
-            "necessary. Set OPENSCIENTIST_MODEL_CONTEXT_TOKENS to pin the window.",
-            model_id,
-            _DEFAULT_CONTEXT_TOKENS,
+        return probed_model_profile(
+            model_id=self.effective_model_name(),
+            override=s.model_context_tokens,
+            probe=lambda mid: _probe_ollama_context_tokens(s.ollama_base_url, mid),
+            server_name="Ollama",
+            provider_logger=logger,
         )
-        return ModelProfile(id=model_id, context_window_tokens=_DEFAULT_CONTEXT_TOKENS)
+
+    def probe_context_window(self) -> int | None:
+        # Probe the local server directly so the launcher can inject the window.
+        model = self.effective_model_name()
+        if not model:
+            return None
+        return _probe_ollama_context_tokens(get_settings().provider.ollama_base_url, model)
 
     def codex_model_provider_id(self) -> str:
         # Not "ollama": codex reserves that id for its built-in provider.
@@ -150,3 +165,20 @@ class OllamaProvider(CodexCompatible):
     def codex_sdk_env(self) -> dict[str, str]:
         # Keyless: nothing to forward into the codex child environment.
         return {}
+
+    def omp_model_catalog(self, *, context_window: int) -> OmpModelCatalog | None:
+        model_id = self.effective_model_name()
+        if not model_id:
+            return None
+        proxy = os.environ.get(LLM_PROXY_URL_ENV)
+        # Ollama is keyless, so a credential exists only when the proxy is
+        # active and the runner exported the job placeholder.
+        key = os.environ.get("OPENAI_API_KEY") if proxy else None
+        return self_hosted_omp_model_catalog(
+            provider_id=self.id,
+            name=self.display_name,
+            base_url=proxy or get_settings().provider.ollama_base_url,
+            model_id=model_id,
+            context_window=context_window,
+            api_key=key,
+        )

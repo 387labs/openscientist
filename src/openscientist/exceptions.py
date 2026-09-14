@@ -56,3 +56,7 @@ class ProviderError(OpenScientistError):
 
 class PDFGenerationError(OpenScientistError):
     """Raised when PDF report generation fails."""
+
+
+class McpToolsUnavailableError(OpenScientistError):
+    """Raised when a turn ran without the openscientist-tools MCP tools."""

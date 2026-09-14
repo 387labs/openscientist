@@ -48,6 +48,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libffi8 \
     shared-mime-info \
     fonts-liberation \
+    nftables \
+    util-linux \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user
@@ -56,14 +58,18 @@ RUN useradd --uid 1001 --create-home --shell /bin/bash agent
 WORKDIR /app
 
 # Copy project files (README.md required by pyproject.toml readme field)
-COPY pyproject.toml README.md uv.lock* ./
+COPY pyproject.toml README.md uv.lock ./
 COPY src/ ./src/
 
 # Install dependencies including claude-agent-sdk and openai-codex (both listed
 # in pyproject.toml). The official openai-codex bundles its codex binary only as
 # a musl wheel, which is dropped via the uv override in pyproject.toml. The
 # binary is provisioned separately below.
-RUN uv pip install --system -e .
+RUN uv export --locked --no-dev --no-emit-project --format requirements-txt \
+        -o /tmp/requirements.txt \
+    && uv pip install --system -r /tmp/requirements.txt \
+    && uv pip install --system --no-deps -e . \
+    && rm /tmp/requirements.txt
 
 # Install the open-codex CLI built in the codex-build stage above (namespace
 # tools, function apply_patch, web_search capability gate, and the apply_patch
@@ -74,8 +80,24 @@ RUN uv pip install --system -e .
 COPY --from=codex-build /usr/local/bin/codex /usr/local/bin/codex
 RUN chmod +x /usr/local/bin/codex
 
+# omp harness CLI (OPENSCIENTIST_HARNESS=omp): pinned static binary onto PATH.
+# The checksum is the release asset digest, not just the tag: a git tag is
+# mutable and can be repointed at different bytes without this file changing,
+# and this binary runs with the job's database credentials in its environment.
+ARG OMP_VERSION=v17.1.5
+ARG OMP_SHA256=35019bfa4d1acae0040ef1f3d91c29c6e7401acfcdbcfeba6ff506a6b103c987
+ARG OMP_RELEASE_BASE=https://github.com/can1357/oh-my-pi/releases/download
+RUN curl -fsSL "${OMP_RELEASE_BASE}/${OMP_VERSION}/omp-linux-x64" -o /tmp/omp \
+    && echo "${OMP_SHA256}  /tmp/omp" | sha256sum -c - \
+    && install -m 0755 /tmp/omp /usr/local/bin/omp \
+    && rm /tmp/omp
+
 # Copy agent entrypoint
 COPY docker/agent-entrypoint.py /agent-entrypoint.py
+
+# Air-gapped egress firewall entrypoint (used when the runner enables airgap).
+COPY docker/agent-firewall-entrypoint.sh /agent-firewall-entrypoint.sh
+RUN chmod +x /agent-firewall-entrypoint.sh
 
 # Switch to non-root user
 USER agent

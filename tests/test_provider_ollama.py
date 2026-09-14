@@ -15,14 +15,12 @@ from openscientist.providers.ollama import OllamaProvider
 def _settings(
     *,
     base_url: str = "http://localhost:11434/v1",
-    model_default: str = "gpt-oss:20b",
     model: str | None = None,
     model_context_tokens: int | None = None,
 ) -> SimpleNamespace:
     return SimpleNamespace(
         provider=SimpleNamespace(
             ollama_base_url=base_url,
-            ollama_model=model_default,
             model=model,
             model_context_tokens=model_context_tokens,
         )
@@ -72,7 +70,7 @@ def test_config_overrides_are_keyless_responses_surface() -> None:
     assert mp["stream_idle_timeout_ms"] == 3600000
 
 
-def test_model_name_defaults_to_ollama_model() -> None:
+def test_model_name_falls_back_to_the_provider_default() -> None:
     with patch(
         "openscientist.providers.ollama.get_settings",
         return_value=_settings(model=None),
@@ -149,31 +147,19 @@ def test_probe_matches_model_name_prefix() -> None:
         assert _probe_ollama_context_tokens("http://h:11434/v1", "gpt-oss:120b") == 40000
 
 
-def test_probe_falls_back_to_api_show_when_not_loaded() -> None:
+def test_probe_declines_the_trained_maximum_when_not_loaded() -> None:
+    """A cold model gets None, never ``/api/show``'s trained maximum. Both callers
+    run before the first model call, so that figure would be the usual answer
+    rather than a rare fallback, and it over-budgets a server launched below it."""
     from openscientist.providers import ollama as ollama_mod
     from openscientist.providers.ollama import _probe_ollama_context_tokens
 
     with (
         patch.object(ollama_mod.requests, "get", return_value=_resp({"models": []})),
-        patch.object(
-            ollama_mod.requests,
-            "post",
-            return_value=_resp({"model_info": {"gptoss.context_length": 131072}}),
-        ) as post,
-    ):
-        assert _probe_ollama_context_tokens("http://h:11434/v1", "gpt-oss:120b") == 131072
-    post.assert_called_once()
-
-
-def test_probe_returns_none_on_empty_responses() -> None:
-    from openscientist.providers import ollama as ollama_mod
-    from openscientist.providers.ollama import _probe_ollama_context_tokens
-
-    with (
-        patch.object(ollama_mod.requests, "get", return_value=_resp({"models": []})),
-        patch.object(ollama_mod.requests, "post", return_value=_resp({"model_info": {}})),
+        patch.object(ollama_mod.requests, "post") as post,
     ):
         assert _probe_ollama_context_tokens("http://h:11434/v1", "gpt-oss:120b") is None
+    post.assert_not_called()
 
 
 def test_probe_returns_none_on_connection_error() -> None:
@@ -182,10 +168,7 @@ def test_probe_returns_none_on_connection_error() -> None:
     from openscientist.providers import ollama as ollama_mod
     from openscientist.providers.ollama import _probe_ollama_context_tokens
 
-    with (
-        patch.object(ollama_mod.requests, "get", side_effect=requests.ConnectionError("down")),
-        patch.object(ollama_mod.requests, "post", side_effect=requests.ConnectionError("down")),
-    ):
+    with patch.object(ollama_mod.requests, "get", side_effect=requests.ConnectionError("down")):
         assert _probe_ollama_context_tokens("http://h:11434/v1", "gpt-oss:120b") is None
 
 
@@ -233,3 +216,58 @@ def test_model_profile_probe_failure_logs_warning_and_defaults(
         profile = OllamaProvider().model_profile()
     assert profile.context_window_tokens == models._DEFAULT_CONTEXT_TOKENS
     assert any("Could not probe" in r.message for r in caplog.records)
+
+
+# --- app-side window resolution (probe_context_window / prelaunch env) -----------
+
+
+def test_probe_context_window_hits_the_direct_server() -> None:
+    """App-side resolution probes ollama_base_url directly, not through the proxy."""
+    from openscientist.providers import ollama as ollama_mod
+
+    with (
+        patch("openscientist.providers.ollama.get_settings", return_value=_settings()),
+        patch.object(ollama_mod, "_probe_ollama_context_tokens", return_value=8192) as probe,
+    ):
+        window = OllamaProvider().probe_context_window()
+    assert window == 8192
+    probe.assert_called_once_with("http://localhost:11434/v1", "gpt-oss:20b")
+
+
+def test_prelaunch_env_injects_the_probed_window() -> None:
+    from openscientist.providers import ollama as ollama_mod
+
+    s = _settings()
+    with (
+        patch("openscientist.providers.ollama.get_settings", return_value=s),
+        patch("openscientist.providers.base.get_settings", return_value=s),
+        patch.object(ollama_mod, "_probe_ollama_context_tokens", return_value=40960),
+    ):
+        env = OllamaProvider().prelaunch_model_context_env()
+    assert env == {"OPENSCIENTIST_MODEL_CONTEXT_TOKENS": "40960"}
+
+
+def test_prelaunch_env_forwards_the_operator_pin() -> None:
+    from openscientist.providers import ollama as ollama_mod
+
+    s = _settings(model_context_tokens=1234)
+    with (
+        patch("openscientist.providers.base.get_settings", return_value=s),
+        patch.object(ollama_mod, "_probe_ollama_context_tokens") as probe,
+    ):
+        env = OllamaProvider().prelaunch_model_context_env()
+    assert env == {"OPENSCIENTIST_MODEL_CONTEXT_TOKENS": "1234"}
+    probe.assert_not_called()
+
+
+def test_prelaunch_env_is_empty_when_the_probe_fails() -> None:
+    from openscientist.providers import ollama as ollama_mod
+
+    s = _settings()
+    with (
+        patch("openscientist.providers.ollama.get_settings", return_value=s),
+        patch("openscientist.providers.base.get_settings", return_value=s),
+        patch.object(ollama_mod, "_probe_ollama_context_tokens", return_value=None),
+    ):
+        env = OllamaProvider().prelaunch_model_context_env()
+    assert env == {}

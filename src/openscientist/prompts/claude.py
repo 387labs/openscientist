@@ -22,6 +22,8 @@ CLAUDE_FRAGMENTS = BackendFragments(
     skills_discovery_note=(
         "Use `search_skills` to discover additional skills in the database beyond those pre-loaded."
     ),
+    # Claude exposes the MCP tools under their bare names.
+    mcp_tool_prefix="",
 )
 
 

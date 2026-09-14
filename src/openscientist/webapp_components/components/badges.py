@@ -253,7 +253,6 @@ def render_job_id_badge(job_id: str, truncate: bool = True) -> None:
         job_id: The job UUID
         truncate: If True, show only last 8 characters of UUID (default True)
     """
-    _inject_job_id_badge_styles()
     badge_html = _get_job_id_badge_html(job_id, truncate)
     ui.html(badge_html)
 
@@ -302,8 +301,6 @@ def render_pmid_badge(pmid: str) -> None:
     Args:
         pmid: The PubMed ID number (just the numeric part)
     """
-    # Inject CSS/JS for badges into page head
-    _inject_pubmed_badge_styles()
 
     # Render badge as inline HTML
     badge_html = _get_pubmed_badge_html(pmid)
@@ -367,9 +364,6 @@ def render_text_with_pmid_links(
             f'text-justify:inter-word;margin:0;">{html.escape(text)}</p>'
         )
         return
-
-    # Inject CSS/JS for badges into page head
-    _inject_pubmed_badge_styles()
 
     # Render as HTML to support inline badges with justified text
     html_content = "".join(result_parts)
@@ -634,3 +628,14 @@ def render_container_status_badge(status: str) -> None:
     }
     color = color_map.get(status, "grey")
     ui.badge(status, color=color).classes("px-2 py-1")
+
+
+def register_badge_head_html() -> None:
+    """Register PubMed/job-id badge CSS and JS globally, for every page.
+
+    Call exactly once, at app bootstrap (alongside ``_register_pwa_metadata``
+    in ``web_app._configure_host_app``) -- see ``_inject_pubmed_badge_styles``
+    for why this can't be called from per-render code.
+    """
+    _inject_pubmed_badge_styles()
+    _inject_job_id_badge_styles()

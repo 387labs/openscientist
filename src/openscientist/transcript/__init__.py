@@ -14,14 +14,17 @@ from openscientist.transcript.agents import (
     AgentMarker,
     ClaudeAgent,
     CodexAgent,
+    OmpAgent,
     TranscriptDeserializer,
 )
 from openscientist.transcript.io import load_transcript, save_transcript
 from openscientist.transcript.translators import (
     CLAUDE,
     CODEX,
+    OMP,
     ClaudeDeserializer,
     CodexDeserializer,
+    OmpDeserializer,
 )
 from openscientist.transcript.union import TranscriptAdapter, TranscriptEntry
 from openscientist.transcript.variants import (
@@ -50,6 +53,7 @@ from openscientist.transcript.variants import (
 __all__ = [
     "CLAUDE",
     "CODEX",
+    "OMP",
     "AgentMarker",
     "AssistantText",
     "ClaudeAgent",
@@ -61,6 +65,8 @@ __all__ = [
     "HookPrompt",
     "ImageGeneration",
     "ImageView",
+    "OmpAgent",
+    "OmpDeserializer",
     "Plan",
     "Reasoning",
     "ReviewModeEntered",

@@ -17,6 +17,10 @@ class CodexAgent(AgentMarker):
     """Marker for the ``openai-codex`` wire formats."""
 
 
+class OmpAgent(AgentMarker):
+    """Marker for the Oh My Pi (omp) wire format."""
+
+
 @runtime_checkable
 class TranscriptDeserializer[A: AgentMarker](Protocol):
     """Translates a backend's native wire transcript into a

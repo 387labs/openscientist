@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import yaml  # type: ignore[import-untyped]
 
-from openscientist.agent.skills import codex_skill_markdown
+from openscientist.agent.skills import render_skill_md
 from openscientist.database.models import Skill
 
 
@@ -15,7 +15,7 @@ def _parse_frontmatter(skill_md: str) -> tuple[dict[str, object], str]:
     return yaml.safe_load(fm), body
 
 
-def test_codex_skill_markdown_basic() -> None:
+def test_render_skill_md_basic() -> None:
     skill = Skill(
         name="Pathway Enrichment",
         slug="pathway-enrichment",
@@ -24,7 +24,7 @@ def test_codex_skill_markdown_basic() -> None:
         content="# Pathway Enrichment\n\nStep 1: ...\n",
         is_enabled=True,
     )
-    md = codex_skill_markdown(skill)
+    md = render_skill_md(skill)
     fm, body = _parse_frontmatter(md)
     assert fm["name"] == "metabolomics--pathway-enrichment"
     assert fm["description"] == "Run pathway enrichment analysis on differential metabolites."
@@ -32,7 +32,7 @@ def test_codex_skill_markdown_basic() -> None:
     assert body == skill.content
 
 
-def test_codex_skill_markdown_null_description_gets_fallback() -> None:
+def test_render_skill_md_null_description_gets_fallback() -> None:
     """Codex drops skills with an empty description, so a null description must
     fall back to a non-empty string."""
     skill = Skill(
@@ -43,12 +43,12 @@ def test_codex_skill_markdown_null_description_gets_fallback() -> None:
         content="body",
         is_enabled=True,
     )
-    fm, _ = _parse_frontmatter(codex_skill_markdown(skill))
+    fm, _ = _parse_frontmatter(render_skill_md(skill))
     assert fm["description"]  # non-empty
     assert "genomics" in str(fm["description"])
 
 
-def test_codex_skill_markdown_truncates_name_and_description() -> None:
+def test_render_skill_md_truncates_name_and_description() -> None:
     skill = Skill(
         name="Long",
         slug="s" * 80,
@@ -57,14 +57,14 @@ def test_codex_skill_markdown_truncates_name_and_description() -> None:
         content="x",
         is_enabled=True,
     )
-    fm, _ = _parse_frontmatter(codex_skill_markdown(skill))
+    fm, _ = _parse_frontmatter(render_skill_md(skill))
     assert len(str(fm["name"])) <= 64
     assert len(str(fm["description"])) <= 1024
     # Description is single-line (collapsed whitespace).
     assert "\n" not in str(fm["description"])
 
 
-def test_codex_skill_markdown_handles_yaml_special_chars() -> None:
+def test_render_skill_md_handles_yaml_special_chars() -> None:
     """A colon or quote in name/description must not break frontmatter parsing."""
     skill = Skill(
         name="Tricky",
@@ -74,5 +74,5 @@ def test_codex_skill_markdown_handles_yaml_special_chars() -> None:
         content="body",
         is_enabled=True,
     )
-    fm, _ = _parse_frontmatter(codex_skill_markdown(skill))
+    fm, _ = _parse_frontmatter(render_skill_md(skill))
     assert fm["description"] == 'Analysis: uses "quotes" and: colons'
