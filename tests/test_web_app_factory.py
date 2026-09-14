@@ -9,6 +9,7 @@ from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 from openscientist import web_app
+from openscientist.settings import AppEnvironment
 
 
 def _noop(*_args: Any, **_kwargs: Any) -> None:
@@ -98,7 +99,10 @@ def test_main_reload_uses_factory_import_target(
     monkeypatch.setattr(web_app, "_settings_error", None)
     monkeypatch.setattr(
         "openscientist.settings.get_settings",
-        lambda: SimpleNamespace(dev=SimpleNamespace(dev_mode=True)),
+        lambda: SimpleNamespace(
+            dev=SimpleNamespace(dev_mode=True, environment=AppEnvironment.DEVELOPMENT),
+            auth=SimpleNamespace(is_oauth_configured=False),
+        ),
     )
 
     uvicorn_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
@@ -124,7 +128,10 @@ def test_main_non_reload_runs_with_created_app(
     monkeypatch.setattr(web_app, "_settings_error", None)
     monkeypatch.setattr(
         "openscientist.settings.get_settings",
-        lambda: SimpleNamespace(dev=SimpleNamespace(dev_mode=False)),
+        lambda: SimpleNamespace(
+            dev=SimpleNamespace(dev_mode=False, environment=AppEnvironment.DEVELOPMENT),
+            auth=SimpleNamespace(is_oauth_configured=False),
+        ),
     )
 
     host_app = FastAPI()
