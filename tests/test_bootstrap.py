@@ -218,9 +218,9 @@ async def test_bootstrap_creates_job_and_syncs_modern_knowledge_state(
 @pytest.mark.asyncio
 async def test_bootstrap_preserves_version_info_from_knowledge_state(
     db_session: AsyncSession,
-    temp_jobs_dir,
+    temp_jobs_dir: Path,
     monkeypatch: pytest.MonkeyPatch,
-):
+) -> None:
     monkeypatch.setattr(
         "openscientist.bootstrap.get_admin_session",
         fake_admin_session(db_session),
@@ -265,9 +265,9 @@ async def test_bootstrap_preserves_version_info_from_knowledge_state(
 @pytest.mark.asyncio
 async def test_bootstrap_ignores_non_dict_version_info(
     db_session: AsyncSession,
-    temp_jobs_dir,
+    temp_jobs_dir: Path,
     monkeypatch: pytest.MonkeyPatch,
-):
+) -> None:
     monkeypatch.setattr(
         "openscientist.bootstrap.get_admin_session",
         fake_admin_session(db_session),

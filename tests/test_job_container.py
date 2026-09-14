@@ -5,7 +5,7 @@ import hmac
 import os
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
+from typing import Any, cast
 from unittest.mock import MagicMock, PropertyMock, patch
 
 import pytest
@@ -998,7 +998,7 @@ class TestChatTurnLaunch:
             airgap=SimpleNamespace(enabled=False),
         )
 
-    def _run_chat(self, settings: SimpleNamespace, *, exit_code: int = 0):
+    def _run_chat(self, settings: SimpleNamespace, *, exit_code: int = 0) -> Any:
         mock_client = MagicMock()
         mock_container = MagicMock()
         mock_container.short_id = "abc123"

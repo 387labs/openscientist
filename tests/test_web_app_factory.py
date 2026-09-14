@@ -222,7 +222,7 @@ def test_register_pwa_metadata_adds_shared_head_html(monkeypatch: pytest.MonkeyP
 
 
 def test_configure_host_app_registers_badge_and_thinking_status_head_html_once(
-    monkeypatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """register_badge_head_html() and _inject_thinking_status_styles() must
     each run exactly once at bootstrap, the same as _register_pwa_metadata --

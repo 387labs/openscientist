@@ -1947,8 +1947,8 @@ class TestJobEndpoints:
         test_user_db: User,
         test_api_key_db: tuple[APIKey, str],
         test_job_db: Job,
-        tmp_path,
-    ):
+        tmp_path: Path,
+    ) -> None:
         _, full_key = test_api_key_db
 
         job_dir = tmp_path / "jobs" / str(test_job_db.id)

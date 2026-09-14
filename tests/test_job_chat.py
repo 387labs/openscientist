@@ -555,7 +555,7 @@ async def test_send_chat_message_raises_on_container_failure(
     test_user: User,
     test_job: Job,
     temp_jobs_dir: Path,
-):
+) -> None:
     """A failed container raises and stores no messages."""
     _ = test_user
     job_dir = temp_jobs_dir / str(test_job.id)
@@ -644,7 +644,7 @@ async def test_build_chat_request_codex_folds_guidance(
 
 
 @pytest.mark.asyncio
-async def test_run_chat_turn_async_writes_reply(temp_jobs_dir: Path):
+async def test_run_chat_turn_async_writes_reply(temp_jobs_dir: Path) -> None:
     """The container-side turn reads the request, runs the agent with the
     request's system prompt, and writes the reply."""
     job_dir = temp_jobs_dir / "chat-turn"
@@ -671,7 +671,7 @@ async def test_run_chat_turn_async_writes_reply(temp_jobs_dir: Path):
 
 
 @pytest.mark.asyncio
-async def test_run_chat_turn_async_records_error(temp_jobs_dir: Path):
+async def test_run_chat_turn_async_records_error(temp_jobs_dir: Path) -> None:
     """A failed turn is captured as an error in the response file, not raised."""
     job_dir = temp_jobs_dir / "chat-turn-err"
     job_dir.mkdir()
