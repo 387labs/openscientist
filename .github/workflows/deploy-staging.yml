@@ -35,7 +35,11 @@ jobs:
           # image kept shipping: the agent stayed on a June build that predates
           # the key-replacement proxy, so it took the placeholder key the runner
           # hands it and sent that straight to Azure, failing every job with 401.
-          az acr build -r $ACR -t openscientist-agent:latest -f Dockerfile.agent .
+          # Dockerfile.agent compiles codex from source, which runs well past
+          # ACR's default 1h step timeout (a build without this flag was killed
+          # mid-compile at exactly 1h0m0s). Raised so the deploy fails on real
+          # errors rather than the clock.
+          az acr build -r $ACR --timeout 21600 -t openscientist-agent:latest -f Dockerfile.agent .
           az acr build -r $ACR -t openscientist-executor:latest -f Dockerfile.executor .
           TAG=staging-${{ github.sha }}
           az acr build -r $ACR -t openscientist:$TAG -f Dockerfile .
