@@ -40,7 +40,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # the agent image (Dockerfile.agent, same CODEX_REF). When CODEX_REF changes,
 # rebuild openscientist-agent (on a host with enough RAM); this image and every
 # deploy then just copy the prebuilt binary — no Rust toolchain in the web build.
-COPY --from=acrcbraindev.azurecr.io/openscientist-agent:latest /usr/local/bin/codex /usr/local/bin/codex
+ARG CODEX_IMAGE=acrcbraindev.azurecr.io/openscientist-codex:8f8009fc
+COPY --from=${CODEX_IMAGE} /usr/local/bin/codex /usr/local/bin/codex
 RUN chmod +x /usr/local/bin/codex
 
 # Copy project files — deps already installed in base

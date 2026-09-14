@@ -79,6 +79,11 @@ class JobContainerRunner:
             "JOB_ID": job_id,
             "JOB_DIR": job_mount,
             "DATABASE_URL": settings.database.effective_database_url,
+            # Settings refuses to construct without this outside dev mode, and the
+            # agent builds Settings on startup, so omitting it killed every job at
+            # import with "ADMIN_DATABASE_URL is required". The agent never opens an
+            # admin session, but it must still be able to load its configuration.
+            "ADMIN_DATABASE_URL": settings.database.effective_admin_database_url,
             "OPENSCIENTIST_SECRET_KEY": derive_job_secret(settings.secret_key, job_id),
             # Per-job execution credential the broker verifies, plus the broker URL.
             EXEC_TOKEN_ENV: make_exec_placeholder(settings.secret_key, job_id),
