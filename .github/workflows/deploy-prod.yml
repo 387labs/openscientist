@@ -39,4 +39,10 @@ jobs:
           ACR=${{ secrets.ACR_NAME }}
           FULL=${ACR}.azurecr.io/openscientist:${{ env.TAG }}
           TOK=$(az acr login -n $ACR --expose-token --query accessToken -o tsv)
-          az vm run-command invoke -g rg-openscientist-prod -n vm-openscientist-prod --command-id RunShellScript --scripts "docker login ${ACR}.azurecr.io -u 00000000-0000-0000-0000-000000000000 -p '$TOK' && sed -i 's|image: acrcbraindev.azurecr.io/openscientist:.*|image: $FULL|' /opt/openscientist/docker-compose.yml && cd /opt/openscientist && docker compose pull openscientist && docker compose up -d openscientist"
+          # The image ships migrations but nothing applied them, so a release
+          # carrying a schema change left the database behind and every query
+          # touching a new column failed at runtime. Migrating between the pull
+          # and the restart means the new code never starts against an old
+          # schema, and a failed migration aborts the deploy with the previous
+          # container still serving.
+          az vm run-command invoke -g rg-openscientist-prod -n vm-openscientist-prod --command-id RunShellScript --scripts "docker login ${ACR}.azurecr.io -u 00000000-0000-0000-0000-000000000000 -p '$TOK' && sed -i 's|image: acrcbraindev.azurecr.io/openscientist:.*|image: $FULL|' /opt/openscientist/docker-compose.yml && cd /opt/openscientist && docker compose pull openscientist && docker compose run --rm openscientist alembic upgrade head && docker compose up -d openscientist"
