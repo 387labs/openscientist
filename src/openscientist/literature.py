@@ -9,6 +9,8 @@ from typing import Any
 
 import requests
 
+from openscientist.settings import get_settings
+
 
 def search_pubmed(
     query: str, max_results: int = 10, email: str | None = None
@@ -34,6 +36,11 @@ def search_pubmed(
             ...
         ]
     """
+    if get_settings().airgap.enabled:
+        from openscientist.pubmed_mirror.query import search_local_sync
+
+        return search_local_sync(query, max_results=max_results)
+
     base_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 
     # Step 1: Search for PMIDs
@@ -97,11 +104,17 @@ def _parse_pubmed_xml(xml_text: str, pmids: list[str]) -> list[dict[str, Any]]:
 
                 # Extract title
                 title_elem = article.find(".//ArticleTitle")
-                title = title_elem.text if title_elem is not None else "No title"
+                title = (
+                    ("".join(title_elem.itertext()).strip() or "No title")
+                    if title_elem is not None
+                    else "No title"
+                )
 
                 # Extract abstract
                 abstract_elems = article.findall(".//AbstractText")
-                abstract_parts = [elem.text for elem in abstract_elems if elem.text]
+                abstract_parts = [
+                    t for t in ("".join(e.itertext()).strip() for e in abstract_elems) if t
+                ]
                 abstract = " ".join(abstract_parts) if abstract_parts else "No abstract available"
 
                 # Extract authors

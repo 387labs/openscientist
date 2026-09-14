@@ -5,16 +5,18 @@ Uses CBORG API for model access and cost tracking.
 """
 
 import logging
+import os
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import requests
 
 from openscientist.exceptions import ProviderError
-from openscientist.providers.base import ClaudeCompatible, CostInfo
-from openscientist.settings import get_settings
+from openscientist.providers.base import ClaudeCompatible, CostInfo, LlmUpstream
+from openscientist.settings import ProviderSettings, get_settings
 
 from ._anthropic_common import (
+    anthropic_container_env,
     send_anthropic_message,
     send_anthropic_message_with_tools,
 )
@@ -37,21 +39,26 @@ class CborgProvider(ClaudeCompatible):
     def id(self) -> str:
         return "cborg"
 
-    @property
-    def display_name(self) -> str:
-        return "CBORG"
+    display_name = "CBORG"
+
+    @classmethod
+    def validate_model_format(cls, model: str | None) -> str | None:
+        return cls.model_format_error(
+            model,
+            r"^claude-",
+            "an Anthropic model name on CBORG (expected to start with 'claude-')",
+        )
 
     def validate_required_config(self) -> list[str]:
-        """Check required CBORG configuration."""
+        return self.required_config_errors(get_settings().provider)
+
+    @classmethod
+    def required_config_errors(cls, provider: ProviderSettings) -> list[str]:
         errors = []
-        settings = get_settings()
-
-        if not settings.provider.anthropic_auth_token:
+        if not provider.anthropic_auth_token:
             errors.append("ANTHROPIC_AUTH_TOKEN not set (required for CBORG)")
-
-        if not settings.provider.anthropic_base_url:
+        if not provider.anthropic_base_url:
             errors.append("ANTHROPIC_BASE_URL not set (should be https://api.cborg.lbl.gov)")
-
         return errors
 
     def claude_sdk_env(self) -> dict[str, str]:
@@ -62,6 +69,50 @@ class CborgProvider(ClaudeCompatible):
             env["ANTHROPIC_AUTH_TOKEN"] = settings.provider.anthropic_auth_token
         if settings.provider.anthropic_base_url:
             env["ANTHROPIC_BASE_URL"] = settings.provider.anthropic_base_url
+        return env
+
+    @classmethod
+    def container_env(
+        cls, provider: ProviderSettings, *, gcp_credentials_container_path: str | None = None
+    ) -> dict[str, str]:
+        return anthropic_container_env(provider)
+
+    def llm_upstream(self) -> LlmUpstream | None:
+        s = get_settings().provider
+        if s.anthropic_base_url and s.anthropic_auth_token:
+            base = s.anthropic_base_url.rstrip("/")
+            return LlmUpstream(base, {"authorization": f"Bearer {s.anthropic_auth_token}"})
+        return None
+
+    def proxy_env_overrides(self, *, proxy_base_url: str, placeholder: str) -> dict[str, str]:
+        s = get_settings().provider
+        if s.anthropic_base_url and s.anthropic_auth_token:
+            return {"ANTHROPIC_BASE_URL": proxy_base_url, "ANTHROPIC_AUTH_TOKEN": placeholder}
+        return {}
+
+    def harness_env(self, *, proxy: str | None) -> dict[str, str]:
+        """Route omp at the CBORG gateway.
+
+        omp never reads ``ANTHROPIC_AUTH_TOKEN``, the name Claude Code uses for a
+        gateway bearer and the one both our container env and proxy override
+        publish, so untranslated it reaches the gateway with no credential at all.
+
+        Mapped to ``ANTHROPIC_API_KEY`` rather than ``ANTHROPIC_OAUTH_TOKEN``
+        because omp's OAuth path also attaches Anthropic's OAuth beta header,
+        which a gateway has no reason to accept. Proxied, the proxy takes either
+        header and substitutes the real bearer upstream, so this only decides the
+        unproxied header form.
+        """
+        s = get_settings().provider
+        base = proxy or s.anthropic_base_url
+        env = {}
+        if base:
+            env["ANTHROPIC_BASE_URL"] = base
+        # Proxied, the runner has already swapped in the job placeholder, so the
+        # container env holds it and settings still hold the real token.
+        token = os.environ.get("ANTHROPIC_AUTH_TOKEN") if proxy else s.anthropic_auth_token
+        if token:
+            env["ANTHROPIC_API_KEY"] = token
         return env
 
     def claude_model_name(self) -> str:

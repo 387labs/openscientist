@@ -9,8 +9,15 @@ import os
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from openscientist.providers.base import ClaudeCompatible, CostInfo
-from openscientist.settings import get_settings
+from openscientist.providers.base import (
+    AirgapEgress,
+    AirgapPosture,
+    ClaudeCompatible,
+    CostInfo,
+    LlmUpstream,
+    env_from_pairs,
+)
+from openscientist.settings import ProviderSettings, get_settings
 
 from ._anthropic_common import (
     send_anthropic_message,
@@ -33,55 +40,128 @@ class BedrockProvider(ClaudeCompatible):
     def id(self) -> str:
         return "bedrock"
 
-    @property
-    def display_name(self) -> str:
-        return "AWS Bedrock"
+    display_name = "AWS Bedrock"
+
+    @classmethod
+    def validate_model_format(cls, model: str | None) -> str | None:
+        return cls.model_format_error(
+            model,
+            r"^([a-z]+\.anthropic\.claude-.+-v\d+:\d+|arn:aws:bedrock:)",
+            "a Bedrock model id ('<region>.anthropic.claude-<name>-v<n>:<n>' or an "
+            "inference-profile ARN)",
+        )
 
     def validate_required_config(self) -> list[str]:
-        """Check required Bedrock configuration."""
+        return self.required_config_errors(get_settings().provider)
+
+    @classmethod
+    def required_config_errors(cls, provider: ProviderSettings) -> list[str]:
         errors = []
-        settings = get_settings()
-
-        if not settings.provider.aws_region:
+        if not provider.aws_region:
             errors.append("AWS_REGION not set (e.g., us-east-1)")
-
-        # Check for at least one auth method
-        has_access_key = (
-            settings.provider.aws_access_key_id and settings.provider.aws_secret_access_key
-        )
-        has_profile = settings.provider.aws_profile
-        has_bearer_token = settings.provider.aws_bearer_token_bedrock
-
-        if not (has_access_key or has_profile or has_bearer_token):
+        has_access_key = provider.aws_access_key_id and provider.aws_secret_access_key
+        if not (has_access_key or provider.aws_profile or provider.aws_bearer_token_bedrock):
             errors.append(
                 "AWS credentials not configured. Set one of: "
                 "AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY, AWS_PROFILE, or AWS_BEARER_TOKEN_BEDROCK"
             )
-
         return errors
 
-    def claude_sdk_env(self) -> dict[str, str]:
-        """Bedrock routing/auth env vars the claude-agent-sdk CLI must see.
-
-        Mirrors `ProviderSettings._apply_bedrock_env_vars` so the explicit
-        per-provider env stays consistent with the container-env builder.
-        """
-        p = get_settings().provider
-        env: dict[str, str] = {"CLAUDE_CODE_USE_BEDROCK": "1"}
-        for key, value in (
-            ("AWS_REGION", p.aws_region),
-            ("AWS_ACCESS_KEY_ID", p.aws_access_key_id),
-            ("AWS_SECRET_ACCESS_KEY", p.aws_secret_access_key),
-            ("AWS_PROFILE", p.aws_profile),
-            ("AWS_BEARER_TOKEN_BEDROCK", p.aws_bearer_token_bedrock),
-        ):
-            if value:
-                env[key] = value
+    @classmethod
+    def container_env(
+        cls, provider: ProviderSettings, *, gcp_credentials_container_path: str | None = None
+    ) -> dict[str, str]:
+        env = {"CLAUDE_CODE_USE_BEDROCK": "1"}
+        env.update(
+            env_from_pairs(
+                [
+                    ("AWS_REGION", provider.aws_region),
+                    ("AWS_ACCESS_KEY_ID", provider.aws_access_key_id),
+                    ("AWS_SECRET_ACCESS_KEY", provider.aws_secret_access_key),
+                    ("AWS_PROFILE", provider.aws_profile),
+                    ("AWS_BEARER_TOKEN_BEDROCK", provider.aws_bearer_token_bedrock),
+                ]
+            )
+        )
         return env
+
+    def claude_sdk_env(self) -> dict[str, str]:
+        """Bedrock routing/auth env for the claude-agent-sdk CLI (its container env)."""
+        return type(self).container_env(get_settings().provider)
 
     def claude_model_name(self) -> str:
         """Model name for ClaudeAgentOptions.model."""
         return get_settings().provider.model or "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
+
+    def llm_upstream(self) -> LlmUpstream | None:
+        p = get_settings().provider
+        if p.aws_bearer_token_bedrock and p.aws_region:
+            base = f"https://bedrock-runtime.{p.aws_region}.amazonaws.com"
+            return LlmUpstream(base, {"authorization": f"Bearer {p.aws_bearer_token_bedrock}"})
+        return None
+
+    def proxy_env_overrides(self, *, proxy_base_url: str, placeholder: str) -> dict[str, str]:
+        p = get_settings().provider
+        if p.aws_bearer_token_bedrock and p.aws_region:
+            return {
+                "CLAUDE_CODE_USE_BEDROCK": "1",
+                "ANTHROPIC_BEDROCK_BASE_URL": proxy_base_url,
+                "AWS_BEARER_TOKEN_BEDROCK": placeholder,
+            }
+        return {}
+
+    def proxied_container_env(
+        self,
+        *,
+        proxy_base_url: str,
+        placeholder: str,
+        gcp_credentials_container_path: str | None = None,
+    ) -> dict[str, str]:
+        # Strip any SigV4 credential: bearer mode routes through the proxy.
+        env = super().proxied_container_env(
+            proxy_base_url=proxy_base_url,
+            placeholder=placeholder,
+            gcp_credentials_container_path=gcp_credentials_container_path,
+        )
+        if env.get("ANTHROPIC_BEDROCK_BASE_URL") == proxy_base_url:
+            for key in (
+                "AWS_ACCESS_KEY_ID",
+                "AWS_SECRET_ACCESS_KEY",
+                "AWS_PROFILE",
+                "AWS_SESSION_TOKEN",
+            ):
+                env.pop(key, None)
+        return env
+
+    def harness_env(self, *, proxy: str | None) -> dict[str, str]:
+        """Route omp at Bedrock.
+
+        omp drives Bedrock through the AWS SDK using the standard ``AWS_*``
+        names, which match ours, so SigV4 needs no translation and no proxy: it
+        signs its own requests and ``airgap_egress`` already reports DIRECT.
+
+        Bearer mode is the gap. Our proxy override sets
+        ``ANTHROPIC_BEDROCK_BASE_URL``, a Claude Code name omp does not read, and
+        omp exposes no Bedrock base-URL override, so a proxied bearer setup
+        cannot be expressed. Refuse rather than let omp reach AWS directly with
+        the real token.
+        """
+        if not proxy:
+            return {}
+        raise ValueError(
+            "Bedrock bearer-token auth cannot be routed through the LLM proxy under "
+            "the omp harness: omp has no Bedrock base-URL override, so omp would "
+            "reach AWS directly with the real token. Use SigV4 credentials "
+            "(AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY or AWS_PROFILE), which omp "
+            "signs itself, or run this provider under the claude_code harness."
+        )
+
+    def airgap_egress(self) -> AirgapPosture:
+        p = get_settings().provider
+        if p.aws_bearer_token_bedrock:
+            return AirgapPosture(AirgapEgress.PROXY)
+        host = f"bedrock-runtime.{p.aws_region}.amazonaws.com"
+        return AirgapPosture(AirgapEgress.DIRECT, direct_endpoints=((host, 443),))
 
     def _validate_optional_config(self) -> list[str]:
         """Check optional Bedrock configuration."""

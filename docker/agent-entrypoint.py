@@ -61,7 +61,11 @@ async def main() -> int:
             run_discovery_async,
         )
 
-        if run_mode == "report_only":
+        if run_mode == "chat":
+            from openscientist.job_chat import run_chat_turn_async
+
+            result = await run_chat_turn_async(job_dir)
+        elif run_mode == "report_only":
             result = await regenerate_report_async(job_dir)
         else:
             result = await run_discovery_async(job_dir)

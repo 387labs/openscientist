@@ -120,6 +120,10 @@ services:
       # it into each per-job CODEX_HOME for the agent. Unused when OPENAI_API_KEY is set.
       CODEX_AUTH_HOST_PATH: ${CODEX_AUTH_FILE:+/app/codex-auth.json}
 
+      # omp harness auth: host omp vault dir (OMP_AUTH_DIR), mounted read-only
+      # and copied into each job. Unused unless HARNESS=omp.
+      OMP_AUTH_HOST_PATH: ${OMP_AUTH_DIR:+/app/omp-auth}
+
       # Container isolation defaults
       OPENSCIENTIST_USE_CONTAINER_ISOLATION: ${OPENSCIENTIST_USE_CONTAINER_ISOLATION:-true}
       OPENSCIENTIST_EXECUTOR_IMAGE: ${OPENSCIENTIST_EXECUTOR_IMAGE:-openscientist-executor:latest}
@@ -144,6 +148,9 @@ services:
 
       # Mount codex CLI auth if using OpenAI/codex ChatGPT login (set CODEX_AUTH_FILE in .env)
       - ${CODEX_AUTH_FILE:-/dev/null}:/app/codex-auth.json:ro
+
+      # Mount the omp credential vault dir if using the omp harness (set OMP_AUTH_DIR in .env)
+      - ${OMP_AUTH_DIR:-/dev/null}:/app/omp-auth:ro
 
       # Mount Linux Phenix installation if available (set PHENIX_HOST_PATH in .env)
       - ${PHENIX_HOST_PATH:-/dev/null}:/opt/phenix:ro

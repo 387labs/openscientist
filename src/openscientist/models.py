@@ -11,15 +11,17 @@ trained maximum.
 
 Resolving the window is a provider concern: ``Provider.model_profile()`` owns it,
 because the provider knows its model id and (for a self-hosted deployment) how to
-probe the live endpoint. This module holds the value object plus the shared
-"hosted model" resolution (``default_model_profile``: explicit override, known-model
-table, conservative default) that providers without a live endpoint reuse.
+probe the live endpoint. This module holds the value object plus both shared
+resolutions: ``default_model_profile`` (explicit override, known-model table,
+conservative default) for hosted APIs, and ``probed_model_profile`` (explicit
+override, live probe, conservative default) for self-hosted servers.
 """
 
 from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -103,6 +105,42 @@ def default_model_profile(model_id: str | None, override: int | None) -> ModelPr
     logger.warning(
         "No context window size known for model %s; defaulting to %d tokens. "
         "Add this model to _KNOWN_CONTEXT_TOKENS in models.py.",
+        mid,
+        _DEFAULT_CONTEXT_TOKENS,
+    )
+    return ModelProfile(id=mid, context_window_tokens=_DEFAULT_CONTEXT_TOKENS)
+
+
+def probed_model_profile(
+    *,
+    model_id: str | None,
+    override: int | None,
+    probe: Callable[[str], int | None],
+    server_name: str,
+    provider_logger: logging.Logger,
+) -> ModelProfile:
+    """Resolve a self-hosted model's profile by probing the live deployment.
+
+    Resolution order: explicit operator override, live probe, conservative
+    default. The known-model table is skipped on purpose, because a trained
+    maximum would over-budget a server capped below it. ``probe`` receives the
+    resolved model id, and ``provider_logger`` belongs to the calling provider
+    so the warning names whoever failed to answer.
+    """
+    mid = model_id or "unknown"
+    if override:
+        return ModelProfile(id=mid, context_window_tokens=int(override))
+    probed = probe(mid)
+    if probed:
+        return ModelProfile(id=mid, context_window_tokens=probed)
+    # A failed probe is NOT silent: it collapses the prompt budget to the
+    # conservative default, which over-trims the report's literature. Surface
+    # it so an operator can pin the window instead of shipping a thin report.
+    provider_logger.warning(
+        "Could not probe the %s context window for %s. Falling back to a "
+        "%d-token budget, so the report prompt will be trimmed more than "
+        "necessary. Set OPENSCIENTIST_MODEL_CONTEXT_TOKENS to pin the window.",
+        server_name,
         mid,
         _DEFAULT_CONTEXT_TOKENS,
     )

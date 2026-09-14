@@ -10,8 +10,14 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from openscientist.exceptions import ProviderError
-from openscientist.providers.base import ClaudeCompatible, CostInfo
-from openscientist.settings import get_settings
+from openscientist.providers.base import (
+    AirgapEgress,
+    AirgapPosture,
+    ClaudeCompatible,
+    CostInfo,
+    env_from_pairs,
+)
+from openscientist.settings import ProviderSettings, get_settings
 
 from ._anthropic_common import (
     send_anthropic_message,
@@ -29,58 +35,93 @@ class VertexProvider(ClaudeCompatible):
     def id(self) -> str:
         return "vertex"
 
-    @property
-    def display_name(self) -> str:
-        return "Vertex AI"
+    display_name = "Vertex AI"
+
+    @classmethod
+    def validate_model_format(cls, model: str | None) -> str | None:
+        return cls.model_format_error(
+            model, r"^claude-.+@\d{8}$", "a Vertex Anthropic model id ('claude-<name>@<YYYYMMDD>')"
+        )
 
     def validate_required_config(self) -> list[str]:
-        """Check required Vertex AI configuration."""
+        return self.required_config_errors(get_settings().provider)
+
+    @classmethod
+    def required_config_errors(cls, provider: ProviderSettings) -> list[str]:
         errors = []
-        settings = get_settings()
-
-        if not settings.provider.anthropic_vertex_project_id:
+        if not provider.anthropic_vertex_project_id:
             errors.append("ANTHROPIC_VERTEX_PROJECT_ID not set (GCP project ID)")
-
-        creds_env = settings.provider.google_application_credentials
+        creds_env = provider.google_application_credentials
         if not creds_env:
             errors.append("GOOGLE_APPLICATION_CREDENTIALS not set (path to service account JSON)")
-        else:
-            # Check if file exists
-            creds_path = os.path.expanduser(creds_env)
-            if not os.path.exists(creds_path):
-                errors.append(f"GOOGLE_APPLICATION_CREDENTIALS file not found: {creds_path}")
-
-        if not settings.provider.gcp_billing_account_id:
+        elif not os.path.exists(os.path.expanduser(creds_env)):
+            errors.append(
+                f"GOOGLE_APPLICATION_CREDENTIALS file not found: {os.path.expanduser(creds_env)}"
+            )
+        if not provider.gcp_billing_account_id:
             errors.append("GCP_BILLING_ACCOUNT_ID not set (needed for cost tracking)")
-
-        if not settings.provider.cloud_ml_region:
+        if not provider.cloud_ml_region:
             errors.append("CLOUD_ML_REGION not set (e.g., us-east5)")
-
         return errors
 
-    def claude_sdk_env(self) -> dict[str, str]:
-        """Vertex routing/auth env vars the claude-agent-sdk CLI must see.
+    @classmethod
+    def container_env(
+        cls, provider: ProviderSettings, *, gcp_credentials_container_path: str | None = None
+    ) -> dict[str, str]:
+        env = {"CLAUDE_CODE_USE_VERTEX": "1"}
+        env.update(
+            env_from_pairs(
+                [
+                    ("ANTHROPIC_VERTEX_PROJECT_ID", provider.anthropic_vertex_project_id),
+                    ("GCP_BILLING_ACCOUNT_ID", provider.gcp_billing_account_id),
+                    ("CLOUD_ML_REGION", provider.cloud_ml_region),
+                    ("VERTEX_REGION_CLAUDE_4_5_SONNET", provider.vertex_region_claude_4_5_sonnet),
+                    ("VERTEX_REGION_CLAUDE_4_5_HAIKU", provider.vertex_region_claude_4_5_haiku),
+                ]
+            )
+        )
+        if gcp_credentials_container_path:
+            env["GOOGLE_APPLICATION_CREDENTIALS"] = gcp_credentials_container_path
+        return env
 
-        Mirrors `ProviderSettings._apply_vertex_env_vars` so the explicit
-        per-provider env stays consistent with the container-env builder.
+    def claude_sdk_env(self) -> dict[str, str]:
+        """Vertex routing/auth env for the claude-agent-sdk CLI (its container env)."""
+        provider = get_settings().provider
+        return type(self).container_env(
+            provider, gcp_credentials_container_path=provider.google_application_credentials
+        )
+
+    def harness_env(self, *, proxy: str | None) -> dict[str, str]:
+        """Route omp at Vertex.
+
+        Vertex signs its own requests with application-default credentials, so it
+        is never proxied and ``airgap_egress`` reports DIRECT. omp reads the
+        standard Google names rather than the Claude Code ones we publish, so the
+        project and region have to be translated or omp falls back to the public
+        Anthropic endpoint.
         """
         p = get_settings().provider
-        env: dict[str, str] = {"CLAUDE_CODE_USE_VERTEX": "1"}
-        for key, value in (
-            ("ANTHROPIC_VERTEX_PROJECT_ID", p.anthropic_vertex_project_id),
-            ("GCP_BILLING_ACCOUNT_ID", p.gcp_billing_account_id),
-            ("CLOUD_ML_REGION", p.cloud_ml_region),
-            ("VERTEX_REGION_CLAUDE_4_5_SONNET", p.vertex_region_claude_4_5_sonnet),
-            ("VERTEX_REGION_CLAUDE_4_5_HAIKU", p.vertex_region_claude_4_5_haiku),
-            ("GOOGLE_APPLICATION_CREDENTIALS", p.google_application_credentials),
-        ):
-            if value:
-                env[key] = value
-        return env
+        return env_from_pairs(
+            [
+                ("GOOGLE_CLOUD_PROJECT", p.anthropic_vertex_project_id),
+                ("GOOGLE_CLOUD_LOCATION", p.cloud_ml_region),
+                ("GOOGLE_APPLICATION_CREDENTIALS", p.google_application_credentials),
+            ]
+        )
 
     def claude_model_name(self) -> str:
         """Model name for ClaudeAgentOptions.model."""
         return get_settings().provider.model or "claude-sonnet-4-5@20250929"
+
+    def airgap_egress(self) -> AirgapPosture:
+        region = get_settings().provider.cloud_ml_region
+        return AirgapPosture(
+            AirgapEgress.DIRECT,
+            direct_endpoints=(
+                (f"{region}-aiplatform.googleapis.com", 443),
+                ("oauth2.googleapis.com", 443),
+            ),
+        )
 
     def _validate_optional_config(self) -> list[str]:
         """Check optional Vertex AI configuration."""
@@ -223,7 +264,6 @@ class VertexProvider(ClaudeCompatible):
 
         settings = get_settings()
 
-        # These are validated as required in _validate_required_config
         project_id = settings.provider.anthropic_vertex_project_id
         region = settings.provider.cloud_ml_region
         if not project_id or not region:
@@ -261,7 +301,6 @@ class VertexProvider(ClaudeCompatible):
 
         settings = get_settings()
 
-        # These are validated as required in _validate_required_config
         project_id = settings.provider.anthropic_vertex_project_id
         region = settings.provider.cloud_ml_region
         if not project_id or not region:

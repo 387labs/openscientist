@@ -184,11 +184,38 @@ class TestProviderSettings:
         assert "Unknown provider" in caplog.text
 
     def test_foundry_accepted_as_valid_provider(self, caplog):
-        """Foundry is a recognized provider with no warnings."""
+        """Foundry with a resource and API key is recognized and warns nothing."""
         with caplog.at_level(logging.WARNING, logger="openscientist.settings"):
-            settings = ProviderSettings(OPENSCIENTIST_PROVIDER="foundry")
+            settings = ProviderSettings(
+                OPENSCIENTIST_PROVIDER="foundry",
+                ANTHROPIC_FOUNDRY_RESOURCE="my-resource",
+                ANTHROPIC_FOUNDRY_API_KEY="key",
+            )
         assert settings.provider_id == "foundry"
         assert caplog.text == ""
+
+
+class TestHarnessSelection:
+    """Tests for the OPENSCIENTIST_HARNESS selector and its validation."""
+
+    def test_defaults_to_auto(self):
+        settings = ProviderSettings(OPENSCIENTIST_PROVIDER="anthropic")
+        assert settings.harness == "auto"
+
+    def test_accepts_and_normalizes_known_values(self):
+        for raw, expected in [("omp", "omp"), ("CODEX", "codex"), (" Claude_Code ", "claude_code")]:
+            settings = ProviderSettings(
+                OPENSCIENTIST_PROVIDER="anthropic", OPENSCIENTIST_HARNESS=raw
+            )
+            assert settings.harness == expected
+
+    def test_rejects_unknown_harness(self):
+        with pytest.raises(ValidationError, match="OPENSCIENTIST_HARNESS"):
+            ProviderSettings(OPENSCIENTIST_PROVIDER="anthropic", OPENSCIENTIST_HARNESS="bogus")
+
+    def test_container_env_forwards_harness(self):
+        settings = ProviderSettings(OPENSCIENTIST_PROVIDER="anthropic", OPENSCIENTIST_HARNESS="omp")
+        assert settings.get_container_env_vars()["OPENSCIENTIST_HARNESS"] == "omp"
 
 
 class TestProviderIdEnvVar:
@@ -424,25 +451,79 @@ class TestProviderContainerEnvVars:
         settings = ProviderSettings(
             OPENSCIENTIST_PROVIDER="ollama",
             OLLAMA_BASE_URL="http://host.docker.internal:11434/v1",
-            OLLAMA_MODEL="gpt-oss:20b",
         )
 
         env = settings.get_container_env_vars()
 
         assert env["OPENSCIENTIST_PROVIDER"] == "ollama"
         assert env["OLLAMA_BASE_URL"] == "http://host.docker.internal:11434/v1"
-        assert env["OLLAMA_MODEL"] == "gpt-oss:20b"
 
     def test_ollama_vars_default_when_unset(self, monkeypatch, tmp_path):
         # The dev .env reaches tests via both os.environ (database.engine calls
         # load_dotenv() at import) and the settings env_file. Neutralize both.
         monkeypatch.chdir(tmp_path)
         monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
-        monkeypatch.delenv("OLLAMA_MODEL", raising=False)
         settings = ProviderSettings(OPENSCIENTIST_PROVIDER="ollama")
         env = settings.get_container_env_vars()
         assert env["OLLAMA_BASE_URL"] == "http://localhost:11434/v1"
-        assert env["OLLAMA_MODEL"] == "gpt-oss:20b"
+
+    def test_vllm_vars_passed_for_codex_provider(self):
+        settings = ProviderSettings(
+            OPENSCIENTIST_PROVIDER="vllm",
+            VLLM_BASE_URL="http://host.docker.internal:8000/v1",
+            OPENSCIENTIST_MODEL="Qwen/Qwen3-32B",
+            VLLM_API_KEY="vk-real",
+        )
+
+        env = settings.get_container_env_vars()
+
+        assert env["OPENSCIENTIST_PROVIDER"] == "vllm"
+        assert env["VLLM_BASE_URL"] == "http://host.docker.internal:8000/v1"
+        assert env["OPENSCIENTIST_MODEL"] == "Qwen/Qwen3-32B"
+        assert env["VLLM_API_KEY"] == "vk-real"
+
+    def test_vllm_optional_vars_default_or_are_omitted(self, monkeypatch, tmp_path):
+        # The dev .env reaches tests via both os.environ (database.engine calls
+        # load_dotenv() at import) and the settings env_file. Neutralize both.
+        monkeypatch.chdir(tmp_path)
+        for var in ("VLLM_BASE_URL", "OPENSCIENTIST_MODEL", "VLLM_API_KEY"):
+            monkeypatch.delenv(var, raising=False)
+        settings = ProviderSettings(OPENSCIENTIST_PROVIDER="vllm")
+        env = settings.get_container_env_vars()
+        assert env["VLLM_BASE_URL"] == "http://localhost:8000/v1"
+        # There is no default served model and no default key, so neither is
+        # invented for the container.
+        assert "OPENSCIENTIST_MODEL" not in env
+        assert "VLLM_API_KEY" not in env
+
+    def test_llamacpp_vars_passed_for_provider(self):
+        settings = ProviderSettings(
+            OPENSCIENTIST_PROVIDER="llamacpp",
+            LLAMACPP_BASE_URL="http://host.docker.internal:8080/v1",
+            OPENSCIENTIST_MODEL="meta-llama/Llama-3.1-8B-Instruct",
+            LLAMACPP_API_KEY="lk-real",
+        )
+
+        env = settings.get_container_env_vars()
+
+        assert env["OPENSCIENTIST_PROVIDER"] == "llamacpp"
+        assert env["LLAMACPP_BASE_URL"] == "http://host.docker.internal:8080/v1"
+        assert env["OPENSCIENTIST_MODEL"] == "meta-llama/Llama-3.1-8B-Instruct"
+        assert env["LLAMACPP_API_KEY"] == "lk-real"
+
+    def test_llamacpp_optional_vars_default_or_are_omitted(self, monkeypatch, tmp_path):
+        # The dev .env reaches tests via both os.environ (database.engine calls
+        # load_dotenv() at import) and the settings env_file. Neutralize both.
+        monkeypatch.chdir(tmp_path)
+        for var in ("LLAMACPP_BASE_URL", "OPENSCIENTIST_MODEL", "LLAMACPP_API_KEY"):
+            monkeypatch.delenv(var, raising=False)
+        settings = ProviderSettings(OPENSCIENTIST_PROVIDER="llamacpp")
+        env = settings.get_container_env_vars()
+        assert env["LLAMACPP_BASE_URL"] == "http://localhost:8080/v1"
+        # There is no default served model and no default key, so neither is
+        # invented for the container.
+        assert "OPENSCIENTIST_MODEL" not in env
+        assert "LLAMACPP_API_KEY" not in env
 
     def test_optional_model_and_token_env_vars_are_included(self):
         settings = ProviderSettings(
@@ -465,7 +546,8 @@ class TestProviderContainerEnvVars:
         assert env["ANTHROPIC_BASE_URL"] == "https://api.example.com"
         assert env["OPENSCIENTIST_MODEL"] == "claude-sonnet-test"
         assert env["ANTHROPIC_SMALL_FAST_MODEL"] == "model-b"
-        assert env["GITHUB_TOKEN"] == "ghp_example"
+        # GITHUB_TOKEN is web-side only (skill sync), never handed to the container.
+        assert "GITHUB_TOKEN" not in env
 
     def test_foundry_resource_still_exports_api_key(self):
         settings = ProviderSettings(

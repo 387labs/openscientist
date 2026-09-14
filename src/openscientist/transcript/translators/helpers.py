@@ -42,7 +42,7 @@ def full_block_overlay(block: dict[str, object], overlay: dict[str, Any]) -> dic
 
 
 def unknown(
-    source: Literal["claude", "codex"],
+    source: Literal["claude", "codex", "omp"],
     raw: dict[str, Any],
     reason: str,
 ) -> UnknownEntry:
@@ -61,7 +61,7 @@ def unknown(
 
 
 def unknown_block(
-    source: Literal["claude", "codex"],
+    source: Literal["claude", "codex", "omp"],
     overlay: dict[str, Any],
     block: BaseModel,
     reason: str,

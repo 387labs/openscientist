@@ -6,6 +6,8 @@ analysis process. Uses ClaudeCodeAgent for responses, giving the agent
 access to tools (execute_code, search_pubmed, etc.) for follow-up analysis.
 """
 
+import asyncio
+import json
 import logging
 from pathlib import Path
 from typing import Any
@@ -19,6 +21,11 @@ from openscientist.database.session import AsyncSessionLocal
 from openscientist.knowledge_state import KnowledgeState
 
 logger = logging.getLogger(__name__)
+
+# The web side and the chat-turn container exchange one turn through these files
+# in the mounted job_dir, so the container needs no database access of its own.
+_CHAT_REQUEST_FILE = ".chat_request.json"
+_CHAT_RESPONSE_FILE = ".chat_response.json"
 
 
 async def _load_research_question_from_db(job_id: str) -> str | None:
@@ -214,9 +221,8 @@ async def send_chat_message(
         Exception: If executor call fails
     """
     # Use executor (context is read on-demand by the agent from job_dir files)
-    assistant_message = await _send_message_via_executor(session, job_id, message, job_dir)
+    assistant_message = await _send_message_via_container(session, job_id, message, job_dir)
 
-    # Store both messages in database
     user_msg = JobChatMessage(
         job_id=job_id,
         role="user",
@@ -236,9 +242,8 @@ async def send_chat_message(
     return assistant_message
 
 
-# Prior assistant turns can be full report dumps. Replaying them verbatim
-# few-shots the model into dumping again, so cap each history message. Recent
-# intent matters more than verbatim length, and the agent can re-read job files.
+# Prior assistant turns can be full report dumps, and replaying them verbatim
+# few-shots the model into dumping again, so each history message is capped.
 _HISTORY_MAX_CHARS = 800
 
 
@@ -251,30 +256,19 @@ def _truncate_history(content: str) -> str:
     return content[:_HISTORY_MAX_CHARS].rstrip() + " [...truncated]"
 
 
-async def _send_message_via_executor(
+async def _build_chat_request(
     session: AsyncSession,
     job_id: UUID,
     message: str,
-    job_dir: Path,
-) -> str:
-    """
-    Send a chat message through the configured agent backend.
-
-    Creates a short-lived executor via the agent factory (ClaudeCodeAgent for
-    Claude-compatible providers, CodexAgent for codex-compatible ones such as
-    Ollama) with the chat system prompt and full tool access, allowing the
-    agent to re-analyze data or search literature when answering follow-ups.
-    """
-    from openscientist.agent.base import AgentConfig
-    from openscientist.agent.factory import agent_class_for_provider, build_agent
+) -> dict[str, str | None]:
+    """Build one chat turn's request on the web side, where the DB and RLS
+    context are available. The prompt bundles the job context and recent history
+    so the container needs no database access to run the turn."""
+    from openscientist.agent.factory import agent_class_for_provider
     from openscientist.providers import get_provider
 
-    # Get chat history for continuity
     history = await get_chat_history(session, job_id, limit=10)
 
-    # System prompt is kept small (it's passed as a CLI arg to the claude
-    # subprocess, so large payloads hit the OS ARG_MAX limit).  The agent
-    # can read job data files on demand via Claude Code's built-in Read tool.
     system_prompt = """You are a research assistant helping a scientist discuss the results of their OpenScientist literature review and hypothesis generation job.
 
 Your working directory is the job folder. Use available tools to inspect artifacts
@@ -286,14 +280,13 @@ Your role is to:
 3. Clarify scientific concepts mentioned in the reviewed papers
 4. Help interpret the synthesized results in the context of the research question
 
-Important: You are discussing published research and scientific literature. You are not providing personal advice — you are helping analyze what the scientific literature says.
+Important: You are discussing published research and scientific literature. You are not providing personal advice, you are helping analyze what the scientific literature says.
 
 Be concise, accurate, and cite specific papers or findings when relevant. Focus on what the research literature indicates."""
 
-    # Prompt structure matters more than wording: findings are framed as
-    # background reference, long prior turns are truncated so an old report dump
-    # does not few-shot a repeat, and the live user message comes LAST.
-    prompt_parts = []
+    # Findings are framed as background, long prior turns are truncated to avoid
+    # few-shotting a report dump, and the live user message comes last.
+    prompt_parts: list[str] = []
 
     job_context = await load_job_context(str(job_id))
     if job_context.strip():
@@ -321,34 +314,86 @@ Be concise, accurate, and cite specific papers or findings when relevant. Focus 
         "summary."
     )
     prompt_parts.append(f"User: {message}")
-
     prompt = "\n".join(prompt_parts)
 
-    logger.info(
-        "Chat executor call: %d history messages, system prompt %d chars",
-        len(history),
-        len(system_prompt),
-    )
-
-    # Backend-specific chat prep flows through the AbstractAgent contract, not
-    # isinstance: the agent class (from the provider) supplies the system prompt
-    # and model override, then the executor applies its own auth and context
-    # setup (no-ops on codex).
     provider = get_provider()
     agent_cls = agent_class_for_provider(provider)
+    return {
+        "system_prompt": agent_cls.chat_system_prompt(system_prompt),
+        "model_override": agent_cls.chat_model_override(),
+        "prompt": prompt,
+    }
+
+
+async def _send_message_via_container(
+    session: AsyncSession,
+    job_id: UUID,
+    message: str,
+    job_dir: Path,
+) -> str:
+    """Run one chat turn in a hardened, ephemeral container.
+
+    The web side builds the request and (in send_chat_message) persists the chat
+    rows, since it holds the RLS context. The container only reads a request file
+    and writes a reply file in the mounted job_dir, so it touches no database and
+    holds no master key, provider credential, or Docker socket."""
+    from openscientist.job_container.runner import JobContainerRunner
+
+    request = await _build_chat_request(session, job_id, message)
+    request_path = job_dir / _CHAT_REQUEST_FILE
+    response_path = job_dir / _CHAT_RESPONSE_FILE
+    response_path.unlink(missing_ok=True)
+    request_path.write_text(json.dumps(request))
+
+    logger.info("Running chat turn for job %s in a hardened container", job_id)
+    try:
+        # run_chat_turn blocks on the container, so run it off the event loop.
+        await asyncio.to_thread(JobContainerRunner().run_chat_turn, str(job_id), job_dir)
+        if not response_path.exists():
+            raise RuntimeError("Chat container produced no response")
+        response = json.loads(response_path.read_text())
+        error = response.get("error")
+        if error:
+            raise RuntimeError(error)
+        return str(response["output"])
+    finally:
+        request_path.unlink(missing_ok=True)
+        response_path.unlink(missing_ok=True)
+
+
+async def run_chat_turn_async(job_dir: Path) -> dict[str, str]:
+    """Container entry point for one chat turn.
+
+    Reads the request the web side wrote into job_dir, runs one agent turn with
+    the full toolset (the container holds no secrets to protect), and writes the
+    reply to the response file. Returns a status dict for the entrypoint."""
+    from openscientist.agent.base import AgentConfig
+    from openscientist.agent.factory import build_agent
+    from openscientist.providers import get_provider
+
+    job_dir = Path(job_dir)
+    request = json.loads((job_dir / _CHAT_REQUEST_FILE).read_text())
     config = AgentConfig(
         job_dir=job_dir,
-        system_prompt=agent_cls.chat_system_prompt(system_prompt),
-        model_override=agent_cls.chat_model_override(),
+        system_prompt=request["system_prompt"],
+        model_override=request.get("model_override"),
     )
-    executor = build_agent(config, provider)
+    executor = build_agent(config, get_provider())
     executor.apply_runtime_environment()
     executor.write_chat_context()
 
+    response: dict[str, str] = {}
     try:
-        result = await executor.run_iteration(prompt, reset_session=True)
-        if not result.success:
-            raise RuntimeError(result.error or "Chat executor returned no output")
-        return result.output
+        result = await executor.run_iteration(request["prompt"], reset_session=True)
+        if result.success:
+            response = {"output": result.output}
+        else:
+            response = {"error": result.error or "Chat executor returned no output"}
+    except Exception as e:
+        logger.error("Chat turn failed: %s", e, exc_info=True)
+        response = {"error": str(e)}
     finally:
         await executor.shutdown()
+
+    (job_dir / _CHAT_RESPONSE_FILE).write_text(json.dumps(response))
+    return {"status": "completed" if "output" in response else "failed"}

@@ -11,12 +11,16 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # Current Alembic head (see database/migrations/README.md revision chain).
-EXPECTED_HEAD_REVISION = "rename_title_to_rq"
+# Chain: init_full_schema -> add_review_tokens -> rename_title_to_rq
+#        -> add_pubmed_mirror -> add_token_buckets -> add_version_info
+EXPECTED_HEAD_REVISION = "add_version_info"
 
 # Representative tables from across the chain:
 # - init_full_schema: users, jobs, skills
 # - add_review_tokens: review_tokens
-KEY_TABLES = ("users", "jobs", "skills", "review_tokens")
+# - add_pubmed_mirror: pubmed_articles
+# (add_token_buckets and add_version_info add columns, not tables)
+KEY_TABLES = ("users", "jobs", "skills", "review_tokens", "pubmed_articles")
 
 
 @pytest.mark.asyncio

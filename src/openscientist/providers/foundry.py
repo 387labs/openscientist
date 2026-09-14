@@ -10,8 +10,8 @@ import os
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from openscientist.providers.base import ClaudeCompatible, CostInfo
-from openscientist.settings import get_settings
+from openscientist.providers.base import ClaudeCompatible, CostInfo, LlmUpstream
+from openscientist.settings import ProviderSettings, get_settings
 
 from ._anthropic_common import (
     send_anthropic_message,
@@ -68,29 +68,21 @@ class FoundryProvider(ClaudeCompatible):
     def id(self) -> str:
         return "foundry"
 
-    @property
-    def display_name(self) -> str:
-        return "Azure AI Foundry"
+    display_name = "Azure AI Foundry"
 
     def validate_required_config(self) -> list[str]:
-        """Check required Foundry configuration."""
+        return self.required_config_errors(get_settings().provider)
+
+    @classmethod
+    def required_config_errors(cls, provider: ProviderSettings) -> list[str]:
         errors = []
-        settings = get_settings()
-
-        # Resource name or base URL is required
-        has_resource = settings.provider.anthropic_foundry_resource
-        has_base_url = settings.provider.anthropic_foundry_base_url
-
-        if not (has_resource or has_base_url):
+        if not (provider.anthropic_foundry_resource or provider.anthropic_foundry_base_url):
             errors.append(
                 "Azure Foundry resource not configured. Set either "
                 "ANTHROPIC_FOUNDRY_RESOURCE (resource name) or "
                 "ANTHROPIC_FOUNDRY_BASE_URL (full endpoint URL)"
             )
-
-        # Check authentication - either API key or Azure credentials
-        has_api_key = settings.provider.anthropic_foundry_api_key
-        if not has_api_key:
+        if not provider.anthropic_foundry_api_key:
             try:
                 import azure.identity  # noqa: F401, PLC0415
             except ImportError:
@@ -103,24 +95,79 @@ class FoundryProvider(ClaudeCompatible):
                     "ANTHROPIC_FOUNDRY_API_KEY not set. "
                     "Will use Azure default credential chain (Entra ID authentication)"
                 )
-
         return errors
 
-    def claude_sdk_env(self) -> dict[str, str]:
-        """Foundry routing/auth env vars the claude-agent-sdk CLI must see.
+    @classmethod
+    def container_env(
+        cls, provider: ProviderSettings, *, gcp_credentials_container_path: str | None = None
+    ) -> dict[str, str]:
+        env = {"CLAUDE_CODE_USE_FOUNDRY": "1"}
+        # Claude Code treats resource and base_url as mutually exclusive.
+        if provider.anthropic_foundry_resource:
+            env["ANTHROPIC_FOUNDRY_RESOURCE"] = provider.anthropic_foundry_resource
+        elif provider.anthropic_foundry_base_url:
+            env["ANTHROPIC_FOUNDRY_BASE_URL"] = provider.anthropic_foundry_base_url
+        if provider.anthropic_foundry_api_key:
+            env["ANTHROPIC_FOUNDRY_API_KEY"] = provider.anthropic_foundry_api_key
+        return env
 
-        Mirrors `ProviderSettings._apply_foundry_env_vars`, including the
-        resource/base-url mutual exclusion (Claude Code rejects both).
+    def claude_sdk_env(self) -> dict[str, str]:
+        """Foundry routing/auth env for the claude-agent-sdk CLI (its container env)."""
+        return type(self).container_env(get_settings().provider)
+
+    def llm_upstream(self) -> LlmUpstream | None:
+        # Foundry authenticates with x-api-key (API key or minted Entra ID token).
+        p = get_settings().provider
+        if not (p.anthropic_foundry_base_url or p.anthropic_foundry_resource):
+            return None
+        return LlmUpstream(self._resolve_base_url(), {"x-api-key": self._resolve_api_key()})
+
+    def proxy_env_overrides(self, *, proxy_base_url: str, placeholder: str) -> dict[str, str]:
+        p = get_settings().provider
+        if not (p.anthropic_foundry_base_url or p.anthropic_foundry_resource):
+            return {}
+        return {
+            "ANTHROPIC_FOUNDRY_BASE_URL": proxy_base_url,
+            "ANTHROPIC_FOUNDRY_API_KEY": placeholder,
+        }
+
+    def proxied_container_env(
+        self,
+        *,
+        proxy_base_url: str,
+        placeholder: str,
+        gcp_credentials_container_path: str | None = None,
+    ) -> dict[str, str]:
+        # Claude CLI foundry mode rejects resource and base_url together, so when
+        # routing through the proxy the base_url wins and the resource is dropped.
+        env = super().proxied_container_env(
+            proxy_base_url=proxy_base_url,
+            placeholder=placeholder,
+            gcp_credentials_container_path=gcp_credentials_container_path,
+        )
+        if env.get("ANTHROPIC_FOUNDRY_BASE_URL") == proxy_base_url:
+            env.pop("ANTHROPIC_FOUNDRY_RESOURCE", None)
+        return env
+
+    def harness_env(self, *, proxy: str | None) -> dict[str, str]:
+        """Route omp at Foundry.
+
+        This is the case that failed in review. omp keys Foundry mode off
+        ``CLAUDE_CODE_USE_FOUNDRY`` and then reads ``FOUNDRY_BASE_URL``, not the
+        ``ANTHROPIC_FOUNDRY_BASE_URL`` that Claude Code and our container env
+        use. With the name unset omp fell through its chain to
+        ``https://api.anthropic.com``, which the air-gap firewall drops, so every
+        turn hung until it timed out. Foundry mode sends the credential as
+        ``Authorization: Bearer``, which the proxy already accepts, so the
+        placeholder needs no special handling.
         """
         p = get_settings().provider
-        env: dict[str, str] = {"CLAUDE_CODE_USE_FOUNDRY": "1"}
-        if p.anthropic_foundry_resource:
-            env["ANTHROPIC_FOUNDRY_RESOURCE"] = p.anthropic_foundry_resource
-        elif p.anthropic_foundry_base_url:
-            env["ANTHROPIC_FOUNDRY_BASE_URL"] = p.anthropic_foundry_base_url
-        if p.anthropic_foundry_api_key:
-            env["ANTHROPIC_FOUNDRY_API_KEY"] = p.anthropic_foundry_api_key
-        return env
+        if not (p.anthropic_foundry_base_url or p.anthropic_foundry_resource):
+            return {}
+        return {
+            "CLAUDE_CODE_USE_FOUNDRY": "1",
+            "FOUNDRY_BASE_URL": proxy or self._resolve_base_url(),
+        }
 
     def claude_model_name(self) -> str:
         """Model name for ClaudeAgentOptions.model."""

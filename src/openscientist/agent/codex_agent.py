@@ -30,7 +30,7 @@ import os
 import shutil
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from openai_codex import ApprovalMode, AsyncCodex, AsyncThread, CodexConfig, Sandbox
 
@@ -97,6 +97,31 @@ def _toml_str(value: str) -> str:
     return f'"{escaped}"'
 
 
+class _TokenBreakdown(Protocol):
+    """The nested per-turn counts read off the SDK's ``TokenUsageBreakdown``.
+
+    Structural rather than nominal so the mapper stays checkable while tests
+    substitute stubs. Typing these four is what keeps a rename or a change of
+    nesting upstream from silently mis-pricing a turn.
+    """
+
+    @property
+    def input_tokens(self) -> int: ...
+    @property
+    def cached_input_tokens(self) -> int: ...
+    @property
+    def output_tokens(self) -> int: ...
+    @property
+    def reasoning_output_tokens(self) -> int: ...
+
+
+class _TurnUsage(Protocol):
+    """The SDK's ``ThreadTokenUsage``, of which only ``last`` is per-turn."""
+
+    @property
+    def last(self) -> _TokenBreakdown | None: ...
+
+
 class CodexAgent(AbstractAgent[CodexCompatible]):
     """Agent that drives the Codex app-server via the official ``openai-codex``."""
 
@@ -107,6 +132,10 @@ class CodexAgent(AbstractAgent[CodexCompatible]):
 
     backend = AgentBackend.CODEX
     file_write_tool = "apply_patch"
+    display_name = "Codex"
+    # codex discovers ``.agents/skills/<name>/SKILL.md`` under its cwd; the base
+    # class writes them there via the default SKILL.md layout.
+    skills_subdir = ".agents/skills"
 
     @classmethod
     def prompt_fragments(cls) -> BackendFragments:
@@ -121,11 +150,6 @@ class CodexAgent(AbstractAgent[CodexCompatible]):
         # Codex reads a single AGENTS.md, so its discovery system prompt is the
         # full per-job doc (CodexAgent writes it to AGENTS.md from this prompt).
         return cls.job_doc(use_hypotheses=use_hypotheses, phenix_available=phenix_available)
-
-    async def prepare_job_workspace(self, *, use_hypotheses: bool = False) -> None:
-        from openscientist.agent.skills import write_skills_to_codex_dir
-
-        await write_skills_to_codex_dir(self._config.job_dir)
 
     # apply_runtime_environment, chat_system_prompt, write_chat_context, and
     # chat_model_override use the AbstractAgent defaults: codex configures its
@@ -180,20 +204,8 @@ class CodexAgent(AbstractAgent[CodexCompatible]):
         OPENSCIENTIST_SECRET_KEY, provider creds, executor image, ...) that the
         tools need, then overlay the per-job ``OPENSCIENTIST_*`` values.
         """
-        config = self._config
-        job_dir = self._job_dir()
         env = dict(os.environ)
-        env.update(
-            {
-                "OPENSCIENTIST_JOB_ID": job_dir.name,
-                "OPENSCIENTIST_JOB_DIR": str(job_dir),
-                "OPENSCIENTIST_USE_HYPOTHESES": "1" if config.use_hypotheses else "0",
-            }
-        )
-        if config.data_file is not None:
-            env["OPENSCIENTIST_DATA_FILE"] = str(config.data_file)
-        if config.data_files:
-            env["OPENSCIENTIST_DATA_FILES"] = os.pathsep.join(str(p) for p in config.data_files)
+        env.update(self._job_env_overlay(self._job_dir()))
         return env
 
     def _write_codex_config(self) -> None:
@@ -294,23 +306,27 @@ class CodexAgent(AbstractAgent[CodexCompatible]):
         return self._thread
 
     @staticmethod
-    def _usage_from_payload(usage: Any) -> TokenUsage:
+    def _usage_from_payload(usage: _TurnUsage) -> TokenUsage:
         """Normalize the turn's token usage to ``TokenUsage``.
 
         The SDK reports per-turn usage as ``usage.last`` (a
-        ``TokenUsageBreakdown``) with ``input_tokens`` inclusive of
-        ``cached_input_tokens`` (Responses-API shape), so the fresh-input count
-        is the difference. ``usage.total`` is the running thread total, which we
-        do not use here since ``_token_usage`` accumulates per turn.
+        ``TokenUsageBreakdown``) whose counts nest: ``input_tokens`` includes
+        ``cached_input_tokens`` and ``output_tokens`` includes
+        ``reasoning_output_tokens`` (Responses-API shape). Both sub-counts are
+        subtracted here so the buckets stay non-overlapping and still sum to
+        the payload's ``total_tokens``. ``usage.total`` is the running thread
+        total, which we do not use since ``_token_usage`` accumulates per turn.
         """
-        last = getattr(usage, "last", None)
+        last = usage.last
         if last is None:
             return TokenUsage()
         return TokenUsage(
             input_tokens=last.input_tokens - last.cached_input_tokens,
-            output_tokens=last.output_tokens,
+            output_tokens=max(last.output_tokens - last.reasoning_output_tokens, 0),
             cache_read_tokens=last.cached_input_tokens,
+            # The SDK exposes no cache-write count in either lifetime tier.
             cache_write_tokens=0,
+            cache_write_1h_tokens=0,
             reasoning_tokens=last.reasoning_output_tokens,
         )
 

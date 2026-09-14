@@ -157,6 +157,12 @@ class Job(UUIDv7Mixin, Base):
         comment="Structured data summary used for prompting and UI",
     )
 
+    version_info: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB,
+        nullable=True,
+        comment="Runtime provenance (claude_code_version, claude_agent_sdk_version, etc.)",
+    )
+
     agent_status: Mapped[str | None] = mapped_column(
         Text,
         nullable=True,

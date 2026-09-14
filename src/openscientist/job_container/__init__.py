@@ -6,6 +6,7 @@ Each agent job runs in its own Docker container:
 """
 
 from openscientist.job_container.runner import JobContainerRunner
+from openscientist.job_container.secrets import derive_job_secret
 from openscientist.job_container.utils import resolve_docker_network, to_host_path
 
-__all__ = ["JobContainerRunner", "resolve_docker_network", "to_host_path"]
+__all__ = ["JobContainerRunner", "derive_job_secret", "resolve_docker_network", "to_host_path"]

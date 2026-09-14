@@ -24,6 +24,10 @@ from nicegui import app, ui
 from openscientist.job_manager import JobManager
 from openscientist.security import register_scanner_block_middleware
 from openscientist.version import get_version_string
+from openscientist.webapp_components.ui_components import (
+    _inject_thinking_status_styles,
+    register_badge_head_html,
+)
 
 # Path to assets directory (favicon, icons, etc.)
 ASSETS_DIR = Path(__file__).parent / "assets"
@@ -151,6 +155,17 @@ def _register_share_routes() -> None:
         logger.info("Share routes registered at /web/shares")
     except Exception as e:
         logger.warning("Failed to register share routes: %s", e)
+
+
+def _register_download_routes() -> None:
+    """Register the session-authenticated artifact download route."""
+    try:
+        from openscientist.webapp_components.artifact_routes import router as download_router
+
+        app.include_router(download_router)
+        logger.info("Artifact download route registered at /web/jobs")
+    except Exception as e:
+        logger.warning("Failed to register artifact download routes: %s", e)
 
 
 def _register_review_routes() -> None:
@@ -376,6 +391,23 @@ async def _start_background_tasks(engine: Any) -> None:
     except Exception as e:
         logger.warning("Failed to start skill sync scheduler: %s", e)
 
+    # Start the LLM key-replacement proxy
+    try:
+        from openscientist.llm_proxy import start_llm_proxy
+
+        await start_llm_proxy()
+    except Exception as e:
+        logger.warning("Failed to start LLM proxy: %s", e)
+
+    # Start the execution broker
+    try:
+        from openscientist.exec_broker import start_exec_broker
+
+        await start_exec_broker()
+        logger.info("Execution broker started")
+    except Exception as e:
+        logger.warning("Failed to start execution broker: %s", e)
+
 
 def _initialize_job_manager_runtime(jobs_dir: Path) -> None:
     if _state.job_manager is not None:
@@ -462,6 +494,7 @@ def _configure_host_app(host_app: FastAPI, jobs_dir: Path) -> None:
     _register_api_routes(host_app)
     _register_oauth_routes()
     _register_share_routes()
+    _register_download_routes()
     _register_review_routes()
 
     _initialize_job_manager_runtime(jobs_dir)
@@ -470,6 +503,8 @@ def _configure_host_app(host_app: FastAPI, jobs_dir: Path) -> None:
     importlib.import_module("openscientist.webapp_components.pages")
     _register_nicegui_static_files(jobs_dir)
     _register_pwa_metadata()
+    register_badge_head_html()
+    _inject_thinking_status_styles()
 
     ui.run_with(
         host_app,

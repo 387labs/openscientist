@@ -26,6 +26,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.concurrency import run_in_threadpool
 from starlette.datastructures import FormData
 from starlette.datastructures import UploadFile as StarletteUploadFile
 
@@ -711,7 +712,12 @@ async def download_artifacts(
         archive_path = Path(tmp_file.name)
 
     try:
-        create_artifacts_zip_file(job_dir=job_dir, archive_path=archive_path, job_id=str(job.id))
+        await run_in_threadpool(
+            create_artifacts_zip_file,
+            job_dir=job_dir,
+            archive_path=archive_path,
+            job_id=str(job.id),
+        )
     except Exception:
         archive_path.unlink(missing_ok=True)
         raise

@@ -2,6 +2,7 @@
 
 import pytest
 
+from openscientist.database.models.job import Job
 from openscientist.knowledge_state import KnowledgeState, _sanitize_for_json
 
 
@@ -288,6 +289,49 @@ class TestVersionInfo:
     def test_set_version_info(self, ks):
         ks.set_version_info({"claude_model": "claude-4", "openscientist_commit": "abc123"})
         assert ks.data["config"]["version_info"]["claude_model"] == "claude-4"
+
+    async def test_save_to_database_persists_version_info(self, ks, db_session):
+        job = Job(research_question="What drives metabolite X?", status="running")
+        db_session.add(job)
+        await db_session.commit()
+
+        ks.set_version_info({"claude_code_version": "2.0.14", "claude_agent_sdk_version": "0.1.4"})
+        await ks.save_to_database(str(job.id), session=db_session)
+        await db_session.refresh(job)
+
+        assert job.version_info == {
+            "claude_code_version": "2.0.14",
+            "claude_agent_sdk_version": "0.1.4",
+        }
+
+    async def test_save_to_database_without_version_info_leaves_null(self, ks, db_session):
+        job = Job(research_question="What drives metabolite X?", status="running")
+        db_session.add(job)
+        await db_session.commit()
+
+        await ks.save_to_database(str(job.id), session=db_session)
+        await db_session.refresh(job)
+
+        assert job.version_info is None
+
+    async def test_reloaded_state_does_not_null_recorded_version_info(self, ks, db_session):
+        job = Job(research_question="What drives metabolite X?", status="running")
+        db_session.add(job)
+        await db_session.commit()
+
+        recorded = {"agent_harness": "omp", "agent_harness_version": "17.4.0"}
+        ks.set_version_info(recorded)
+        await ks.save_to_database(str(job.id), session=db_session)
+        await db_session.refresh(job)
+
+        # Report regeneration reloads state from the DB (its config carries no
+        # version_info) and saves again. The recorded provenance must survive.
+        reloaded = KnowledgeState._new_from_job_record(str(job.id), job)
+        assert "version_info" not in reloaded.data["config"]
+        await reloaded.save_to_database(str(job.id), session=db_session)
+        await db_session.refresh(job)
+
+        assert job.version_info == recorded
 
 
 class TestGetReportSummary:

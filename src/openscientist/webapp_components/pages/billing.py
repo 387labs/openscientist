@@ -32,13 +32,21 @@ async def _render_db_cost_section() -> None:
 
     total_input = sum(r.input_tokens for r in cost_records)
     total_output = sum(r.output_tokens for r in cost_records)
+    total_cache_read = sum(r.cache_read_tokens for r in cost_records)
+    total_cache_write = sum(r.cache_write_tokens for r in cost_records)
+    total_reasoning = sum(r.reasoning_tokens for r in cost_records)
     total_cost = sum(r.cost_usd for r in cost_records)
 
+    # Every bucket that cost_usd prices is shown, otherwise the cost per token
+    # reads as nonsense: cached reads usually dominate an agentic run.
     render_stat_badges(
         [
             ("Total Cost", f"${total_cost:.4f}", "green"),
             ("Input Tokens", f"{total_input:,}", "blue"),
             ("Output Tokens", f"{total_output:,}", "orange"),
+            ("Cache Read", f"{total_cache_read:,}", "purple"),
+            ("Cache Write", f"{total_cache_write:,}", "teal"),
+            ("Reasoning", f"{total_reasoning:,}", "pink"),
         ]
     )
 
@@ -58,6 +66,24 @@ async def _render_db_cost_section() -> None:
             "field": "output_tokens",
             "align": "right",
         },
+        {
+            "name": "cache_read_tokens",
+            "label": "Cache Read",
+            "field": "cache_read_tokens",
+            "align": "right",
+        },
+        {
+            "name": "cache_write_tokens",
+            "label": "Cache Write",
+            "field": "cache_write_tokens",
+            "align": "right",
+        },
+        {
+            "name": "reasoning_tokens",
+            "label": "Reasoning",
+            "field": "reasoning_tokens",
+            "align": "right",
+        },
         {"name": "cost_usd", "label": "Cost (USD)", "field": "cost_usd", "align": "right"},
         {"name": "created_at", "label": "Date", "field": "created_at", "align": "left"},
     ]
@@ -69,6 +95,9 @@ async def _render_db_cost_section() -> None:
             "provider": r.provider,
             "input_tokens": r.input_tokens,
             "output_tokens": r.output_tokens,
+            "cache_read_tokens": r.cache_read_tokens,
+            "cache_write_tokens": r.cache_write_tokens,
+            "reasoning_tokens": r.reasoning_tokens,
             "cost_usd": f"${r.cost_usd:.4f}",
             "created_at": r.created_at.strftime("%Y-%m-%d %H:%M"),
         }

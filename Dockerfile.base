@@ -35,8 +35,14 @@ COPY pyproject.toml uv.lock README.md ./
 # Stub package so uv can do the editable install
 RUN mkdir -p src/openscientist && touch src/openscientist/__init__.py
 
-# Install all deps — cached until pyproject.toml or uv.lock changes
-RUN uv pip install --system -e .
+# Install deps from the lock: `uv pip install -e .` re-resolves pyproject and
+# ignores uv.lock, which floated mcp to 2.x and broke the tools MCP server.
+# --no-deps keeps the project install from pulling anything unlocked back in.
+RUN uv export --locked --no-dev --no-emit-project --format requirements-txt \
+        -o /tmp/requirements.txt \
+    && uv pip install --system -r /tmp/requirements.txt \
+    && uv pip install --system --no-deps -e . \
+    && rm /tmp/requirements.txt
 
 # Smoke test: verify WeasyPrint can render text + images
 RUN python -c "\

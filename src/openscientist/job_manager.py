@@ -53,8 +53,8 @@ def _effective_model(settings: Any) -> str | None:
     on the job so the UI can show a model badge.
 
     ``OPENSCIENTIST_MODEL`` (and the anthropic default) are checked first, but
-    codex providers carry their model in provider-specific config (for example
-    ``OLLAMA_MODEL`` or the Azure deployment), so when those are unset we ask
+    codex providers may carry their model in provider-specific config (for example
+    the Azure deployment) or in a provider default, so when those are unset we ask
     the provider itself. Returns None when nothing resolves (for example codex
     on the account default), leaving the job with a provider badge only.
     """
