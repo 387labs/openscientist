@@ -28,24 +28,33 @@ jobs:
       - name: Build base + main image in ACR
         run: |
           ACR=${{ secrets.ACR_NAME }}
-          # Transient registry errors ("failed to get layer ... layer does not
-          # exist") showed up when a dependent build raced the base tag that had
-          # just been overwritten in this same run. Retry rather than fail a deploy
-          # on it; the identical build succeeds on a second attempt.
           acr_build() {
             for attempt in 1 2 3; do
               az acr build -r $ACR "$@" && return 0
-              echo "acr build failed (attempt $attempt), retrying in 30s" >&2
-              sleep 30
+              echo "acr build failed (attempt $attempt), retrying in 60s" >&2
+              sleep 60
             done
             return 1
           }
-          acr_build -t openscientist-base:latest -f Dockerfile.base .
-          # Pin every dependent image to the exact base just built, so they cannot
-          # resolve a half-replicated :latest and cannot drift apart from one
-          # another when the base is rebuilt between steps.
-          BASE_DIGEST=$(az acr repository show -n $ACR --image openscientist-base:latest --query digest -o tsv)
-          sed -i "s|^FROM openscientist-base:latest|FROM ${ACR}.azurecr.io/openscientist-base@${BASE_DIGEST}|" Dockerfile Dockerfile.agent Dockerfile.executor
+          # The base carries system packages and the locked Python deps, so it only
+          # changes when those inputs change. Tagging it by a hash of those inputs
+          # means an ordinary deploy reuses it instead of rebuilding it.
+          #
+          # This is not only about speed. Building an image FROM a base that was
+          # pushed moments earlier fails reproducibly with "failed to get layer
+          # ... layer does not exist", even when the base is pinned by digest and
+          # the build is retried; the same build succeeds against a base that has
+          # had a few minutes to settle. Reusing the base avoids that window
+          # entirely, and the sleep below covers the rare deploy that rebuilds it.
+          BASE_KEY=$(cat Dockerfile.base pyproject.toml uv.lock | sha256sum | cut -c1-12)
+          if az acr repository show -n $ACR --image openscientist-base:$BASE_KEY >/dev/null 2>&1; then
+            echo "base image openscientist-base:$BASE_KEY already built, reusing"
+          else
+            acr_build -t openscientist-base:$BASE_KEY -t openscientist-base:latest -f Dockerfile.base .
+            echo "waiting for the freshly pushed base to become consistent"
+            sleep 180
+          fi
+          sed -i "s|^FROM openscientist-base:latest|FROM ${ACR}.azurecr.io/openscientist-base:${BASE_KEY}|" Dockerfile Dockerfile.agent Dockerfile.executor
           # The agent and executor images run the same src/ as the web image but
           # were only ever built by hand, so they froze on a June build while the
           # web image kept shipping. The key-replacement proxy landed after that
