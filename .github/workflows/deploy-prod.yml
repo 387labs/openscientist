@@ -28,8 +28,15 @@ jobs:
       - name: Build base + main image in ACR
         run: |
           ACR=${{ secrets.ACR_NAME }}
-          sed -i "s|^FROM openscientist-base:latest|FROM ${ACR}.azurecr.io/openscientist-base:latest|" Dockerfile
+          sed -i "s|^FROM openscientist-base:latest|FROM ${ACR}.azurecr.io/openscientist-base:latest|" Dockerfile Dockerfile.agent Dockerfile.executor
           az acr build -r $ACR -t openscientist-base:latest -f Dockerfile.base .
+          # The agent and executor images run the same src/ as the web image.
+          # They used to be built by hand, so they silently froze while the web
+          # image kept shipping: the agent stayed on a June build that predates
+          # the key-replacement proxy, so it took the placeholder key the runner
+          # hands it and sent that straight to Azure, failing every job with 401.
+          az acr build -r $ACR -t openscientist-agent:latest -f Dockerfile.agent .
+          az acr build -r $ACR -t openscientist-executor:latest -f Dockerfile.executor .
           TAG=prod-${{ github.sha }}
           az acr build -r $ACR -t openscientist:$TAG -f Dockerfile .
           echo "TAG=$TAG" >> "$GITHUB_ENV"
