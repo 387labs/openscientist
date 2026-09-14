@@ -46,6 +46,10 @@ RUN chmod +x /usr/local/bin/codex
 # Copy project files — deps already installed in base
 COPY pyproject.toml README.md alembic.ini uv.lock ./
 COPY src/ src/
+# web_app resolves BUILTIN_SKILLS_DIR to /app/skills. Without this the
+# built-in source fails every boot with 'Path does not exist: /app/skills'
+# and the bundled skills are silently missing from every environment.
+COPY skills/ skills/
 
 # Reinstall the project so the web image has dependencies added since the base
 # image was built, notably the openai-codex SDK used by the codex agent path
