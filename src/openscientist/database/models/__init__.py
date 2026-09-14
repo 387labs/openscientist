@@ -36,6 +36,8 @@ from .job_share import JobShare
 from .literature import Literature
 from .oauth_account import OAuthAccount
 from .plot import Plot
+from .pubmed_article import PubMedArticle
+from .pubmed_corpus import PubMedCorpusMeta
 
 # Review tokens
 from .review_token import ReviewToken
@@ -63,6 +65,8 @@ __all__ = [
     "Literature",
     "OAuthAccount",
     "Plot",
+    "PubMedArticle",
+    "PubMedCorpusMeta",
     "ReviewToken",
     "Session",
     "Skill",

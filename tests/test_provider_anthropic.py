@@ -136,19 +136,12 @@ class TestAnthropicClaudeCompatible:
         assert not isinstance(provider, CodexCompatible)
 
     def test_validate_required_config_ok_with_api_key(self) -> None:
-        with patch("openscientist.providers.anthropic.get_settings", return_value=_mock_settings()):
-            assert AnthropicProvider().validate_required_config() == []
+        assert AnthropicProvider.required_config_errors(_mock_settings().provider) == []
 
     def test_validate_required_config_error_when_unset(self) -> None:
-        # Construct with a valid config (Provider.__init__ would raise otherwise).
-        with patch("openscientist.providers.anthropic.get_settings", return_value=_mock_settings()):
-            provider = AnthropicProvider()
-        # Re-evaluate with both auth fields unset.
-        with patch(
-            "openscientist.providers.anthropic.get_settings",
-            return_value=_mock_settings(api_key=None, oauth=None),
-        ):
-            errors = provider.validate_required_config()
+        errors = AnthropicProvider.required_config_errors(
+            _mock_settings(api_key=None, oauth=None).provider
+        )
         assert len(errors) == 1
         assert "ANTHROPIC_API_KEY" in errors[0]
 

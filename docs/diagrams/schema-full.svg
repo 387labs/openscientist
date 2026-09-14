@@ -41,7 +41,7 @@
 <circle cx="50" cy="147" r="3" fill="#607D8B" opacity="0.8"/>
 <path d="M 50 692 C -26 692, -26 167, 50 167" fill="none" stroke="#607D8B" stroke-width="1.4" opacity="0.8"/>
 <circle cx="50" cy="167" r="3" fill="#607D8B" opacity="0.8"/>
-<path d="M 754 878 C 722 874, 706 140, 674 135" fill="none" stroke="#607D8B" stroke-width="1.4" opacity="0.8"/>
+<path d="M 754 932 C 722 928, 706 140, 674 135" fill="none" stroke="#607D8B" stroke-width="1.4" opacity="0.8"/>
 <circle cx="674" cy="135" r="3" fill="#607D8B" opacity="0.8"/>
 <path d="M 754 610 C 722 610, 706 178, 674 178" fill="none" stroke="#607D8B" stroke-width="1.4" opacity="0.8"/>
 <circle cx="674" cy="178" r="3" fill="#607D8B" opacity="0.8"/>
@@ -248,10 +248,10 @@
 <text x="786" y="471" font-size="10" fill="#212121" text-anchor="start">updated_at: TIMESTAMP</text>
 <line x1="762" y1="489" x2="965" y2="489" stroke="#E0E0E0" stroke-width="1"/>
 <text x="768" y="501" font-size="9" fill="#616161" text-anchor="start">⚡ job_id</text>
-<rect x="754" y="540" width="219" height="265" fill="#FFFFFF" stroke="#E0E0E0" stroke-width="1" rx="6" filter="url(#shadow)"/>
-<clipPath id="clip-cost_records"><rect x="754" y="540" width="219" height="265" rx="6"/></clipPath>
+<rect x="754" y="540" width="219" height="319" fill="#FFFFFF" stroke="#E0E0E0" stroke-width="1" rx="6" filter="url(#shadow)"/>
+<clipPath id="clip-cost_records"><rect x="754" y="540" width="219" height="319" rx="6"/></clipPath>
 <rect x="754" y="540" width="219" height="30" fill="#FFF3CD" clip-path="url(#clip-cost_records)"/>
-<rect x="754" y="570" width="4" height="235" fill="#FFF3CD" clip-path="url(#clip-cost_records)"/>
+<rect x="754" y="570" width="4" height="289" fill="#FFF3CD" clip-path="url(#clip-cost_records)"/>
 <use href="#icon-coins" x="764" y="549" width="14" height="14" fill="#212121"/>
 <text x="782" y="560" font-size="12" fill="#212121" text-anchor="start" font-weight="600">COST_RECORDS</text>
 <text x="963" y="560" font-size="9" fill="#43A047" text-anchor="end" font-weight="600">RLS</text>
@@ -260,42 +260,45 @@
 <text x="786" y="584" font-size="10" fill="#212121" text-anchor="start">id: UUID</text>
 <use href="#icon-briefcase" x="766" y="592" width="12" height="12" fill="#616161"/>
 <text x="786" y="602" font-size="10" fill="#212121" text-anchor="start">job_id: UUID → jobs.id  [I]</text>
-<text x="786" y="620" font-size="10" fill="#212121" text-anchor="start">cost_usd: FLOAT</text>
-<text x="786" y="638" font-size="10" fill="#212121" text-anchor="start">created_at: TIMESTAMP</text>
-<text x="786" y="656" font-size="10" fill="#212121" text-anchor="start">input_tokens: INTEGER</text>
-<text x="786" y="674" font-size="10" fill="#212121" text-anchor="start">iteration: INTEGER</text>
-<text x="786" y="692" font-size="10" fill="#212121" text-anchor="start">model: VARCHAR(100)</text>
-<text x="786" y="710" font-size="10" fill="#212121" text-anchor="start">operation_type: VARCHAR(50)</text>
-<text x="786" y="728" font-size="10" fill="#212121" text-anchor="start">output_tokens: INTEGER</text>
-<text x="786" y="746" font-size="10" fill="#212121" text-anchor="start">provider: VARCHAR(50)</text>
-<text x="786" y="764" font-size="10" fill="#212121" text-anchor="start">updated_at: TIMESTAMP</text>
-<line x1="762" y1="782" x2="965" y2="782" stroke="#E0E0E0" stroke-width="1"/>
-<text x="768" y="794" font-size="9" fill="#616161" text-anchor="start">⚡ job_id</text>
-<rect x="754" y="833" width="219" height="301" fill="#FFFFFF" stroke="#E0E0E0" stroke-width="1" rx="6" filter="url(#shadow)"/>
-<clipPath id="clip-analysis_log"><rect x="754" y="833" width="219" height="301" rx="6"/></clipPath>
-<rect x="754" y="833" width="219" height="30" fill="#FFF3CD" clip-path="url(#clip-analysis_log)"/>
-<rect x="754" y="863" width="4" height="271" fill="#FFF3CD" clip-path="url(#clip-analysis_log)"/>
-<use href="#icon-chart" x="764" y="842" width="14" height="14" fill="#212121"/>
-<text x="782" y="853" font-size="12" fill="#212121" text-anchor="start" font-weight="600">ANALYSIS_LOG</text>
-<text x="963" y="853" font-size="9" fill="#43A047" text-anchor="end" font-weight="600">RLS</text>
-<line x1="754" y1="863" x2="973" y2="863" stroke="#E0E0E0" stroke-width="1"/>
-<text x="768" y="877" font-size="10" fill="#212121" text-anchor="start">🔑</text>
-<text x="786" y="877" font-size="10" fill="#212121" text-anchor="start">id: UUID</text>
-<use href="#icon-briefcase" x="766" y="885" width="12" height="12" fill="#616161"/>
-<text x="786" y="895" font-size="10" fill="#212121" text-anchor="start">job_id: UUID → jobs.id  [I]</text>
-<text x="786" y="913" font-size="10" fill="#212121" text-anchor="start">action_type: VARCHAR(50)</text>
-<text x="786" y="931" font-size="10" fill="#212121" text-anchor="start">created_at: TIMESTAMP</text>
-<text x="786" y="949" font-size="10" fill="#212121" text-anchor="start">description: TEXT</text>
-<text x="786" y="967" font-size="10" fill="#212121" text-anchor="start">duration_seconds: FLOAT</text>
-<text x="786" y="985" font-size="10" fill="#212121" text-anchor="start">error_message: TEXT</text>
-<text x="786" y="1003" font-size="10" fill="#212121" text-anchor="start">input_data: JSONB</text>
-<text x="786" y="1021" font-size="10" fill="#212121" text-anchor="start">iteration: INTEGER</text>
-<text x="786" y="1039" font-size="10" fill="#212121" text-anchor="start">output_data: JSONB</text>
-<text x="786" y="1057" font-size="10" fill="#212121" text-anchor="start">step_number: INTEGER</text>
-<text x="786" y="1075" font-size="10" fill="#212121" text-anchor="start">success: BOOLEAN</text>
-<text x="786" y="1093" font-size="10" fill="#212121" text-anchor="start">updated_at: TIMESTAMP</text>
-<line x1="762" y1="1111" x2="965" y2="1111" stroke="#E0E0E0" stroke-width="1"/>
-<text x="768" y="1123" font-size="9" fill="#616161" text-anchor="start">⚡ job_id</text>
+<text x="786" y="620" font-size="10" fill="#212121" text-anchor="start">cache_read_tokens: INTEGER</text>
+<text x="786" y="638" font-size="10" fill="#212121" text-anchor="start">cache_write_tokens: INTEGER</text>
+<text x="786" y="656" font-size="10" fill="#212121" text-anchor="start">cost_usd: FLOAT</text>
+<text x="786" y="674" font-size="10" fill="#212121" text-anchor="start">created_at: TIMESTAMP</text>
+<text x="786" y="692" font-size="10" fill="#212121" text-anchor="start">input_tokens: INTEGER</text>
+<text x="786" y="710" font-size="10" fill="#212121" text-anchor="start">iteration: INTEGER</text>
+<text x="786" y="728" font-size="10" fill="#212121" text-anchor="start">model: VARCHAR(100)</text>
+<text x="786" y="746" font-size="10" fill="#212121" text-anchor="start">operation_type: VARCHAR(50)</text>
+<text x="786" y="764" font-size="10" fill="#212121" text-anchor="start">output_tokens: INTEGER</text>
+<text x="786" y="782" font-size="10" fill="#212121" text-anchor="start">provider: VARCHAR(50)</text>
+<text x="786" y="800" font-size="10" fill="#212121" text-anchor="start">reasoning_tokens: INTEGER</text>
+<text x="786" y="818" font-size="10" fill="#212121" text-anchor="start">updated_at: TIMESTAMP</text>
+<line x1="762" y1="836" x2="965" y2="836" stroke="#E0E0E0" stroke-width="1"/>
+<text x="768" y="848" font-size="9" fill="#616161" text-anchor="start">⚡ job_id</text>
+<rect x="754" y="887" width="219" height="301" fill="#FFFFFF" stroke="#E0E0E0" stroke-width="1" rx="6" filter="url(#shadow)"/>
+<clipPath id="clip-analysis_log"><rect x="754" y="887" width="219" height="301" rx="6"/></clipPath>
+<rect x="754" y="887" width="219" height="30" fill="#FFF3CD" clip-path="url(#clip-analysis_log)"/>
+<rect x="754" y="917" width="4" height="271" fill="#FFF3CD" clip-path="url(#clip-analysis_log)"/>
+<use href="#icon-chart" x="764" y="896" width="14" height="14" fill="#212121"/>
+<text x="782" y="907" font-size="12" fill="#212121" text-anchor="start" font-weight="600">ANALYSIS_LOG</text>
+<text x="963" y="907" font-size="9" fill="#43A047" text-anchor="end" font-weight="600">RLS</text>
+<line x1="754" y1="917" x2="973" y2="917" stroke="#E0E0E0" stroke-width="1"/>
+<text x="768" y="931" font-size="10" fill="#212121" text-anchor="start">🔑</text>
+<text x="786" y="931" font-size="10" fill="#212121" text-anchor="start">id: UUID</text>
+<use href="#icon-briefcase" x="766" y="939" width="12" height="12" fill="#616161"/>
+<text x="786" y="949" font-size="10" fill="#212121" text-anchor="start">job_id: UUID → jobs.id  [I]</text>
+<text x="786" y="967" font-size="10" fill="#212121" text-anchor="start">action_type: VARCHAR(50)</text>
+<text x="786" y="985" font-size="10" fill="#212121" text-anchor="start">created_at: TIMESTAMP</text>
+<text x="786" y="1003" font-size="10" fill="#212121" text-anchor="start">description: TEXT</text>
+<text x="786" y="1021" font-size="10" fill="#212121" text-anchor="start">duration_seconds: FLOAT</text>
+<text x="786" y="1039" font-size="10" fill="#212121" text-anchor="start">error_message: TEXT</text>
+<text x="786" y="1057" font-size="10" fill="#212121" text-anchor="start">input_data: JSONB</text>
+<text x="786" y="1075" font-size="10" fill="#212121" text-anchor="start">iteration: INTEGER</text>
+<text x="786" y="1093" font-size="10" fill="#212121" text-anchor="start">output_data: JSONB</text>
+<text x="786" y="1111" font-size="10" fill="#212121" text-anchor="start">step_number: INTEGER</text>
+<text x="786" y="1129" font-size="10" fill="#212121" text-anchor="start">success: BOOLEAN</text>
+<text x="786" y="1147" font-size="10" fill="#212121" text-anchor="start">updated_at: TIMESTAMP</text>
+<line x1="762" y1="1165" x2="965" y2="1165" stroke="#E0E0E0" stroke-width="1"/>
+<text x="768" y="1177" font-size="9" fill="#616161" text-anchor="start">⚡ job_id</text>
 <rect x="1053" y="80" width="231" height="283" fill="#FFFFFF" stroke="#E0E0E0" stroke-width="1" rx="6" filter="url(#shadow)"/>
 <clipPath id="clip-hypotheses"><rect x="1053" y="80" width="231" height="283" rx="6"/></clipPath>
 <rect x="1053" y="80" width="231" height="30" fill="#F3D9E4" clip-path="url(#clip-hypotheses)"/>

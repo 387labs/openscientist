@@ -78,10 +78,10 @@
 <text x="574" y="760" font-size="10" fill="#212121" text-anchor="start">updated_at: TIMESTAMP</text>
 <line x1="550" y1="778" x2="753" y2="778" stroke="#E0E0E0" stroke-width="1"/>
 <text x="556" y="790" font-size="9" fill="#616161" text-anchor="start">⚡ job_id</text>
-<rect x="301" y="659" width="219" height="265" fill="#FFFFFF" stroke="#E0E0E0" stroke-width="1" rx="6" filter="url(#shadow)"/>
-<clipPath id="clip-cost_records"><rect x="301" y="659" width="219" height="265" rx="6"/></clipPath>
+<rect x="301" y="659" width="219" height="319" fill="#FFFFFF" stroke="#E0E0E0" stroke-width="1" rx="6" filter="url(#shadow)"/>
+<clipPath id="clip-cost_records"><rect x="301" y="659" width="219" height="319" rx="6"/></clipPath>
 <rect x="301" y="659" width="219" height="30" fill="#FFF3CD" clip-path="url(#clip-cost_records)"/>
-<rect x="301" y="689" width="4" height="235" fill="#FFF3CD" clip-path="url(#clip-cost_records)"/>
+<rect x="301" y="689" width="4" height="289" fill="#FFF3CD" clip-path="url(#clip-cost_records)"/>
 <use href="#icon-coins" x="311" y="668" width="14" height="14" fill="#212121"/>
 <text x="329" y="679" font-size="12" fill="#212121" text-anchor="start" font-weight="600">COST_RECORDS</text>
 <text x="510" y="679" font-size="9" fill="#43A047" text-anchor="end" font-weight="600">RLS</text>
@@ -90,17 +90,20 @@
 <text x="333" y="703" font-size="10" fill="#212121" text-anchor="start">id: UUID</text>
 <use href="#icon-briefcase" x="313" y="711" width="12" height="12" fill="#616161"/>
 <text x="333" y="721" font-size="10" fill="#212121" text-anchor="start">job_id: UUID → jobs.id  [I]</text>
-<text x="333" y="739" font-size="10" fill="#212121" text-anchor="start">cost_usd: FLOAT</text>
-<text x="333" y="757" font-size="10" fill="#212121" text-anchor="start">created_at: TIMESTAMP</text>
-<text x="333" y="775" font-size="10" fill="#212121" text-anchor="start">input_tokens: INTEGER</text>
-<text x="333" y="793" font-size="10" fill="#212121" text-anchor="start">iteration: INTEGER</text>
-<text x="333" y="811" font-size="10" fill="#212121" text-anchor="start">model: VARCHAR(100)</text>
-<text x="333" y="829" font-size="10" fill="#212121" text-anchor="start">operation_type: VARCHAR(50)</text>
-<text x="333" y="847" font-size="10" fill="#212121" text-anchor="start">output_tokens: INTEGER</text>
-<text x="333" y="865" font-size="10" fill="#212121" text-anchor="start">provider: VARCHAR(50)</text>
-<text x="333" y="883" font-size="10" fill="#212121" text-anchor="start">updated_at: TIMESTAMP</text>
-<line x1="309" y1="901" x2="512" y2="901" stroke="#E0E0E0" stroke-width="1"/>
-<text x="315" y="913" font-size="9" fill="#616161" text-anchor="start">⚡ job_id</text>
+<text x="333" y="739" font-size="10" fill="#212121" text-anchor="start">cache_read_tokens: INTEGER</text>
+<text x="333" y="757" font-size="10" fill="#212121" text-anchor="start">cache_write_tokens: INTEGER</text>
+<text x="333" y="775" font-size="10" fill="#212121" text-anchor="start">cost_usd: FLOAT</text>
+<text x="333" y="793" font-size="10" fill="#212121" text-anchor="start">created_at: TIMESTAMP</text>
+<text x="333" y="811" font-size="10" fill="#212121" text-anchor="start">input_tokens: INTEGER</text>
+<text x="333" y="829" font-size="10" fill="#212121" text-anchor="start">iteration: INTEGER</text>
+<text x="333" y="847" font-size="10" fill="#212121" text-anchor="start">model: VARCHAR(100)</text>
+<text x="333" y="865" font-size="10" fill="#212121" text-anchor="start">operation_type: VARCHAR(50)</text>
+<text x="333" y="883" font-size="10" fill="#212121" text-anchor="start">output_tokens: INTEGER</text>
+<text x="333" y="901" font-size="10" fill="#212121" text-anchor="start">provider: VARCHAR(50)</text>
+<text x="333" y="919" font-size="10" fill="#212121" text-anchor="start">reasoning_tokens: INTEGER</text>
+<text x="333" y="937" font-size="10" fill="#212121" text-anchor="start">updated_at: TIMESTAMP</text>
+<line x1="309" y1="955" x2="512" y2="955" stroke="#E0E0E0" stroke-width="1"/>
+<text x="315" y="967" font-size="9" fill="#616161" text-anchor="start">⚡ job_id</text>
 <rect x="61" y="490" width="219" height="301" fill="#FFFFFF" stroke="#E0E0E0" stroke-width="1" rx="6" filter="url(#shadow)"/>
 <clipPath id="clip-analysis_log"><rect x="61" y="490" width="219" height="301" rx="6"/></clipPath>
 <rect x="61" y="490" width="219" height="30" fill="#FFF3CD" clip-path="url(#clip-analysis_log)"/>

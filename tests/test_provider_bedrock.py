@@ -212,15 +212,11 @@ class TestBedrockClaudeCompatible:
         assert not isinstance(provider, CodexCompatible)
 
     def test_validate_required_config_ok(self) -> None:
-        with patch("openscientist.providers.bedrock.get_settings", return_value=_mock_settings()):
-            assert BedrockProvider().validate_required_config() == []
+        assert BedrockProvider.required_config_errors(_mock_settings().provider) == []
 
     def test_validate_required_config_errors_when_unset(self) -> None:
-        with patch("openscientist.providers.bedrock.get_settings", return_value=_mock_settings()):
-            provider = BedrockProvider()
         unset = _mock_settings(region=None, access_key=None, secret=None)
-        with patch("openscientist.providers.bedrock.get_settings", return_value=unset):
-            errors = provider.validate_required_config()
+        errors = BedrockProvider.required_config_errors(unset.provider)
         assert len(errors) == 2
         assert any("AWS_REGION" in e for e in errors)
         assert any("credentials" in e.lower() for e in errors)

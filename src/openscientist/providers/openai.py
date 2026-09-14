@@ -11,8 +11,18 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from openscientist.providers.base import CodexCompatible, CostInfo
-from openscientist.settings import get_settings
+from openscientist.providers.base import (
+    LLM_PROXY_URL_ENV,
+    AirgapEgress,
+    AirgapPosture,
+    CodexCompatible,
+    CostInfo,
+    LlmUpstream,
+    env_from_pairs,
+)
+from openscientist.settings import ProviderSettings, get_settings
+
+_OPENAI_BASE_URL = "https://api.openai.com/v1"
 
 
 def _codex_auth_json() -> Path:
@@ -27,17 +37,30 @@ class OpenAIDirectProvider(CodexCompatible):
     def id(self) -> str:
         return "openai"
 
-    @property
-    def display_name(self) -> str:
-        return "OpenAI API"
+    display_name = "OpenAI API"
+
+    @classmethod
+    def container_env(
+        cls, provider: ProviderSettings, *, gcp_credentials_container_path: str | None = None
+    ) -> dict[str, str]:
+        return env_from_pairs(
+            [
+                ("OPENAI_API_KEY", provider.openai_api_key),
+                ("CODEX_AUTH_HOST_PATH", provider.codex_auth_host_path),
+            ]
+        )
 
     def validate_required_config(self) -> list[str]:
+        return self.required_config_errors(get_settings().provider)
+
+    @classmethod
+    def required_config_errors(cls, provider: ProviderSettings) -> list[str]:
         # Auth is satisfied by an API key, a configured codex auth file (which
         # the container runner provisions into the per-job CODEX_HOME), or a
         # local codex CLI login.
         if (
             os.environ.get("OPENAI_API_KEY")
-            or get_settings().provider.codex_auth_host_path
+            or provider.codex_auth_host_path
             or _codex_auth_json().exists()
         ):
             return []
@@ -57,10 +80,42 @@ class OpenAIDirectProvider(CodexCompatible):
             data_lag_note="OpenAI per-key cost tracking is not available.",
         )
 
+    def llm_upstream(self) -> LlmUpstream | None:
+        key = get_settings().provider.openai_api_key
+        if key:
+            return LlmUpstream(_OPENAI_BASE_URL, {"authorization": f"Bearer {key}"})
+        return None
+
+    def proxy_env_overrides(self, *, proxy_base_url: str, placeholder: str) -> dict[str, str]:
+        if get_settings().provider.openai_api_key:
+            return {"OPENAI_API_KEY": placeholder, LLM_PROXY_URL_ENV: proxy_base_url}
+        return {}
+
+    def airgap_egress(self) -> AirgapPosture:
+        if get_settings().provider.openai_api_key:
+            return AirgapPosture(AirgapEgress.PROXY)
+        return AirgapPosture(
+            AirgapEgress.UNSUPPORTED,
+            reason=(
+                "OpenAI codex ChatGPT-login cannot be air-gapped: its model turn "
+                "targets chatgpt.com over a websocket that no base-url config "
+                "redirects. Set OPENAI_API_KEY for a proxied, air-gappable setup."
+            ),
+        )
+
     def codex_config_overrides(self) -> list[str]:
-        # Codex ships a built-in "openai" model_providers entry pointing at
-        # the default endpoint, so no config.toml override is needed.
-        return []
+        # Codex ships a built-in "openai" entry at the default endpoint. When the
+        # proxy is active, override base_url so codex routes through it.
+        proxy = os.environ.get(LLM_PROXY_URL_ENV)
+        if not proxy:
+            return []
+        return [
+            "[model_providers.openai]",
+            'name = "OpenAI"',
+            f'base_url = "{proxy}"',
+            'env_key = "OPENAI_API_KEY"',
+            'wire_api = "responses"',
+        ]
 
     def codex_model_name(self) -> str | None:
         # No forced default: codex uses its account/config default unless the

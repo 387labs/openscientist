@@ -26,12 +26,14 @@ _STUB_FRAGMENTS = BackendFragments(
     builtin_read_tool_short="the read tool",
     search_skills_doc="",
     skills_discovery_note="",
+    mcp_tool_prefix="",
 )
 
 
 class _StubAgent(AbstractAgent[ClaudeCompatible]):
     backend = AgentBackend.CLAUDE_CODE
     file_write_tool = "Write"
+    display_name = "Stub"
 
     async def run_iteration(self, prompt: str, *, reset_session: bool = False) -> IterationResult:
         return IterationResult(

@@ -24,9 +24,10 @@ from openscientist.agent.factory import (
     agent_class_for_provider_id,
     backend_for_provider_id,
 )
+from openscientist.agent.omp_agent import OmpAgent  # noqa: F401
 from openscientist.prompts.common import BackendFragments
 from openscientist.providers import provider_class, provider_ids
-from openscientist.providers.base import Provider
+from openscientist.providers.base import OpenAiWireCompatible, Provider
 
 
 def _concrete_agent_classes() -> set[type[AbstractAgent[Provider]]]:
@@ -106,11 +107,71 @@ def test_every_provider_class_is_registered() -> None:
         assert cls in registered, f"{cls.__name__} is not in providers._PROVIDER_CLASS_PATHS"
 
 
-def test_every_backend_has_a_display_name() -> None:
-    # display_name is a dict lookup. A new AgentBackend member without an entry
-    # would KeyError only at UI render time, so assert it eagerly here.
-    for backend in AgentBackend:
-        assert isinstance(backend.display_name, str) and backend.display_name
+def test_every_provider_declares_its_own_harness_routing() -> None:
+    """Every provider must answer how a provider-agnostic harness reaches it.
+
+    This is the gap that shipped. ``harness_env`` defaulted to ``{}``, so a
+    provider nobody wired sent omp to the vendor with the real credential,
+    bypassing the key-replacement proxy. Under air-gap that hangs until the turn
+    times out; without air-gap it succeeds silently, which is worse. The existing
+    structural checks did not catch it because they cover provider-to-agent
+    wiring, not reachability.
+
+    It is now abstract, so this guards against someone reintroducing a permissive
+    default on a base class and letting providers inherit silence again. The
+    routing values themselves are asserted per provider in ``test_llm_proxy``,
+    which already owns the per-provider credential recipes.
+    """
+    for provider_id in provider_ids():
+        cls = provider_class(provider_id)
+        owner = next(k for k in cls.__mro__ if "harness_env" in k.__dict__)
+        assert owner is not Provider, (
+            f"{provider_id} inherits harness_env from the abstract base, so it "
+            "declares no routing for a provider-agnostic harness"
+        )
+
+
+#: Providers for which inheriting ``OpenAiWireCompatible.harness_env`` is correct:
+#: the endpoint really is OpenAI's, so an unproxied harness should use its default.
+_HOSTED_OPENAI_FAMILY = {"openai", "azure-openai"}
+
+
+def test_self_hosted_providers_do_not_inherit_the_openai_default() -> None:
+    """The inherited default is silently wrong for a self-hosted provider.
+
+    ``OpenAiWireCompatible.harness_env`` returns nothing when no proxy is active,
+    which leaves omp on its built-in default of ``api.openai.com``. For OpenAI and
+    Azure that is right. For anything self-hosted it means a job configured against
+    a local server quietly talks to OpenAI instead, the same silent-reachability
+    failure that motivated making ``harness_env`` abstract. Inheriting is therefore
+    opt-in, so a new OpenAI-wire provider has to choose.
+
+    Anchored on the class that actually defines the default. It previously named
+    ``CodexCompatible``, and when the default moved up to the wire layer the
+    condition stopped matching anything and the guard passed vacuously.
+    """
+    checked = 0
+    for provider_id in provider_ids():
+        cls = provider_class(provider_id)
+        if not issubclass(cls, OpenAiWireCompatible):
+            continue
+        owner = next(k for k in cls.__mro__ if "harness_env" in k.__dict__)
+        if owner is OpenAiWireCompatible:
+            checked += 1
+            assert provider_id in _HOSTED_OPENAI_FAMILY, (
+                f"{provider_id} inherits the OpenAI harness default, so an unproxied "
+                "run points at api.openai.com. Override harness_env to name its real "
+                f"endpoint, or add it to {sorted(_HOSTED_OPENAI_FAMILY)} if it is "
+                "genuinely OpenAI-hosted"
+            )
+    assert checked, "guard matched no provider, so it is no longer testing anything"
+
+
+def test_every_concrete_agent_declares_a_display_name() -> None:
+    # Enforced in __init_subclass__; a backend missing its label would otherwise
+    # only surface at UI render time.
+    for cls in _concrete_agent_classes():
+        assert isinstance(cls.display_name, str) and cls.display_name, cls
 
 
 def test_prompts_are_fully_substituted() -> None:

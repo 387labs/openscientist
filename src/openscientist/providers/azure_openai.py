@@ -13,8 +13,14 @@ from __future__ import annotations
 
 import os
 
-from openscientist.providers.base import CodexCompatible, CostInfo
-from openscientist.settings import get_settings
+from openscientist.providers.base import (
+    LLM_PROXY_URL_ENV,
+    CodexCompatible,
+    CostInfo,
+    LlmUpstream,
+    env_from_pairs,
+)
+from openscientist.settings import ProviderSettings, get_settings
 
 
 class AzureOpenAIProvider(CodexCompatible):
@@ -24,21 +30,36 @@ class AzureOpenAIProvider(CodexCompatible):
     def id(self) -> str:
         return "azure-openai"
 
-    @property
-    def display_name(self) -> str:
-        return "Azure OpenAI Service"
+    display_name = "Azure OpenAI Service"
+
+    @classmethod
+    def container_env(
+        cls, provider: ProviderSettings, *, gcp_credentials_container_path: str | None = None
+    ) -> dict[str, str]:
+        return env_from_pairs(
+            [
+                ("AZURE_OPENAI_API_KEY", provider.azure_openai_api_key),
+                ("AZURE_OPENAI_RESOURCE", provider.azure_openai_resource),
+                ("AZURE_OPENAI_DEPLOYMENT", provider.azure_openai_deployment),
+                ("AZURE_OPENAI_API_VERSION", provider.azure_openai_api_version),
+                ("AZURE_OPENAI_STREAM_MAX_RETRIES", str(provider.azure_openai_stream_max_retries)),
+            ]
+        )
 
     def validate_required_config(self) -> list[str]:
-        s = get_settings().provider
+        return self.required_config_errors(get_settings().provider)
+
+    @classmethod
+    def required_config_errors(cls, provider: ProviderSettings) -> list[str]:
         errors: list[str] = []
         if not os.environ.get("AZURE_OPENAI_API_KEY"):
             errors.append("AZURE_OPENAI_API_KEY is required for the Azure OpenAI provider.")
-        if not s.azure_openai_resource:
+        if not provider.azure_openai_resource:
             errors.append(
                 "AZURE_OPENAI_RESOURCE is required (the <resource> in "
                 "https://<resource>.openai.azure.com)."
             )
-        if not s.azure_openai_deployment:
+        if not provider.azure_openai_deployment:
             errors.append(
                 "AZURE_OPENAI_DEPLOYMENT is required (the deployment name configured in Azure)."
             )
@@ -62,6 +83,20 @@ class AzureOpenAIProvider(CodexCompatible):
         # model name in the request body (see codex_model_name).
         return f"https://{get_settings().provider.azure_openai_resource}.openai.azure.com/openai/v1"
 
+    def llm_upstream(self) -> LlmUpstream | None:
+        s = get_settings().provider
+        if s.azure_openai_api_key and s.azure_openai_resource:
+            return LlmUpstream(
+                self._base_url(), {"authorization": f"Bearer {s.azure_openai_api_key}"}
+            )
+        return None
+
+    def proxy_env_overrides(self, *, proxy_base_url: str, placeholder: str) -> dict[str, str]:
+        s = get_settings().provider
+        if s.azure_openai_api_key and s.azure_openai_resource:
+            return {"AZURE_OPENAI_API_KEY": placeholder, LLM_PROXY_URL_ENV: proxy_base_url}
+        return {}
+
     def codex_config_overrides(self) -> list[str]:
         # A [model_providers.azure-openai] TOML table. The key is sent as a
         # Bearer token (env_key). api-version is optional on the v1 surface, so
@@ -71,10 +106,11 @@ class AzureOpenAIProvider(CodexCompatible):
         # stream_max_retries makes codex reconnect through Azure's intermittent
         # streaming disconnects (a known Azure-side timeout, openai/codex#9936),
         # which it otherwise treats as a fatal "stream disconnected" error.
+        base_url = os.environ.get(LLM_PROXY_URL_ENV) or self._base_url()
         lines = [
             "[model_providers.azure-openai]",
             'name = "Azure OpenAI Service"',
-            f'base_url = "{self._base_url()}"',
+            f'base_url = "{base_url}"',
             'env_key = "AZURE_OPENAI_API_KEY"',
             'wire_api = "responses"',
             f"stream_max_retries = {s.azure_openai_stream_max_retries}",

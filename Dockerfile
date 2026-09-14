@@ -1,6 +1,12 @@
 # Dockerfile for OpenScientist
 # Builds on openscientist-base which includes Python, Node.js, uv, and Claude CLI
 
+# The pinned codex binary, built separately by Dockerfile.codex. Declared as a
+# stage because the classic builder does not expand build args inside
+# 'COPY --from=', which fails with "invalid reference format".
+ARG CODEX_IMAGE=acrcbraindev.azurecr.io/openscientist-codex:8f8009fc
+FROM ${CODEX_IMAGE} AS codex-bin
+
 FROM openscientist-base:latest
 
 # Build args
@@ -40,18 +46,27 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # the agent image (Dockerfile.agent, same CODEX_REF). When CODEX_REF changes,
 # rebuild openscientist-agent (on a host with enough RAM); this image and every
 # deploy then just copy the prebuilt binary — no Rust toolchain in the web build.
-COPY --from=acrcbraindev.azurecr.io/openscientist-agent:latest /usr/local/bin/codex /usr/local/bin/codex
+COPY --from=codex-bin /usr/local/bin/codex /usr/local/bin/codex
 RUN chmod +x /usr/local/bin/codex
 
 # Copy project files — deps already installed in base
 COPY pyproject.toml README.md alembic.ini uv.lock ./
 COPY src/ src/
+# web_app resolves BUILTIN_SKILLS_DIR to /app/skills. Without this the
+# built-in source fails every boot with 'Path does not exist: /app/skills'
+# and the bundled skills are silently missing from every environment.
+COPY skills/ skills/
 
 # Reinstall the project so the web image has dependencies added since the base
 # image was built, notably the openai-codex SDK used by the codex agent path
 # (in-page chat + discovery). The pyproject override drops the musl-only
-# openai-codex-cli-bin. The codex binary itself is provisioned above.
-RUN uv pip install --system -e .
+# openai-codex-cli-bin. The codex binary itself is provisioned above. That delta
+# comes from the lock, not a fresh resolve.
+RUN uv export --locked --no-dev --no-emit-project --format requirements-txt \
+        -o /tmp/requirements.txt \
+    && uv pip install --system -r /tmp/requirements.txt \
+    && uv pip install --system --no-deps -e . \
+    && rm /tmp/requirements.txt
 
 RUN groupadd --gid 1001 openscientist \
     && useradd --uid 1001 --gid 1001 --create-home --shell /bin/bash openscientist

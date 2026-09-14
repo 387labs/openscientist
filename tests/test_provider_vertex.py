@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from openscientist.providers.base import AirgapEgress
 from openscientist.providers.vertex import VertexProvider
 from openscientist.settings import clear_settings_cache
 
@@ -29,6 +30,25 @@ class TestVertexProviderValidation:
             clear_settings_cache()
             provider = VertexProvider()
             assert "vertex" in provider.display_name.lower()
+
+    def test_airgap_egress_is_direct(self, tmp_path):
+        creds = tmp_path / "creds.json"
+        creds.write_text('{"type": "service_account"}')
+        with patch.dict(
+            os.environ,
+            {
+                "OPENSCIENTIST_PROVIDER": "vertex",
+                "ANTHROPIC_VERTEX_PROJECT_ID": "my-project",
+                "GOOGLE_APPLICATION_CREDENTIALS": str(creds),
+                "GCP_BILLING_ACCOUNT_ID": "012345-ABCDEF",
+                "CLOUD_ML_REGION": "us-east5",
+            },
+        ):
+            clear_settings_cache()
+            posture = VertexProvider().airgap_egress()
+        assert posture.mode is AirgapEgress.DIRECT
+        assert ("us-east5-aiplatform.googleapis.com", 443) in posture.direct_endpoints
+        assert ("oauth2.googleapis.com", 443) in posture.direct_endpoints
 
     def test_missing_creds_file_raises(self):
         with patch.dict(
@@ -218,17 +238,12 @@ class TestVertexClaudeCompatible:
 
     def test_validate_required_config_ok(self, tmp_path: Path) -> None:
         settings = _mock_settings(self._creds_file(tmp_path))
-        with patch("openscientist.providers.vertex.get_settings", return_value=settings):
-            assert VertexProvider().validate_required_config() == []
+        assert VertexProvider.required_config_errors(settings.provider) == []
 
     def test_validate_required_config_errors_when_unset(self, tmp_path: Path) -> None:
-        settings = _mock_settings(self._creds_file(tmp_path))
-        with patch("openscientist.providers.vertex.get_settings", return_value=settings):
-            provider = VertexProvider()
         unset = _mock_settings("", project=None, billing=None, region=None)
         unset.provider.google_application_credentials = None
-        with patch("openscientist.providers.vertex.get_settings", return_value=unset):
-            errors = provider.validate_required_config()
+        errors = VertexProvider.required_config_errors(unset.provider)
         assert any("ANTHROPIC_VERTEX_PROJECT_ID" in e for e in errors)
         assert any("GOOGLE_APPLICATION_CREDENTIALS" in e for e in errors)
         assert any("GCP_BILLING_ACCOUNT_ID" in e for e in errors)

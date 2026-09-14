@@ -20,5 +20,5 @@ class UnknownEntry(BaseModel):
     """
 
     type: Literal["unknown_entry"] = "unknown_entry"
-    source: Literal["claude", "codex"]
+    source: Literal["claude", "codex", "omp"]
     raw: dict[str, Any]

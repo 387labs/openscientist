@@ -1,0 +1,14 @@
+# Slim stand-in for the agent image, built by tests/test_agent_firewall.py so the
+# firewall can be exercised in a real network namespace in seconds. The entrypoint is
+# bind-mounted at run time, never copied here. A test asserts this stays in step with
+# Dockerfile.agent.
+FROM python:3.12-slim-bookworm
+
+# nftables for nft, util-linux for setpriv, mawk for the resolver pipeline.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    nftables \
+    util-linux \
+    mawk \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN useradd --uid 1001 --create-home --shell /bin/bash agent
