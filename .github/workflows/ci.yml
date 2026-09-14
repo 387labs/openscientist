@@ -259,10 +259,15 @@ jobs:
       - name: Upload coverage to Codecov
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
         uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f  # v7.0.0
+        # Inherited from upstream, which has Codecov OIDC configured. This fork
+        # does not, and coverage is already gated by the coverage-delta job
+        # below, so a failed upload must not fail the build. Flip
+        # fail_ci_if_error back to true once Codecov is set up for this repo.
+        continue-on-error: true
         with:
           files: ./coverage.xml
           disable_search: true
-          fail_ci_if_error: true
+          fail_ci_if_error: false
           use_oidc: true
 
       - name: Upload coverage to Codecov from a fork
